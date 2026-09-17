@@ -34,6 +34,6 @@ export class StateTransitionRepository {
       .prepare(
         `SELECT * FROM state_transitions WHERE entity_type = ? AND entity_id = ? ORDER BY occurred_at ASC`
       )
-      .all(entityType, entityId) as StateTransitionRow[];
+      .all(entityType, entityId) as unknown as StateTransitionRow[];
   }
 }

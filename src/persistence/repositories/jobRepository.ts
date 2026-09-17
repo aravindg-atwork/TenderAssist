@@ -36,10 +36,8 @@ export class JobRepository {
     const now = new Date().toISOString();
     const row: JobRow = { id: randomUUID(), state: 'SCHEDULED', created_at: now, updated_at: now };
     this.db
-      .prepare(
-        'INSERT INTO jobs (id, state, created_at, updated_at) VALUES (@id, @state, @created_at, @updated_at)'
-      )
-      .run(row);
+      .prepare('INSERT INTO jobs (id, state, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .run(row.id, row.state, row.created_at, row.updated_at);
     return row;
   }
 
