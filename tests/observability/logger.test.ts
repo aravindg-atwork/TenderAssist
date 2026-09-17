@@ -27,4 +27,40 @@ describe('logger', () => {
     expect(entry.dscPin).toBe('[REDACTED]');
     expect(entry.tenderId).toBe('EB_704783');
   });
+
+  it('redacts a secret key nested inside an object field', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // Uses a non-secret container key ("context") so this actually exercises the
+    // recursive redaction path, rather than being trivially caught by the
+    // top-level "session"/"auth"-style keyword match.
+    logger.warn('x', { context: { password: '1234' } });
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.context.password).toBe('[REDACTED]');
+  });
+
+  it('redacts an entire secret-keyed field even when its value is an object', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logger.warn('x', { session: { password: '1234' } });
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.session).toBe('[REDACTED]');
+  });
+
+  it('preserves a non-secret nested field', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logger.info('x', { profile: { name: 'jane' } });
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.profile.name).toBe('jane');
+  });
+
+  it('does not let caller-supplied fields overwrite the log envelope', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logger.error('failed', { message: 'other', level: 'debug' });
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.level).toBe('error');
+    expect(entry.message).toBe('failed');
+  });
 });
