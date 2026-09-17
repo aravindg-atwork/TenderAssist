@@ -28,4 +28,10 @@ describe('isSessionExpiredPage', () => {
     const text = 'YOUR SESSION IN THE CLIENT AREA HAS EXPIRED';
     expect(isSessionExpiredPage(url, text)).toBe(true);
   });
+
+  it('returns true when a newline appears within the matched gap (innerText-extracted text)', () => {
+    const url = 'https://tntenders.gov.in/nicgep/app?page=WebTenderStatusLists';
+    const text = 'Your session in the client area\nhas expired.';
+    expect(isSessionExpiredPage(url, text)).toBe(true);
+  });
 });
