@@ -32,7 +32,7 @@ export class StateTransitionRepository {
   listFor(entityType: string, entityId: string): StateTransitionRow[] {
     return this.db
       .prepare(
-        `SELECT * FROM state_transitions WHERE entity_type = ? AND entity_id = ? ORDER BY occurred_at ASC`
+        `SELECT * FROM state_transitions WHERE entity_type = ? AND entity_id = ? ORDER BY occurred_at ASC, rowid ASC`
       )
       .all(entityType, entityId) as unknown as StateTransitionRow[];
   }

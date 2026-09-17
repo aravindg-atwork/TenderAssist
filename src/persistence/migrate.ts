@@ -12,7 +12,7 @@ export function runMigrations(db: DatabaseSync, migrationsDir: string): void {
   `);
 
   const applied = new Set(
-    (db.prepare('SELECT id FROM schema_migrations').all() as Array<{ id: string }>).map(
+    (db.prepare('SELECT id FROM schema_migrations').all() as unknown as Array<{ id: string }>).map(
       (row) => row.id
     )
   );

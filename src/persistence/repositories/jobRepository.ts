@@ -45,6 +45,7 @@ export class JobRepository {
     return this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as JobRow | undefined;
   }
 
+  /** @internal Use JobStateMachine.transition() instead — calling this directly skips transition validation and the audit-log write. */
   updateState(id: string, state: JobState): void {
     this.db
       .prepare('UPDATE jobs SET state = ?, updated_at = ? WHERE id = ?')
