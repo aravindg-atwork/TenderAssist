@@ -14,12 +14,20 @@ import { logger } from '../observability/logger.js';
 
 const POLL_INTERVAL_MS = 3000;
 const TIMEOUT_MS = 5 * 60 * 1000;
-const CDP_PORT = 9222;
+// Randomized like the test files' own CDP ports, rather than a fixed 9222:
+// a fixed port risks silently attaching to a stale/unrelated Chrome instance
+// left over from a previous run or another tool, which would produce a false
+// SUCCESS/failure on the one manual run that's supposed to be authoritative.
+const CDP_PORT = 9222 + Math.floor(Math.random() * 5000);
 
 async function main(): Promise<void> {
   const portalUrl = process.argv[2];
   if (!portalUrl) {
     console.error('Usage: node dist/scripts/manualAuthVerification.js <PORTAL_LOGIN_URL>');
+    process.exit(1);
+  }
+  if (!/^https?:\/\//i.test(portalUrl)) {
+    console.error(`Invalid portal URL: ${portalUrl} (must start with http:// or https://)`);
     process.exit(1);
   }
 
@@ -55,17 +63,51 @@ async function main(): Promise<void> {
   console.log('');
 
   const deadline = Date.now() + TIMEOUT_MS;
-  let authenticated = false;
+  let outcome: 'SUCCESS' | 'TIMEOUT' | 'ABORTED' = 'TIMEOUT';
+  let abortReason = '';
+
   while (Date.now() < deadline) {
-    authenticated = await flow.checkAuthenticated();
-    if (authenticated) break;
+    let authenticated: boolean;
+    try {
+      authenticated = await flow.checkAuthenticated();
+    } catch (err) {
+      // The retained page/tab can go away mid-check (e.g. the human closes
+      // it, or it navigates away at the exact wrong instant), which would
+      // otherwise surface as an uncaught Playwright rejection and a raw
+      // stack trace instead of a clean, actionable report.
+      outcome = 'ABORTED';
+      abortReason = `checkAuthenticated() failed: ${err instanceof Error ? err.message : String(err)}`;
+      break;
+    }
+
+    if (authenticated) {
+      outcome = 'SUCCESS';
+      break;
+    }
+
+    // A terminal auth-session state (tab closed, or the page ended up
+    // showing a session-expired indicator) will never become AUTHENTICATED
+    // on a later poll -- stop early instead of silently polling out the
+    // full remaining timeout with no chance of success.
+    const state = sessions.getById(authSessionId)?.state;
+    if (state === 'TAB_LOST' || state === 'SESSION_EXPIRED') {
+      outcome = 'ABORTED';
+      abortReason = `auth session reached terminal state ${state} before authentication was detected`;
+      break;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
-  if (authenticated) {
+  console.log('');
+  if (outcome === 'SUCCESS') {
     jobMachine.transition(job.id, 'AUTHENTICATED', 'auth flow confirmed dashboard indicators');
     console.log('SUCCESS: authenticated-dashboard indicators detected.');
     logger.info('manual auth verification succeeded', { jobId: job.id, authSessionId });
+  } else if (outcome === 'ABORTED') {
+    console.log(`ABORTED: ${abortReason}.`);
+    console.log(`Final auth session state: ${sessions.getById(authSessionId)?.state}`);
+    logger.warn('manual auth verification aborted', { jobId: job.id, authSessionId, reason: abortReason });
   } else {
     console.log('TIMEOUT: authenticated-dashboard indicators were not detected in time.');
     console.log(`Final auth session state: ${sessions.getById(authSessionId)?.state}`);
@@ -73,6 +115,10 @@ async function main(): Promise<void> {
   }
 
   db.close();
+  // The live CDP websocket to Chrome keeps the event loop open indefinitely
+  // otherwise -- without this, the script hangs after printing its result
+  // instead of returning control to the shell.
+  process.exit(outcome === 'SUCCESS' ? 0 : 1);
 }
 
 main().catch((err) => {
