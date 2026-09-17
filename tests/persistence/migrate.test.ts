@@ -1,18 +1,17 @@
 // tests/persistence/migrate.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, writeFileSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrations } from '../../src/persistence/migrate.js';
-import { createDatabase } from '../../src/persistence/db.js';
 
 describe('runMigrations', () => {
   let db: DatabaseSync;
   let migrationsDir: string;
 
   beforeEach(() => {
-    db = createDatabase(':memory:');
+    db = new DatabaseSync(':memory:');
     migrationsDir = mkdtempSync(join(tmpdir(), 'tenderassist-migrations-'));
     writeFileSync(
       join(migrationsDir, '001_test.sql'),
@@ -37,7 +36,7 @@ describe('runMigrations', () => {
   });
 
   it('applies the real 001_init migration creating jobs and state_transitions', () => {
-    const realDb = createDatabase(':memory:');
+    const realDb = new DatabaseSync(':memory:');
     runMigrations(realDb, join(process.cwd(), 'src', 'persistence', 'migrations'));
     const names = realDb
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
