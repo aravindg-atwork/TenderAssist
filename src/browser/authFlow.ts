@@ -3,6 +3,7 @@ import type { AuthSessionRepository } from '../persistence/repositories/authSess
 import type { AuthStateMachine } from '../state/authStateMachine.js';
 import { BrowserController, type SessionLossReason } from './browserController.js';
 import { isAuthenticatedDashboard } from './authDetector.js';
+import { isSessionExpiredPage } from './sessionExpiredDetector.js';
 
 export interface AuthFlowDeps {
   sessions: AuthSessionRepository;
@@ -39,6 +40,11 @@ export class AuthFlow {
     if (!current || current.state !== 'AUTH_PENDING') return false;
 
     const text = await this.controller.extractPageText();
+    // Spec precedence: expiry wins whenever both detectors would match. Checked
+    // here explicitly, off the same text snapshot, rather than relying on the
+    // controller's separate async framenavigated handler having already landed
+    // the SESSION_EXPIRED transition by the time this poll runs.
+    if (isSessionExpiredPage(this.controller.getPage().url(), text)) return false;
     if (!isAuthenticatedDashboard(text)) return false;
 
     this.deps.machine.transition(this.authSessionId, 'AUTHENTICATED', 'dashboard indicators detected');

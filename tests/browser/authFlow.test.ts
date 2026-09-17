@@ -1,6 +1,6 @@
 // tests/browser/authFlow.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http, { type Server } from 'node:http';
@@ -12,10 +12,18 @@ import { StateTransitionRepository } from '../../src/persistence/repositories/st
 import { AuthStateMachine } from '../../src/state/authStateMachine.js';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
 import { AuthFlow } from '../../src/browser/authFlow.js';
+import { CHROME_PATH } from '../support/chrome.js';
+import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
 
-describe.skipIf(!existsSync(CHROME_PATH))('AuthFlow', () => {
+describe.skipIf(!CHROME_PATH)('AuthFlow', { timeout: 30_000 }, () => {
   let db: DatabaseSync;
   let jobs: JobRepository;
   let sessions: AuthSessionRepository;
@@ -37,7 +45,11 @@ describe.skipIf(!existsSync(CHROME_PATH))('AuthFlow', () => {
     jobId = jobs.create().id;
 
     server = http.createServer((req, res) => {
-      if (req.url?.includes('/dashboard')) {
+      if (req.url?.includes('/both-expired-and-dashboard')) {
+        res.end(
+          '<html><body>Welcome : test@example.com<br>Bid Management<br>Logout<br>Your session in the client area has expired.</body></html>'
+        );
+      } else if (req.url?.includes('/dashboard')) {
         res.end('<html><body>Welcome : test@example.com<br>Bid Management<br>Logout</body></html>');
       } else {
         res.end('<html><body>please log in</body></html>');
@@ -50,9 +62,9 @@ describe.skipIf(!existsSync(CHROME_PATH))('AuthFlow', () => {
     cdpPort = 9222 + Math.floor(Math.random() * 5000);
     chromeProc = launchChrome({ userDataDir, cdpPort });
     await waitForCdpReady(cdpPort, 10000);
-  });
+  }, 30_000);
 
-  afterEach(() => {
+  afterEach(async () => {
     if (chromeProc.pid) {
       try {
         process.kill(chromeProc.pid);
@@ -60,14 +72,7 @@ describe.skipIf(!existsSync(CHROME_PATH))('AuthFlow', () => {
         // already exited
       }
     }
-    try {
-      rmSync(userDataDir, { recursive: true, force: true });
-    } catch {
-      // Windows can hold a transient handle lock on the profile dir for
-      // up to ~1s after the Chrome process is killed (verified: kill
-      // itself is always clean, no orphaned process, this is filesystem
-      // handle-release lag, not a leak) — verified during Task 1's review.
-    }
+    await removeDirWithRetry(userDataDir);
     server.close();
   });
 
@@ -105,12 +110,35 @@ describe.skipIf(!existsSync(CHROME_PATH))('AuthFlow', () => {
     expect(sessions.getById(authSessionId)?.state).toBe('SESSION_EXPIRED');
   });
 
+  it('checkAuthenticated treats expiry as taking precedence when a page shows both indicators', async () => {
+    const flow = new AuthFlow({ sessions, machine });
+    const { authSessionId } = await flow.start(jobId, `http://127.0.0.1:${cdpPort}`);
+
+    // A page that satisfies BOTH the authenticated-dashboard detector and the
+    // session-expired detector at once (the spec's documented TN Tenders
+    // scenario: an expiry banner rendered inside chrome that still shows
+    // Welcome/Logout/Bid Management).
+    await flow.getPage().goto(`http://127.0.0.1:${serverPort}/both-expired-and-dashboard`);
+
+    // Navigating to this page also triggers BrowserController's own
+    // framenavigated-driven expiry check, which independently races
+    // checkAuthenticated() and in practice wins, moving the session straight
+    // to SESSION_EXPIRED before this call runs. We deliberately assert the
+    // safety guarantee (never falsely AUTHENTICATED) rather than the exact
+    // intermediate state, since in real polling usage (not immediately after
+    // a navigation) checkAuthenticated()'s own isSessionExpiredPage check is
+    // what actually catches this — this test can't cleanly isolate that race
+    // without mocking, which this project avoids.
+    expect(await flow.checkAuthenticated()).toBe(false);
+    expect(sessions.getById(authSessionId)?.state).not.toBe('AUTHENTICATED');
+  });
+
   it('transitions to TAB_LOST when the retained tab is closed', async () => {
     const flow = new AuthFlow({ sessions, machine });
     const { authSessionId } = await flow.start(jobId, `http://127.0.0.1:${cdpPort}`);
 
     await flow.getPage().close();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitFor(() => sessions.getById(authSessionId)?.state === 'TAB_LOST');
 
     expect(sessions.getById(authSessionId)?.state).toBe('TAB_LOST');
   });
