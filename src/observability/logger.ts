@@ -32,19 +32,22 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
   if (depth > MAX_REDACTION_DEPTH) return value;
 
   if (Array.isArray(value)) {
-    if (seen.has(value)) return value;
+    if (seen.has(value)) return '[CIRCULAR]';
     seen.add(value);
-    return value.map((item) => redactValue(item, depth + 1, seen));
+    const result = value.map((item) => redactValue(item, depth + 1, seen));
+    seen.delete(value);
+    return result;
   }
 
   if (isPlainObject(value)) {
-    if (seen.has(value)) return value;
+    if (seen.has(value)) return '[CIRCULAR]';
     seen.add(value);
     const out: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
       const isSecret = SECRET_KEY_FRAGMENTS.some((fragment) => key.toLowerCase().includes(fragment));
       out[key] = isSecret ? '[REDACTED]' : redactValue(val, depth + 1, seen);
     }
+    seen.delete(value);
     return out;
   }
 

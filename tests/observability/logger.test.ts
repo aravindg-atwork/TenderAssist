@@ -55,6 +55,28 @@ describe('logger', () => {
     expect(entry.profile.name).toBe('jane');
   });
 
+  it('redacts a shared/aliased object under every field it appears in', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const sharedObj = { password: '1234' };
+    logger.warn('x', { a: sharedObj, b: sharedObj });
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.a.password).toBe('[REDACTED]');
+    expect(entry.b.password).toBe('[REDACTED]');
+  });
+
+  it('does not crash or infinite-loop on a self-referencing object, and still redacts its own secret key', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const cyclic: Record<string, unknown> = { password: '1234' };
+    cyclic.self = cyclic;
+
+    expect(() => logger.warn('x', { context: cyclic })).not.toThrow();
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.context.password).toBe('[REDACTED]');
+    expect(entry.context.self).toBe('[CIRCULAR]');
+  });
+
   it('does not let caller-supplied fields overwrite the log envelope', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     logger.error('failed', { message: 'other', level: 'debug' });
