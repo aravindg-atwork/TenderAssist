@@ -42,6 +42,14 @@ export interface CdpVersionInfo {
 export function launchChrome(options: ChromeLaunchOptions, chromePath: string = resolveChromePath()): ChildProcess {
   const args = buildChromeLaunchArgs(options);
   const proc = spawn(chromePath, args, { detached: true, stdio: 'ignore' });
+  // Without a listener, a spawn failure (e.g. a bad chromePath) emits an
+  // unhandled 'error' event asynchronously and crashes the whole process
+  // instead of surfacing as a normal rejection/timeout. The caller already
+  // has a clear signal in that case: waitForCdpReady() below will simply
+  // never see the port come up and throw its own descriptive error.
+  proc.on('error', () => {
+    // Intentionally no-op; see comment above.
+  });
   proc.unref();
   return proc;
 }

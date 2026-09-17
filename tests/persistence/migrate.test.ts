@@ -1,7 +1,7 @@
 // tests/persistence/migrate.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrations } from '../../src/persistence/migrate.js';
@@ -17,6 +17,13 @@ describe('runMigrations', () => {
       join(migrationsDir, '001_test.sql'),
       'CREATE TABLE widgets (id TEXT PRIMARY KEY);'
     );
+  });
+
+  afterEach(() => {
+    // Plain temp dir with a SQL file, nothing holds an open handle on it
+    // (unlike the Chrome-profile-dir case elsewhere), so a bare rmSync is
+    // sufficient -- no retry needed.
+    rmSync(migrationsDir, { recursive: true, force: true });
   });
 
   it('applies pending migrations', () => {

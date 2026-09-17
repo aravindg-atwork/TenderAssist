@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { existsSync } from 'node:fs';
-import { resolveChromePath, buildChromeLaunchArgs } from '../../src/browser/chromeLauncher.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { resolveChromePath, buildChromeLaunchArgs, launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
+import { CHROME_PATH } from '../support/chrome.js';
+import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
 describe('resolveChromePath', () => {
   it('returns the first candidate path that exists', () => {
@@ -26,7 +30,7 @@ describe('resolveChromePath', () => {
     );
   });
 
-  it.skipIf(!existsSync('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'))(
+  it.skipIf(!CHROME_PATH)(
     'finds the real Chrome install on this machine using the default candidates',
     () => {
       expect(() => resolveChromePath()).not.toThrow();
@@ -60,19 +64,11 @@ describe('buildChromeLaunchArgs', () => {
   });
 });
 
-import { afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
-
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-
 describe('launchChrome + waitForCdpReady', () => {
   let tempDirs: string[] = [];
   let procs: Array<{ pid?: number }> = [];
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const proc of procs) {
       if (proc.pid) {
         try {
@@ -84,16 +80,12 @@ describe('launchChrome + waitForCdpReady', () => {
     }
     procs = [];
     for (const dir of tempDirs) {
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // directory might still be locked by terminating processes
-      }
+      await removeDirWithRetry(dir);
     }
     tempDirs = [];
   });
 
-  it.skipIf(!existsSync(CHROME_PATH))(
+  it.skipIf(!CHROME_PATH)(
     'launches Chrome and the CDP endpoint becomes ready',
     async () => {
       const userDataDir = mkdtempSync(join(tmpdir(), 'tenderassist-chrome-test-'));
@@ -112,5 +104,21 @@ describe('launchChrome + waitForCdpReady', () => {
 
   it('waitForCdpReady rejects when nothing is listening on the port', async () => {
     await expect(waitForCdpReady(9, 500)).rejects.toThrow('did not become ready');
+  });
+
+  it('does not crash the process when spawn fails for a bad chrome path', async () => {
+    // Before the 'error' listener was added in launchChrome, a bad path
+    // here would emit an unhandled 'error' event on the ChildProcess and
+    // crash this whole test worker instead of failing gracefully. Since
+    // spawn failures on Windows surface asynchronously, give the event
+    // loop a tick to prove no crash occurred, then confirm the caller's
+    // own timeout path (waitForCdpReady) still reports cleanly.
+    const port = 9222 + Math.floor(Math.random() * 5000);
+    const proc = launchChrome({ userDataDir: tmpdir(), cdpPort: port }, 'C:\\definitely\\not\\a\\real\\chrome.exe');
+    procs.push(proc);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    await expect(waitForCdpReady(port, 300)).rejects.toThrow('did not become ready');
   });
 });
