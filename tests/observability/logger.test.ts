@@ -47,6 +47,24 @@ describe('logger', () => {
     expect(entry.session).toBe('[REDACTED]');
   });
 
+  it('does not redact an identifier field even when its name contains a secret fragment', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logger.info('auth checked', { authSessionId: 'sess-abc-123', jobId: 'job-1' });
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.authSessionId).toBe('sess-abc-123');
+    expect(entry.jobId).toBe('job-1');
+  });
+
+  it('still redacts a bare secret-fragment key that is not an identifier', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    logger.warn('x', { authorization: 'Bearer abc', session: 'raw-value' });
+
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.authorization).toBe('[REDACTED]');
+    expect(entry.session).toBe('[REDACTED]');
+  });
+
   it('preserves a non-secret nested field', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     logger.info('x', { profile: { name: 'jane' } });

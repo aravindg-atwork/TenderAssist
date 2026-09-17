@@ -18,6 +18,20 @@ const SECRET_KEY_FRAGMENTS = [
 
 const MAX_REDACTION_DEPTH = 5;
 
+// A key that looks like an identifier reference (e.g. authSessionId, jobId,
+// cdpTargetId, targetIds) is not itself a secret, even though it
+// substring-matches a fragment like "session" or "auth" above. Exempt keys
+// ending in "id"/"ids" (optionally preceded by "_") rather than trying to
+// remove "session"/"auth" from the fragment list, since those fragments are
+// still needed to redact the actual secret-bearing fields (e.g. a bare
+// `session` object, an `authorization` header). See spec: "Resolved: logger
+// redaction false-positive on identifier fields".
+const IDENTIFIER_KEY_PATTERN = /(^|[a-z0-9])_?ids?$/i;
+
+function isIdentifierKey(key: string): boolean {
+  return IDENTIFIER_KEY_PATTERN.test(key);
+}
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type LogFields = Record<string, unknown>;
 
@@ -44,7 +58,8 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
     seen.add(value);
     const out: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
-      const isSecret = SECRET_KEY_FRAGMENTS.some((fragment) => key.toLowerCase().includes(fragment));
+      const isSecret =
+        !isIdentifierKey(key) && SECRET_KEY_FRAGMENTS.some((fragment) => key.toLowerCase().includes(fragment));
       out[key] = isSecret ? '[REDACTED]' : redactValue(val, depth + 1, seen);
     }
     seen.delete(value);
@@ -58,7 +73,8 @@ function redact(fields: LogFields): LogFields {
   const seen = new WeakSet<object>();
   const out: LogFields = {};
   for (const [key, value] of Object.entries(fields)) {
-    const isSecret = SECRET_KEY_FRAGMENTS.some((fragment) => key.toLowerCase().includes(fragment));
+    const isSecret =
+      !isIdentifierKey(key) && SECRET_KEY_FRAGMENTS.some((fragment) => key.toLowerCase().includes(fragment));
     out[key] = isSecret ? '[REDACTED]' : redactValue(value, 1, seen);
   }
   return out;
