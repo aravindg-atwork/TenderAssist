@@ -57,7 +57,7 @@ export class JobRepository {
     const placeholders = TERMINAL_STATES.map(() => '?').join(', ');
     return this.db
       .prepare(
-        `SELECT * FROM jobs WHERE state NOT IN (${placeholders}) ORDER BY updated_at DESC, rowid DESC LIMIT 1`
+        `SELECT * FROM jobs WHERE state NOT IN (${placeholders}) ORDER BY created_at DESC, rowid DESC LIMIT 1`
       )
       .get(...TERMINAL_STATES) as JobRow | undefined;
   }
