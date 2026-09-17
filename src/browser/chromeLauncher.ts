@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 export interface ChromeLaunchOptions {
   userDataDir: string;
@@ -8,6 +9,9 @@ export interface ChromeLaunchOptions {
 const DEFAULT_CHROME_PATHS = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ...(process.env.LOCALAPPDATA
+    ? [join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe')]
+    : []),
 ];
 
 export function resolveChromePath(
