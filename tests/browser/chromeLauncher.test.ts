@@ -59,3 +59,58 @@ describe('buildChromeLaunchArgs', () => {
     ]);
   });
 });
+
+import { afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
+
+const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+
+describe('launchChrome + waitForCdpReady', () => {
+  let tempDirs: string[] = [];
+  let procs: Array<{ pid?: number }> = [];
+
+  afterEach(() => {
+    for (const proc of procs) {
+      if (proc.pid) {
+        try {
+          process.kill(proc.pid);
+        } catch {
+          // already exited
+        }
+      }
+    }
+    procs = [];
+    for (const dir of tempDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // directory might still be locked by terminating processes
+      }
+    }
+    tempDirs = [];
+  });
+
+  it.skipIf(!existsSync(CHROME_PATH))(
+    'launches Chrome and the CDP endpoint becomes ready',
+    async () => {
+      const userDataDir = mkdtempSync(join(tmpdir(), 'tenderassist-chrome-test-'));
+      tempDirs.push(userDataDir);
+      const port = 9222 + Math.floor(Math.random() * 5000);
+
+      const proc = launchChrome({ userDataDir, cdpPort: port });
+      procs.push(proc);
+
+      const info = await waitForCdpReady(port, 10000);
+      expect(info.Browser).toContain('Chrome');
+      expect(info.webSocketDebuggerUrl).toContain(`:${port}`);
+    },
+    15000
+  );
+
+  it('waitForCdpReady rejects when nothing is listening on the port', async () => {
+    await expect(waitForCdpReady(9, 500)).rejects.toThrow('did not become ready');
+  });
+});
