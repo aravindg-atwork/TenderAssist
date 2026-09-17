@@ -50,6 +50,7 @@ export class AuthSessionRepository {
       .get(jobId) as AuthSessionRow | undefined;
   }
 
+  /** @internal Use AuthStateMachine.transition() instead — calling this directly skips transition validation and the audit-log write. */
   updateState(id: string, state: AuthState): void {
     this.db
       .prepare('UPDATE auth_sessions SET state = ?, updated_at = ? WHERE id = ?')
