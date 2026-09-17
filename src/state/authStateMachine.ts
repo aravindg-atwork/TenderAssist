@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { AuthSessionRepository, AuthState } from '../persistence/repositories/authSessionRepository.js';
 import type { StateTransitionRepository } from '../persistence/repositories/stateTransitionRepository.js';
 import { withTransaction } from '../persistence/db.js';
+import { IllegalTransitionError } from './errors.js';
 
 const VALID_AUTH_TRANSITIONS: Record<AuthState, AuthState[]> = {
   NOT_STARTED: ['AUTH_PENDING'],
@@ -11,7 +12,7 @@ const VALID_AUTH_TRANSITIONS: Record<AuthState, AuthState[]> = {
   TAB_LOST: [],
 };
 
-export class IllegalAuthTransitionError extends Error {
+export class IllegalAuthTransitionError extends IllegalTransitionError {
   constructor(from: AuthState, to: AuthState) {
     super(`Illegal auth session state transition: ${from} -> ${to}`);
     this.name = 'IllegalAuthTransitionError';
@@ -34,12 +35,13 @@ export class AuthStateMachine {
       throw new IllegalAuthTransitionError(session.state, to);
     }
 
+    const now = new Date().toISOString();
     withTransaction(this.db, () => {
       this.sessions.updateState(authSessionId, to);
       if (to === 'AUTHENTICATED') {
-        this.sessions.markAuthenticatedAt(authSessionId, new Date().toISOString());
+        this.sessions.markAuthenticatedAt(authSessionId, now);
       }
-      this.transitions.record('AUTH_SESSION', authSessionId, session.state, to, reason);
+      this.transitions.record('AUTH_SESSION', authSessionId, session.state, to, reason, now);
     });
   }
 }

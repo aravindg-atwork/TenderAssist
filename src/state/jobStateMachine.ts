@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { JobRepository, JobState } from '../persistence/repositories/jobRepository.js';
 import type { StateTransitionRepository } from '../persistence/repositories/stateTransitionRepository.js';
 import { withTransaction } from '../persistence/db.js';
+import { IllegalTransitionError } from './errors.js';
 
 const VALID_TRANSITIONS: Record<JobState, JobState[]> = {
   SCHEDULED: ['AUTH_REQUIRED', 'FAILED_MANUAL'],
@@ -29,7 +30,7 @@ const VALID_TRANSITIONS: Record<JobState, JobState[]> = {
   FAILED_MANUAL: [],
 };
 
-export class IllegalJobTransitionError extends Error {
+export class IllegalJobTransitionError extends IllegalTransitionError {
   constructor(from: JobState, to: JobState) {
     super(`Illegal job state transition: ${from} -> ${to}`);
     this.name = 'IllegalJobTransitionError';
@@ -52,9 +53,10 @@ export class JobStateMachine {
       throw new IllegalJobTransitionError(job.state, to);
     }
 
+    const now = new Date().toISOString();
     withTransaction(this.db, () => {
       this.jobs.updateState(jobId, to);
-      this.transitions.record('JOB', jobId, job.state, to, reason);
+      this.transitions.record('JOB', jobId, job.state, to, reason, now);
     });
   }
 }

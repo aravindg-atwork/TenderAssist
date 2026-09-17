@@ -19,14 +19,23 @@ export class StateTransitionRepository {
     entityId: string,
     fromState: string | null,
     toState: string,
-    reason?: string
+    reason?: string,
+    occurredAt?: string
   ): void {
     this.db
       .prepare(
         `INSERT INTO state_transitions (id, entity_type, entity_id, from_state, to_state, reason, occurred_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(randomUUID(), entityType, entityId, fromState, toState, reason ?? null, new Date().toISOString());
+      .run(
+        randomUUID(),
+        entityType,
+        entityId,
+        fromState,
+        toState,
+        reason ?? null,
+        occurredAt ?? new Date().toISOString()
+      );
   }
 
   listFor(entityType: string, entityId: string): StateTransitionRow[] {

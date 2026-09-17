@@ -32,4 +32,24 @@ describe('StateTransitionRepository', () => {
 
     expect(repo.listFor('JOB', 'job-1')).toHaveLength(1);
   });
+
+  it('uses an explicit occurredAt when provided, instead of generating its own', () => {
+    const explicitTimestamp = '2020-01-01T00:00:00.000Z';
+    repo.record('JOB', 'job-1', null, 'SCHEDULED', 'created', explicitTimestamp);
+
+    const rows = repo.listFor('JOB', 'job-1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].occurred_at).toBe(explicitTimestamp);
+  });
+
+  it('auto-generates a timestamp when occurredAt is not provided', () => {
+    const before = new Date().toISOString();
+    repo.record('JOB', 'job-1', null, 'SCHEDULED');
+    const after = new Date().toISOString();
+
+    const rows = repo.listFor('JOB', 'job-1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].occurred_at >= before).toBe(true);
+    expect(rows[0].occurred_at <= after).toBe(true);
+  });
 });
