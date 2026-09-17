@@ -9,6 +9,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
+  "dependencies": {
+    "playwright-core": "^1.63.0"
+  },
   "devDependencies": {
     "@types/node": "^26.0.0",
     "typescript": "^5.7.2",
