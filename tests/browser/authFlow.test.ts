@@ -142,4 +142,21 @@ describe.skipIf(!CHROME_PATH)('AuthFlow', { timeout: 30_000 }, () => {
 
     expect(sessions.getById(authSessionId)?.state).toBe('TAB_LOST');
   });
+
+  it('invokes onAuthSessionLost with the reason and terminal state when the tab is closed', async () => {
+    const calls: Array<{ reason: string; terminalState: string }> = [];
+    const flow = new AuthFlow({
+      sessions,
+      machine,
+      onAuthSessionLost: (reason, terminalState) => {
+        calls.push({ reason, terminalState });
+      },
+    });
+    const { authSessionId } = await flow.start(jobId, `http://127.0.0.1:${cdpPort}`);
+
+    await flow.getPage().close();
+    await waitFor(() => sessions.getById(authSessionId)?.state === 'TAB_LOST');
+
+    expect(calls).toEqual([{ reason: 'TAB_CLOSED', terminalState: 'TAB_LOST' }]);
+  });
 });

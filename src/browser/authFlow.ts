@@ -8,6 +8,7 @@ import { isSessionExpiredPage } from './sessionExpiredDetector.js';
 export interface AuthFlowDeps {
   sessions: AuthSessionRepository;
   machine: AuthStateMachine;
+  onAuthSessionLost?: (reason: SessionLossReason, terminalState: 'TAB_LOST' | 'SESSION_EXPIRED') => void;
 }
 
 export class AuthFlow {
@@ -64,5 +65,6 @@ export class AuthFlow {
 
     const target = reason === 'SESSION_EXPIRED_PAGE' ? 'SESSION_EXPIRED' : 'TAB_LOST';
     this.deps.machine.transition(this.authSessionId, target, `browser controller reported ${reason}`);
+    this.deps.onAuthSessionLost?.(reason, target);
   }
 }
