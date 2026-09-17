@@ -10,6 +10,7 @@ import { reactToAuthSessionLoss } from '../../src/browser/authJobCoordinator.js'
 describe('reactToAuthSessionLoss', () => {
   let db: DatabaseSync;
   let jobs: JobRepository;
+  let transitions: StateTransitionRepository;
   let machine: JobStateMachine;
   let jobId: string;
 
@@ -17,7 +18,7 @@ describe('reactToAuthSessionLoss', () => {
     db = new DatabaseSync(':memory:');
     runMigrations(db, join(process.cwd(), 'src', 'persistence', 'migrations'));
     jobs = new JobRepository(db);
-    const transitions = new StateTransitionRepository(db);
+    transitions = new StateTransitionRepository(db);
     machine = new JobStateMachine(db, jobs, transitions);
     jobId = jobs.create().id;
   });
@@ -46,6 +47,11 @@ describe('reactToAuthSessionLoss', () => {
     // through, since JobStateMachine's own test suite already covers
     // that transition() writes whatever reason string it's given.
     expect(jobs.getById(jobId)?.state).toBe('AUTH_REQUIRED');
+
+    const stateTransitions = transitions.listFor('JOB', jobId);
+    expect(stateTransitions[stateTransitions.length - 1].reason).toBe(
+      'auth session lost: SESSION_EXPIRED_PAGE (SESSION_EXPIRED)'
+    );
   });
 
   it('does nothing (does not throw) when the job is already AUTH_REQUIRED', () => {
