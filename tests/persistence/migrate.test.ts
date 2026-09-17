@@ -1,5 +1,6 @@
 // tests/persistence/migrate.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import { runMigrations } from '../../src/persistence/migrate.js';
 import { createDatabase } from '../../src/persistence/db.js';
 
 describe('runMigrations', () => {
-  let db: any;
+  let db: DatabaseSync;
   let migrationsDir: string;
 
   beforeEach(() => {
