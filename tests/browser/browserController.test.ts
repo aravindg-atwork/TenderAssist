@@ -1,14 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http, { type Server } from 'node:http';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
 import { BrowserController, type SessionLossReason } from '../../src/browser/browserController.js';
+import { CHROME_PATH } from '../support/chrome.js';
+import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
 
-describe.skipIf(!existsSync(CHROME_PATH))('BrowserController', () => {
+describe.skipIf(!CHROME_PATH)('BrowserController', { timeout: 30_000 }, () => {
   let server: Server;
   let serverPort: number;
   let userDataDir: string;
@@ -32,9 +40,9 @@ describe.skipIf(!existsSync(CHROME_PATH))('BrowserController', () => {
     cdpPort = 9222 + Math.floor(Math.random() * 5000);
     chromeProc = launchChrome({ userDataDir, cdpPort });
     await waitForCdpReady(cdpPort, 10000);
-  });
+  }, 30_000);
 
-  afterEach(() => {
+  afterEach(async () => {
     if (chromeProc.pid) {
       try {
         process.kill(chromeProc.pid);
@@ -42,14 +50,7 @@ describe.skipIf(!existsSync(CHROME_PATH))('BrowserController', () => {
         // already exited
       }
     }
-    try {
-      rmSync(userDataDir, { recursive: true, force: true });
-    } catch {
-      // Windows can hold a transient handle lock on the profile dir for
-      // up to ~1s after the Chrome process is killed (verified: kill
-      // itself is always clean, no orphaned process, this is filesystem
-      // handle-release lag, not a leak) — verified during Task 1's review.
-    }
+    await removeDirWithRetry(userDataDir);
     server.close();
   });
 
@@ -89,7 +90,7 @@ describe.skipIf(!existsSync(CHROME_PATH))('BrowserController', () => {
     await controller.attach();
 
     await controller.getPage().close();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitFor(() => losses.includes('TAB_CLOSED'));
 
     expect(losses).toContain('TAB_CLOSED');
   });
@@ -103,7 +104,7 @@ describe.skipIf(!existsSync(CHROME_PATH))('BrowserController', () => {
     await controller.attach();
 
     await controller.navigate(`http://127.0.0.1:${serverPort}/nicgep/app?page=CommonErrorPage`);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitFor(() => losses.includes('SESSION_EXPIRED_PAGE'));
 
     expect(losses).toContain('SESSION_EXPIRED_PAGE');
   });
