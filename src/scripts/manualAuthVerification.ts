@@ -9,6 +9,7 @@ import { AuthStateMachine } from '../state/authStateMachine.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { launchChrome, waitForCdpReady } from '../browser/chromeLauncher.js';
 import { AuthFlow } from '../browser/authFlow.js';
+import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
 import { logger } from '../observability/logger.js';
 
@@ -51,7 +52,11 @@ async function main(): Promise<void> {
   launchChrome({ userDataDir: profileDir, cdpPort: CDP_PORT });
   await waitForCdpReady(CDP_PORT, 15000);
 
-  const flow = new AuthFlow({ sessions, machine: authMachine });
+  const flow = new AuthFlow({
+    sessions,
+    machine: authMachine,
+    onAuthSessionLost: reactToAuthSessionLoss(jobMachine, job.id),
+  });
   const { authSessionId } = await flow.start(job.id, `http://127.0.0.1:${CDP_PORT}`);
   jobMachine.transition(job.id, 'AUTH_PENDING', 'browser attached');
 
