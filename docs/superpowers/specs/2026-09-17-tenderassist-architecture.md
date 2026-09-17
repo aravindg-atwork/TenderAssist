@@ -32,6 +32,30 @@ TenderAssist never decides bid eligibility. It discovers tenders, classifies rel
 
 Every transition at every layer is written in the same SQLite transaction as an append-only `state_transitions` audit row (`entity_type`, `entity_id`, `from_state`, `to_state`, `reason`, `occurred_at`). Resume logic is always "find the first row not yet in a terminal state for its phase" — never a re-derived summary.
 
+## Decision: BrowserController has no close()/disconnect() (2026-09-17, Plan 3, resolved in Plan 3's final review)
+
+`BrowserController` (`src/browser/browserController.ts`) has no method to cleanly detach the CDP connection or signal shutdown — deliberately: its only real caller (`src/scripts/manualAuthVerification.ts`) is a short-lived script, and a future plan hosting a long-lived orchestrator (e.g. inside Electron's main process) should design a `close()` against its own real lifecycle requirements (disconnect-only vs. also kill Chrome? survive app restarts?) rather than this plan guessing now. **Correction to the original rationale:** the original note claimed OS process exit reclaims everything because Chrome is spawned `detached`. That's true of the Chrome *process* but is not why `manualAuthVerification.ts` hangs after printing its result — verified directly: a Node process holding a live `connectOverCDP` WebSocket stays alive indefinitely on its own, independent of Chrome's detached-ness. The script's hang (fixed in Plan 3's final review with an explicit `process.exit()`) is caused by the open CDP connection pinning the event loop, which is exactly why a future `close()`/`disconnect()` on `BrowserController` would be the *principled* fix — `process.exit()` in the script is a deliberate stopgap, not a mystery workaround.
+
+## Decision: `AuthSessionRepository.setCdpTargetId()` set-once guard (2026-09-17, resolved in Plan 3's final review)
+
+Closing the open item from Plan 2's spec note: no guard was added. `AuthFlow.start()` (Plan 3) is the sole caller in the codebase, and it calls `setCdpTargetId()` exactly once per auth session, immediately after `attach()` — a lost session gets a brand-new `AuthSessionRepository.create()` row on retry (per Plan 2's append-only design), never a re-point of an existing row's `cdp_target_id`. The invariant holds by construction; a hard guard would be defensive code with no caller that could ever trigger it.
+
+## Known gap: job state does not react to auth-session loss (2026-09-17, Plan 3 final review)
+
+`AuthFlow` (Plan 3) transitions only the `auth_sessions` row on `TAB_LOST`/`SESSION_EXPIRED` — it has no `JobStateMachine` dependency, so the parent **job** row is left stranded in `AUTH_PENDING` indefinitely when the browser session is lost. The spec's Browser strategy step 4 requires "job state `AUTH_REQUIRED`/`SESSION_EXPIRED`, checkpoint immediately" — that wiring does not exist yet. Correctly out of Plan 3's scope (`AuthFlow`'s job is the auth session only; a future orchestrator plan owns the job-level reaction), but recorded here as a known gap so Plan 4 doesn't have to rediscover it.
+
+## Resolved: logger redaction false-positive on identifier fields (2026-09-17, Plan 3, corrected during final review)
+
+Plan 2's final review widened `SECRET_KEY_FRAGMENTS` to include `'session'`; Plan 3's manual verification script logs `authSessionId`, which redacted to `[REDACTED]` because the substring `"session"` appears in the field name. **The originally recommended fix (removing the bare `'session'` fragment) was checked during Plan 3's final review and found to be ineffective** — `authSessionId` also matches the pre-existing `'auth'` fragment, so removing `'session'` alone would not have stopped the redaction, while also weakening real `session`-keyed secret detection for no benefit (and breaking an existing test asserting a literal `session` key redacts). The actual fix applied: an identifier-key exemption in `src/observability/logger.ts` — a key matching `/(^|[a-z0-9])_?ids?$/i` (e.g. `authSessionId`, `jobId`, `apiKeyId`) is never treated as secret, checked before the fragment-substring scan, leaving `SECRET_KEY_FRAGMENTS` itself untouched. This also fixes the same class of false positive for any future `...Id` field, not just this one.
+
+## Resolved: logger cycle-guard depth-ordering bug did not trigger in Plan 3 (2026-09-17)
+
+The "Known limitation: logger redaction on long reference cycles" section (below) predicted Plan 3 would log "CDP targets and session objects, which are deeply nested and can be self-referential," and instructed the ordering bug be fixed before that logging landed. In practice, Plan 3's only log calls (`manualAuthVerification.ts`) pass flat `{ jobId, authSessionId }` — two strings, no nested/circular objects. The deferral correctly did not trigger and remains open for whichever future plan is first to log a real object (a Playwright handle, a raw CDP event payload, etc.).
+
+## Resolved: Chrome-profile temp-dir cleanup retry budget widened for full-suite contention (2026-09-17, Plan 3 fix-wave)
+
+`tests/support/removeDirWithRetry.ts` (added to fix the fix-wave's IMPORTANT #3, measured 372 leaked temp dirs at HEAD) was verified against an isolated single-file probe with a 10-attempt/200ms (~2s) budget and passed 6/6. Re-measured here against a full `npm test` run (all three real-Chrome test files' spawn/kill cycles happening concurrently across Vitest's parallel workers, not one file at a time): roughly half the profile dirs (29 of 55 created across 5 runs) still weren't released within the 2s budget. Widened to 30 attempts/200ms (~6s) and re-verified: 0 new leaked dirs across 5 subsequent full-suite runs. Still gives up quietly past the budget rather than ever failing a passing test — this only changes how long it's willing to wait first.
+
 ## Browser strategy (retaining the exact authenticated tab)
 
 1. Launch the user's real Chrome with a dedicated profile dir + CDP port.
