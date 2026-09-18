@@ -36,4 +36,10 @@ describe('evaluateGate1', () => {
     const result = evaluateGate1('2026-09-08T00:00:00+05:30', '2026-09-15T00:00:00+05:30', 7);
     expect(result.result).toBe('PASS');
   });
+
+  it('rejects with UNPARSEABLE_PUBLISHED_DATE when the published date string is present but unparseable', () => {
+    const result = evaluateGate1('not-a-real-date', '2026-09-15T00:00:00+05:30', 7);
+    expect(result.result).toBe('REJECT');
+    expect(result.reason_code).toBe('UNPARSEABLE_PUBLISHED_DATE');
+  });
 });

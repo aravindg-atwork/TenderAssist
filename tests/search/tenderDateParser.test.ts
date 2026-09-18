@@ -23,4 +23,21 @@ describe('parseTenderPortalDate', () => {
     expect(parseTenderPortalDate('')).toBeNull();
     expect(parseTenderPortalDate('2026-09-11 18:00')).toBeNull();
   });
+
+  it('returns null for a syntactically valid but calendrically impossible date (Feb 31)', () => {
+    // Date.parse silently rolls this forward to Mar 3 instead of rejecting it.
+    expect(parseTenderPortalDate('31-Feb-2026 10:00 AM')).toBeNull();
+  });
+
+  it('returns null for an invalid hour', () => {
+    expect(parseTenderPortalDate('11-Sep-2026 13:45 PM')).toBeNull();
+  });
+
+  it('returns null for an invalid day', () => {
+    expect(parseTenderPortalDate('32-Sep-2026 10:00 AM')).toBeNull();
+  });
+
+  it('returns null for an invalid minute', () => {
+    expect(parseTenderPortalDate('11-Sep-2026 06:99 PM')).toBeNull();
+  });
 });

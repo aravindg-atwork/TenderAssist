@@ -22,6 +22,16 @@ export function evaluateGate1(
   }
 
   const publishedMs = Date.parse(publishedDateIso);
+  if (Number.isNaN(publishedMs)) {
+    return {
+      gate: 'G1',
+      result: 'REJECT',
+      reason_code: 'UNPARSEABLE_PUBLISHED_DATE',
+      published_date: publishedDateIso,
+      evaluated_against: evaluatedAgainstIso,
+    };
+  }
+
   const evaluatedMs = Date.parse(evaluatedAgainstIso);
   const windowMs = freshnessWindowDays * 24 * 60 * 60 * 1000;
   const withinWindow = evaluatedMs >= publishedMs && evaluatedMs - publishedMs <= windowMs;
