@@ -74,27 +74,39 @@ ipcMain.handle('start-job', async () => {
   if (activeJobId) {
     throw new Error('A job is already running. Wait for it to finish before starting another.');
   }
+  activeJobId = 'pending'; // synchronous claim -- closes the guard atomically, before any await
 
   const profileDir = join(getAppDataDir(), 'chrome-profile');
   mkdirSync(profileDir, { recursive: true });
   const cdpPort = 9222 + Math.floor(Math.random() * 5000);
-  launchChrome({ userDataDir: profileDir, cdpPort });
-  await waitForCdpReady(cdpPort, 15000);
+  try {
+    launchChrome({ userDataDir: profileDir, cdpPort });
+    await waitForCdpReady(cdpPort, 15000);
+  } catch (err) {
+    // Making the guard atomic means WE now own resetting it on early failure --
+    // without this, a launch failure would permanently lock out all future jobs.
+    activeJobId = null;
+    throw err;
+  }
 
   // The `!` tells TypeScript this will definitely be assigned before use --
   // true here because the Promise executor runs synchronously, but that
   // fact isn't visible to TS's control-flow analysis across the closure.
   let resolveStarted!: (jobId: string) => void;
-  const started = new Promise<string>((resolve) => {
+  let rejectStarted!: (err: unknown) => void;
+  const started = new Promise<string>((resolve, reject) => {
     resolveStarted = resolve;
+    rejectStarted = reject;
   });
 
+  let jobIdCaptured = false;
   const runPromise = runAuthJob(
     { jobs, sessions, jobMachine, authMachine },
     `http://127.0.0.1:${cdpPort}`,
     PORTAL_URL,
     (update) => {
-      if (activeJobId === null) {
+      if (!jobIdCaptured) {
+        jobIdCaptured = true;
         activeJobId = update.jobId;
         resolveStarted(update.jobId);
       }
@@ -105,9 +117,12 @@ ipcMain.handle('start-job', async () => {
   // runAuthJob only ever RESOLVES (with a terminal SUCCESS/TIMEOUT/ABORTED
   // AuthJobUpdate) -- a rejection here means something broke outside its own
   // control loop (e.g. Chrome crashed). Surface it instead of letting it
-  // become an unhandled rejection, since nothing else awaits this promise.
+  // become an unhandled rejection, since nothing else awaits this promise. It
+  // also rejects `started` -- a silent no-op if `started` already resolved,
+  // but load-bearing if runAuthJob fails before its first onUpdate call.
   runPromise.catch((err) => {
     console.error('runAuthJob failed unexpectedly:', err);
+    rejectStarted(err);
   });
   runPromise.finally(() => {
     activeJobId = null;
