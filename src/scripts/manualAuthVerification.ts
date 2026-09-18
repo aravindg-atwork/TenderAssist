@@ -8,13 +8,10 @@ import { StateTransitionRepository } from '../persistence/repositories/stateTran
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { launchChrome, waitForCdpReady } from '../browser/chromeLauncher.js';
-import { AuthFlow } from '../browser/authFlow.js';
-import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
+import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
 import { logger } from '../observability/logger.js';
 
-const POLL_INTERVAL_MS = 3000;
-const TIMEOUT_MS = 5 * 60 * 1000;
 // Randomized like the test files' own CDP ports, rather than a fixed 9222:
 // a fixed port risks silently attaching to a stale/unrelated Chrome instance
 // left over from a previous run or another tool, which would produce a false
@@ -42,9 +39,6 @@ async function main(): Promise<void> {
   const jobMachine = new JobStateMachine(db, jobs, transitions);
   const authMachine = new AuthStateMachine(db, sessions, transitions);
 
-  const job = jobs.create();
-  jobMachine.transition(job.id, 'AUTH_REQUIRED', 'manual verification run');
-
   const profileDir = join(getAppDataDir(), 'chrome-profile');
   mkdirSync(profileDir, { recursive: true });
 
@@ -52,78 +46,45 @@ async function main(): Promise<void> {
   launchChrome({ userDataDir: profileDir, cdpPort: CDP_PORT });
   await waitForCdpReady(CDP_PORT, 15000);
 
-  const flow = new AuthFlow({
-    sessions,
-    machine: authMachine,
-    onAuthSessionLost: reactToAuthSessionLoss(jobMachine, job.id),
-  });
-  const { authSessionId } = await flow.start(job.id, `http://127.0.0.1:${CDP_PORT}`);
-  jobMachine.transition(job.id, 'AUTH_PENDING', 'browser attached');
-
-  await flow.getPage().goto(portalUrl);
-
   console.log('');
   console.log('Chrome is open. Complete login (and DSC authentication, if applicable) in that window.');
-  console.log(`Polling for the authenticated-dashboard indicators every ${POLL_INTERVAL_MS / 1000}s, up to ${TIMEOUT_MS / 60000} minutes.`);
+  console.log('Polling for the authenticated-dashboard indicators every 3s, up to 5 minutes.');
   console.log('');
 
-  const deadline = Date.now() + TIMEOUT_MS;
-  let outcome: 'SUCCESS' | 'TIMEOUT' | 'ABORTED' = 'TIMEOUT';
-  let abortReason = '';
-
-  while (Date.now() < deadline) {
-    let authenticated: boolean;
-    try {
-      authenticated = await flow.checkAuthenticated();
-    } catch (err) {
-      // The retained page/tab can go away mid-check (e.g. the human closes
-      // it, or it navigates away at the exact wrong instant), which would
-      // otherwise surface as an uncaught Playwright rejection and a raw
-      // stack trace instead of a clean, actionable report.
-      outcome = 'ABORTED';
-      abortReason = `checkAuthenticated() failed: ${err instanceof Error ? err.message : String(err)}`;
-      break;
+  const final = await runAuthJob(
+    { jobs, sessions, jobMachine, authMachine },
+    `http://127.0.0.1:${CDP_PORT}`,
+    portalUrl,
+    () => {
+      // Intermediate polling updates stay silent here, matching the
+      // script's prior behavior -- only the terminal outcome (below)
+      // was ever printed before this refactor.
     }
-
-    if (authenticated) {
-      outcome = 'SUCCESS';
-      break;
-    }
-
-    // A terminal auth-session state (tab closed, or the page ended up
-    // showing a session-expired indicator) will never become AUTHENTICATED
-    // on a later poll -- stop early instead of silently polling out the
-    // full remaining timeout with no chance of success.
-    const state = sessions.getById(authSessionId)?.state;
-    if (state === 'TAB_LOST' || state === 'SESSION_EXPIRED') {
-      outcome = 'ABORTED';
-      abortReason = `auth session reached terminal state ${state} before authentication was detected`;
-      break;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-  }
+  );
 
   console.log('');
-  if (outcome === 'SUCCESS') {
-    jobMachine.transition(job.id, 'AUTHENTICATED', 'auth flow confirmed dashboard indicators');
+  if (final.outcome === 'SUCCESS') {
     console.log('SUCCESS: authenticated-dashboard indicators detected.');
-    logger.info('manual auth verification succeeded', { jobId: job.id, authSessionId });
-  } else if (outcome === 'ABORTED') {
-    console.log(`ABORTED: ${abortReason}.`);
-    console.log(`Final auth session state: ${sessions.getById(authSessionId)?.state}`);
-    logger.warn('manual auth verification aborted', { jobId: job.id, authSessionId, reason: abortReason });
+    logger.info('manual auth verification succeeded', { jobId: final.jobId, authSessionId: final.authSessionId });
+  } else if (final.outcome === 'ABORTED') {
+    console.log(`ABORTED: ${final.abortReason}.`);
+    console.log(`Final auth session state: ${final.authState}`);
+    logger.warn('manual auth verification aborted', {
+      jobId: final.jobId,
+      authSessionId: final.authSessionId,
+      reason: final.abortReason,
+    });
   } else {
     console.log('TIMEOUT: authenticated-dashboard indicators were not detected in time.');
-    console.log(`Final auth session state: ${sessions.getById(authSessionId)?.state}`);
-    logger.warn('manual auth verification timed out', { jobId: job.id, authSessionId });
+    console.log(`Final auth session state: ${final.authState}`);
+    logger.warn('manual auth verification timed out', { jobId: final.jobId, authSessionId: final.authSessionId });
   }
 
   db.close();
   // The live CDP websocket to Chrome keeps the event loop open indefinitely
   // otherwise -- without this, the script hangs after printing its result
   // instead of returning control to the shell.
-  process.exit(outcome === 'SUCCESS' ? 0 : 1);
+  process.exit(final.outcome === 'SUCCESS' ? 0 : 1);
 }
 
 main().catch((err) => {
