@@ -38,6 +38,14 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 // transport error, and not an indefinite hang) drives the outcome.
 const SESSION_LOSS_GRACE_MS = 1000;
 const SESSION_LOSS_GRACE_POLL_MS = 50;
+// If checkAuthenticated() keeps failing/stalling tick after tick without the
+// auth session ever reaching a terminal state (TAB_LOST/SESSION_EXPIRED),
+// that's not the transient single-tick navigation race the grace window
+// above exists for -- it's a genuinely broken/stuck check. Bounding this
+// streak means a real failure still surfaces promptly with its diagnostic
+// message, rather than being silently retried for the full outer timeoutMs
+// (5 minutes by default) and reported as a generic, undiagnosable TIMEOUT.
+const TRANSIENT_FAILURE_BUDGET_MS = 15000;
 // Bounds a single CDP-backed call (checkAuthenticated(), the initial
 // navigation) so a command sent to a troubled browser connection can't stall
 // this function forever if it never settles -- observed in practice under
@@ -173,6 +181,11 @@ export async function runAuthJob(
   const deadline = Date.now() + timeoutMs;
   let outcome: 'SUCCESS' | 'TIMEOUT' | 'ABORTED' = 'TIMEOUT';
   let abortReason: string | undefined;
+  // Tracks a run of consecutive checkAuthenticated() failures/stalls that
+  // hasn't yet been resolved (by reaching a terminal auth state, or by a
+  // clean tick in between). Reset to null whenever a tick comes back clean.
+  let failureStreakStartedAt: number | null = null;
+  let lastFailure: unknown = null;
 
   while (Date.now() < deadline) {
     const check = await checkAuthenticatedBounded(flow, CDP_CALL_TIMEOUT_MS);
@@ -200,15 +213,37 @@ export async function runAuthJob(
       // still alive (just transiently busy) -- treat this tick as
       // inconclusive and keep polling, rather than spuriously aborting a
       // run that's actually still headed for SUCCESS.
+      if (failureStreakStartedAt === null) failureStreakStartedAt = Date.now();
+      lastFailure = check.kind === 'error' ? check.error : new Error('checkAuthenticated() did not settle in time');
+
       const state = await waitForTerminalAuthState(sessions, authSessionId, SESSION_LOSS_GRACE_MS, SESSION_LOSS_GRACE_POLL_MS);
       if (state === 'TAB_LOST' || state === 'SESSION_EXPIRED') {
         outcome = 'ABORTED';
         abortReason = `auth session reached terminal state ${state} before authentication was detected`;
         break;
       }
+
+      // The grace window didn't turn up a real terminal state. If this has
+      // now been going on for TRANSIENT_FAILURE_BUDGET_MS with no clean
+      // tick in between, this isn't a one-off race any more -- it's a
+      // genuinely stuck/broken check. Surface it now, with the last real
+      // error, instead of silently retrying for the rest of timeoutMs.
+      if (Date.now() - failureStreakStartedAt >= TRANSIENT_FAILURE_BUDGET_MS) {
+        outcome = 'ABORTED';
+        const message = lastFailure instanceof Error ? lastFailure.message : String(lastFailure);
+        abortReason = `checkAuthenticated() failed repeatedly: ${message}`;
+        break;
+      }
+
       await delay(pollIntervalMs);
       continue;
     }
+
+    // A clean tick (even if not yet authenticated) means whatever was
+    // causing prior failures has passed -- reset the streak so an old,
+    // already-resolved hiccup can't count against a later, unrelated one.
+    failureStreakStartedAt = null;
+    lastFailure = null;
 
     if (check.authenticated) {
       outcome = 'SUCCESS';
