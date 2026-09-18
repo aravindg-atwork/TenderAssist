@@ -1,6 +1,6 @@
 // renderer/src/components/JobList.tsx
-import { useEffect, useState } from 'react';
-import type { JobListItem } from '../../../src/electron/ipcTypes';
+import { useCallback, useEffect, useState } from 'react';
+import type { AuthJobUpdate, JobListItem } from '../../../src/electron/ipcTypes';
 
 export interface JobListProps {
   onSelectJob: (jobId: string) => void;
@@ -8,14 +8,46 @@ export interface JobListProps {
 
 export function JobList({ onSelectJob }: JobListProps) {
   const [jobs, setJobs] = useState<JobListItem[]>([]);
+  const [starting, setStarting] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     window.tenderAssist.listJobs().then(setJobs);
   }, []);
+
+  useEffect(() => {
+    refresh();
+    const unsubscribe = window.tenderAssist.onJobUpdate((update: AuthJobUpdate) => {
+      if (update.outcome) {
+        setActiveJobId(null);
+        refresh();
+      }
+    });
+    return unsubscribe;
+  }, [refresh]);
+
+  const handleStart = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      const { jobId } = await window.tenderAssist.startJob();
+      setActiveJobId(jobId);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStarting(false);
+    }
+  };
 
   return (
     <div>
       <h1>Jobs</h1>
+      <button onClick={handleStart} disabled={starting || activeJobId !== null}>
+        {activeJobId ? 'Job running…' : 'Start new job'}
+      </button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
       <table>
         <thead>
           <tr>
