@@ -45,6 +45,12 @@ export class JobRepository {
     return this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as JobRow | undefined;
   }
 
+  listAll(): JobRow[] {
+    return this.db
+      .prepare('SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC')
+      .all() as unknown as JobRow[];
+  }
+
   /** @internal Use JobStateMachine.transition() instead — calling this directly skips transition validation and the audit-log write. */
   updateState(id: string, state: JobState): void {
     this.db

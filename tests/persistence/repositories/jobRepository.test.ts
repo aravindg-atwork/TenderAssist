@@ -51,4 +51,13 @@ describe('JobRepository', () => {
 
     expect(repo.findIncomplete()).toBeUndefined();
   });
+
+  it('listAll returns every job, newest first', async () => {
+    const first = repo.create();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = repo.create();
+
+    const all = repo.listAll();
+    expect(all.map((j) => j.id)).toEqual([second.id, first.id]);
+  });
 });
