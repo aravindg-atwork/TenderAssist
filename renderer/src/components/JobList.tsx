@@ -1,28 +1,29 @@
 // renderer/src/components/JobList.tsx
 import { useCallback, useEffect, useState } from 'react';
-import type { AuthJobUpdate, JobListItem } from '../../../src/electron/ipcTypes';
+import type { JobListItem } from '../../../src/electron/ipcTypes';
 
 export interface JobListProps {
   onSelectJob: (jobId: string) => void;
+  activeJobId: string | null;
+  onActiveJobChange: (jobId: string | null) => void;
 }
 
-export function JobList({ onSelectJob }: JobListProps) {
+export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobListProps) {
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [starting, setStarting] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    window.tenderAssist.listJobs().then(setJobs);
+    window.tenderAssist
+      .listJobs()
+      .then(setJobs)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
   useEffect(() => {
     refresh();
-    const unsubscribe = window.tenderAssist.onJobUpdate((update: AuthJobUpdate) => {
-      if (update.outcome) {
-        setActiveJobId(null);
-        refresh();
-      }
+    const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
+      if (update.outcome) refresh();
     });
     return unsubscribe;
   }, [refresh]);
@@ -32,7 +33,7 @@ export function JobList({ onSelectJob }: JobListProps) {
     setError(null);
     try {
       const { jobId } = await window.tenderAssist.startJob();
-      setActiveJobId(jobId);
+      onActiveJobChange(jobId);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

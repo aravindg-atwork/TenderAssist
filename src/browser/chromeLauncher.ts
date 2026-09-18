@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 export interface ChromeLaunchOptions {
   userDataDir: string;
   cdpPort: number;
+  startUrl?: string;
 }
 
 const DEFAULT_CHROME_PATHS = [
@@ -26,12 +27,14 @@ export function resolveChromePath(
 }
 
 export function buildChromeLaunchArgs(options: ChromeLaunchOptions): string[] {
-  return [
+  const args = [
     `--remote-debugging-port=${options.cdpPort}`,
     `--user-data-dir=${options.userDataDir}`,
     '--no-first-run',
     '--no-default-browser-check',
   ];
+  if (options.startUrl) args.push(options.startUrl);
+  return args;
 }
 
 export interface CdpVersionInfo {

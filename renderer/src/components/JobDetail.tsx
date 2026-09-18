@@ -10,21 +10,52 @@ export interface JobDetailProps {
 export function JobDetail({ jobId, onBack }: JobDetailProps) {
   const [detail, setDetail] = useState<JobDetailData | null>(null);
   const [latestUpdate, setLatestUpdate] = useState<AuthJobUpdate | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    window.tenderAssist.getJobDetail(jobId).then(setDetail);
+    window.tenderAssist
+      .getJobDetail(jobId)
+      .then((d) => {
+        setDetail(d);
+        setError(null);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [jobId]);
 
   useEffect(() => {
     const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
       if (update.jobId !== jobId) return;
       setLatestUpdate(update);
-      window.tenderAssist.getJobDetail(jobId).then(setDetail);
+      window.tenderAssist
+        .getJobDetail(jobId)
+        .then((d) => {
+          setDetail(d);
+          setError(null);
+        })
+        .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     });
     return unsubscribe;
   }, [jobId]);
 
-  if (!detail) return <p>Loading...</p>;
+  // The Back button must stay reachable in every state -- loading, error,
+  // and loaded -- so an IPC failure never strands the user on this screen.
+  if (error) {
+    return (
+      <div>
+        <button onClick={onBack}>&larr; Back to jobs</button>
+        <p style={{ color: 'red' }}>Failed to load job: {error}</p>
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div>
+        <button onClick={onBack}>&larr; Back to jobs</button>
+        <p>Loading...</p>
+      </div>
+    );
+  }
 
   const bannerColor =
     latestUpdate?.outcome === 'SUCCESS' ? 'green' : latestUpdate?.outcome === 'ABORTED' ? 'red' : 'gray';

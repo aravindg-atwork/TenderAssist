@@ -40,6 +40,9 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   });
+  mainWindow.on('closed', () => {
+    mainWindow = undefined;
+  });
   void mainWindow.loadFile(join(__dirname, '..', '..', 'renderer', 'dist', 'index.html'));
 }
 
@@ -79,8 +82,9 @@ ipcMain.handle('start-job', async () => {
   const profileDir = join(getAppDataDir(), 'chrome-profile');
   mkdirSync(profileDir, { recursive: true });
   const cdpPort = 9222 + Math.floor(Math.random() * 5000);
+  let chromeProc: ReturnType<typeof launchChrome>;
   try {
-    launchChrome({ userDataDir: profileDir, cdpPort });
+    chromeProc = launchChrome({ userDataDir: profileDir, cdpPort, startUrl: PORTAL_URL });
     await waitForCdpReady(cdpPort, 15000);
   } catch (err) {
     // Making the guard atomic means WE now own resetting it on early failure --
@@ -110,7 +114,7 @@ ipcMain.handle('start-job', async () => {
         activeJobId = update.jobId;
         resolveStarted(update.jobId);
       }
-      mainWindow?.webContents.send('job-updated', update);
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
     }
   );
 
@@ -120,13 +124,47 @@ ipcMain.handle('start-job', async () => {
   // become an unhandled rejection, since nothing else awaits this promise. It
   // also rejects `started` -- a silent no-op if `started` already resolved,
   // but load-bearing if runAuthJob fails before its first onUpdate call.
-  runPromise.catch((err) => {
-    console.error('runAuthJob failed unexpectedly:', err);
-    rejectStarted(err);
-  });
-  runPromise.finally(() => {
-    activeJobId = null;
-  });
+  runPromise
+    .catch((err) => {
+      console.error('runAuthJob failed unexpectedly:', err);
+      rejectStarted(err); // no-op if `started` already resolved
+      if (jobIdCaptured) {
+        // A rejection after the first onUpdate means the job genuinely died
+        // mid-run with no terminal AuthJobUpdate ever pushed -- without this,
+        // the UI has no way to learn the job is dead and stays stuck showing
+        // it as still running indefinitely.
+        const failedJobId = activeJobId;
+        if (failedJobId && failedJobId !== 'pending') {
+          const job = jobs.getById(failedJobId);
+          const session = sessions.getLatestForJob(failedJobId);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('job-updated', {
+              jobId: failedJobId,
+              authSessionId: session?.id ?? '',
+              jobState: job?.state ?? 'FAILED_MANUAL',
+              authState: session?.state ?? 'TAB_LOST',
+              outcome: 'ABORTED',
+              abortReason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+    })
+    .finally(() => {
+      activeJobId = null;
+      // Release the Chrome profile lock now that this job's run has settled --
+      // without this, the NEXT start-job launches a Chrome that can't bind its
+      // own CDP port (Chrome forwards to the already-running instance and
+      // silently ignores --remote-debugging-port), and waitForCdpReady hangs
+      // 15s before throwing a confusing error.
+      if (chromeProc.pid) {
+        try {
+          process.kill(chromeProc.pid);
+        } catch {
+          // already exited
+        }
+      }
+    });
 
   const jobId = await started;
   return { jobId };
