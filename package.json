@@ -3,18 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/electron/main.js",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "verify:auth": "node dist/scripts/manualAuthVerification.js"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p renderer/tsconfig.json",
+    "verify:auth": "node dist/scripts/manualAuthVerification.js",
+    "renderer:build": "vite build --config renderer/vite.config.ts",
+    "electron": "npm run build && npm run renderer:build && electron ."
   },
   "dependencies": {
-    "playwright-core": "^1.63.0"
+    "playwright-core": "^1.63.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.2",
     "typescript": "^5.7.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
