@@ -10,7 +10,7 @@ import { StateTransitionRepository } from '../persistence/repositories/stateTran
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath } from '../config/paths.js';
-import type { JobListItem } from './ipcTypes.js';
+import type { JobListItem, JobDetail } from './ipcTypes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +48,20 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
       updatedAt: job.updated_at,
     };
   });
+});
+
+ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
+  const job = jobs.getById(jobId);
+  if (!job) throw new Error(`Job not found: ${jobId}`);
+  const session = sessions.getLatestForJob(jobId);
+  return {
+    jobId: job.id,
+    jobState: job.state,
+    authSessionId: session?.id ?? null,
+    authState: session?.state ?? null,
+    jobTransitions: transitions.listFor('JOB', jobId),
+    authTransitions: session ? transitions.listFor('AUTH_SESSION', session.id) : [],
+  };
 });
 
 app.whenReady().then(createWindow);
