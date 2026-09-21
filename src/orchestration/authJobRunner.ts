@@ -1,3 +1,4 @@
+import type { Page } from 'playwright-core';
 import type { JobRepository, JobState } from '../persistence/repositories/jobRepository.js';
 import type { AuthSessionRepository, AuthState } from '../persistence/repositories/authSessionRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
@@ -21,6 +22,7 @@ export interface AuthJobUpdate {
   authState: AuthState;
   outcome?: 'SUCCESS' | 'TIMEOUT' | 'ABORTED';
   abortReason?: string;
+  phase?: 'AUTH' | 'SEARCH';
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
@@ -129,7 +131,8 @@ export async function runAuthJob(
   deps: AuthJobRunnerDeps,
   cdpEndpoint: string,
   portalUrl: string,
-  onUpdate: (update: AuthJobUpdate) => void
+  onUpdate: (update: AuthJobUpdate) => void,
+  onAttached?: (page: Page) => void
 ): Promise<AuthJobUpdate> {
   const { jobs, sessions, jobMachine, authMachine } = deps;
   const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -151,6 +154,7 @@ export async function runAuthJob(
   if (attachResult.kind === 'error') throw attachResult.error;
   if (attachResult.kind === 'stalled') throw new Error('AuthFlow.start() did not settle in time');
   const { authSessionId } = attachResult.value;
+  onAttached?.(flow.getPage());
   jobMachine.transition(job.id, 'AUTH_PENDING', 'browser attached');
   const initialNav = await bounded(flow.getPage().goto(portalUrl), CDP_CALL_TIMEOUT_MS);
   if (initialNav.kind === 'error' || initialNav.kind === 'stalled') {
