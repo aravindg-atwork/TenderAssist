@@ -60,12 +60,29 @@ export async function searchCategory(
  */
 export async function favoriteAllVisibleRows(page: Page): Promise<number> {
   const checkboxes = page.locator('input[type=checkbox]');
-  const count = await checkboxes.count();
-  if (count === 0) return 0;
+  const total = await checkboxes.count();
+  if (total === 0) return 0;
 
-  for (let i = 0; i < count; i += 1) {
-    await checkboxes.nth(i).check({ force: true }).catch(() => {});
+  // count() alone would overstate success if a check() below silently
+  // failed to register (the same class of flaky click this codebase has
+  // hit before -- and every row's checkbox shares the same real portal
+  // id/name, "Checkbox", confirmed live, which makes a single-attempt
+  // check() measurably less reliable). Verify actual checked state, and
+  // retry up to 3 times per checkbox before giving up on it -- the same
+  // "a click can silently fail to register, retry 2-3 times before
+  // concluding failure" policy this plan's own spec already states for
+  // every other real-portal click, just not previously applied here.
+  let checkedCount = 0;
+  for (let i = 0; i < total; i += 1) {
+    const checkbox = checkboxes.nth(i);
+    let isChecked = false;
+    for (let attempt = 0; attempt < 3 && !isChecked; attempt += 1) {
+      await checkbox.check({ force: true }).catch(() => {});
+      isChecked = await checkbox.isChecked().catch(() => false);
+    }
+    if (isChecked) checkedCount += 1;
   }
+  if (checkedCount === 0) return 0;
 
   const onDialog = (dialog: Dialog) => {
     void dialog.dismiss();
@@ -75,5 +92,5 @@ export async function favoriteAllVisibleRows(page: Page): Promise<number> {
   await page.waitForLoadState('load').catch(() => {});
   page.off('dialog', onDialog);
 
-  return count;
+  return checkedCount;
 }
