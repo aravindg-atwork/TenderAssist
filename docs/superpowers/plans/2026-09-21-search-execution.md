@@ -468,7 +468,7 @@ import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 // Reproduces the real search-form page and results table, captured live
 // 2026-09-21 against an authenticated session (see the design spec).
 const SEARCH_FORM_HTML = `<html><body>
-  <a href="/results">Search Active Tenders</a>
+  <a href="/">Search Active Tenders</a>
   <select id="ProductCategory">
     <option value="">-Select-</option>
     <option>Information Technology</option>
@@ -849,7 +849,7 @@ function resultsHtml(category: string): string {
 }
 
 const SEARCH_FORM_HTML = `<html><body>
-  <a href="/results">Search Active Tenders</a>
+  <a href="/">Search Active Tenders</a>
   <select id="ProductCategory">
     <option value="">-Select-</option>
     <option>Computer- S/W</option>
