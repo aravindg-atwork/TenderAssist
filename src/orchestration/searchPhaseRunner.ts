@@ -29,7 +29,8 @@ export async function runSearchPhase(
   page: Page,
   jobId: string,
   authSessionId: string,
-  onUpdate: (update: AuthJobUpdate) => void
+  onUpdate: (update: AuthJobUpdate) => void,
+  searchDate: Date = new Date()
 ): Promise<AuthJobUpdate> {
   const { jobs, sessions, jobMachine, searches, tenders } = deps;
 
@@ -47,7 +48,7 @@ export async function runSearchPhase(
 
   onUpdate(snapshot());
 
-  const today = formatDdMmYyyy(new Date());
+  const targetDate = formatDdMmYyyy(searchDate);
 
   for (const config of CONFIGURED_SEARCHES) {
     const existing = searches.findByJobAndKey(jobId, config.searchKey);
@@ -57,7 +58,7 @@ export async function runSearchPhase(
     searches.updateState(search.id, 'RUNNING');
 
     try {
-      const rows = await searchCategory(page, config.productCategory, today);
+      const rows = await searchCategory(page, config.productCategory, targetDate);
 
       for (const row of rows) {
         tenders.upsert({

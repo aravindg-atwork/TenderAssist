@@ -163,6 +163,30 @@ a,
   margin: 0;
 }
 
+.start-job-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.start-job-controls__date {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.start-job-controls__date input[type='date'] {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

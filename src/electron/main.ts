@@ -96,11 +96,16 @@ ipcMain.handle('delete-job', (_event, jobId: string): void => {
   });
 });
 
-ipcMain.handle('start-job', async () => {
+ipcMain.handle('start-job', async (_event, searchDateIso?: string) => {
   if (activeJobId) {
     throw new Error('A job is already running. Wait for it to finish before starting another.');
   }
   activeJobId = 'pending'; // synchronous claim -- closes the guard atomically, before any await
+
+  // Append a local-midnight time so "YYYY-MM-DD" parses as the calendar day
+  // the person actually picked, not UTC midnight (which rolls back a day in
+  // any timezone ahead of UTC). Falls back to today when omitted.
+  const searchDate = searchDateIso ? new Date(`${searchDateIso}T00:00:00`) : new Date();
 
   const profileDir = join(getAppDataDir(), 'chrome-profile');
   mkdirSync(profileDir, { recursive: true });
@@ -156,7 +161,8 @@ ipcMain.handle('start-job', async () => {
       authResult.authSessionId,
       (update) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
-      }
+      },
+      searchDate
     );
   });
 

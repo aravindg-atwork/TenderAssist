@@ -4,7 +4,7 @@ import type { TenderAssistApi, AuthJobUpdate } from './ipcTypes.js';
 
 const api: TenderAssistApi = {
   listJobs: () => ipcRenderer.invoke('list-jobs'),
-  startJob: () => ipcRenderer.invoke('start-job'),
+  startJob: (searchDate) => ipcRenderer.invoke('start-job', searchDate),
   getJobDetail: (jobId) => ipcRenderer.invoke('get-job-detail', jobId),
   deleteJob: (jobId) => ipcRenderer.invoke('delete-job', jobId),
   onJobUpdate: (callback) => {

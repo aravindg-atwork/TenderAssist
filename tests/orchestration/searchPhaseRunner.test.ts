@@ -67,7 +67,7 @@ const SEARCH_FORM_HTML = `<html><body>
   <select id="dateCriteria"><option value="0">-Select-</option><option value="1">Published Date</option></select>
   <input type="text" name="fromDate" id="fromDate" readonly value="">
   <input type="text" name="toDate" id="toDate" readonly value="">
-  <input type="submit" id="submit" value="Search" onclick="document.location.href='/results?category=' + encodeURIComponent(document.getElementById('ProductCategory').value)">
+  <input type="submit" id="submit" value="Search" onclick="document.location.href='/results?category=' + encodeURIComponent(document.getElementById('ProductCategory').value) + '&amp;from=' + document.getElementById('fromDate').value + '&amp;to=' + document.getElementById('toDate').value">
 </body></html>`;
 
 describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
@@ -85,8 +85,10 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
   let userDataDir: string;
   let chromeProc: ReturnType<typeof launchChrome>;
   let cdpPort: number;
+  let submittedDates: Array<{ from: string; to: string }>;
 
   beforeEach(async () => {
+    submittedDates = [];
     db = new DatabaseSync(':memory:');
     runMigrations(db, join(process.cwd(), 'src', 'persistence', 'migrations'));
     jobs = new JobRepository(db);
@@ -110,6 +112,7 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
     server = http.createServer((req, res) => {
       if (req.url?.startsWith('/results')) {
         const url = new URL(req.url, 'http://localhost');
+        submittedDates.push({ from: url.searchParams.get('from') ?? '', to: url.searchParams.get('to') ?? '' });
         res.end(resultsHtml(decodeURIComponent(url.searchParams.get('category') ?? '')));
       } else if (req.url?.startsWith('/favorited')) {
         res.end('<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>');
@@ -168,5 +171,27 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
     expect(allTenders[0].favorited_at).not.toBeNull();
 
     expect(updates.at(-1)?.outcome).toBe('SUCCESS');
+  });
+
+  it('uses the explicit searchDate for every category, formatted dd/MM/yyyy, instead of defaulting to today', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    const explicitDate = new Date(2026, 8, 19); // 19 September 2026 (JS months are 0-indexed)
+    await runSearchPhase(
+      { jobs, sessions, jobMachine, searches, tenders },
+      page,
+      jobId,
+      authSessionId,
+      () => {},
+      explicitDate
+    );
+
+    expect(submittedDates).toHaveLength(7);
+    for (const { from, to } of submittedDates) {
+      expect(from).toBe('19/09/2026');
+      expect(to).toBe('19/09/2026');
+    }
   });
 });

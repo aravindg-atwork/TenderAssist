@@ -10,10 +10,19 @@ export interface JobListProps {
   onActiveJobChange: (jobId: string | null) => void;
 }
 
+const todayIso = (): string => {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobListProps) {
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchDate, setSearchDate] = useState(todayIso);
 
   const refresh = useCallback(() => {
     window.tenderAssist
@@ -34,7 +43,7 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
     setStarting(true);
     setError(null);
     try {
-      const { jobId } = await window.tenderAssist.startJob();
+      const { jobId } = await window.tenderAssist.startJob(searchDate);
       onActiveJobChange(jobId);
       refresh();
     } catch (err) {
@@ -60,9 +69,21 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
     <div>
       <div className="list-header">
         <h1>Jobs</h1>
-        <button className="btn btn-primary" onClick={handleStart} disabled={starting || activeJobId !== null}>
-          {activeJobId ? 'Job running…' : 'Start new job'}
-        </button>
+        <div className="start-job-controls">
+          <label className="start-job-controls__date">
+            Published on
+            <input
+              type="date"
+              value={searchDate}
+              max={todayIso()}
+              disabled={starting || activeJobId !== null}
+              onChange={(event) => setSearchDate(event.target.value)}
+            />
+          </label>
+          <button className="btn btn-primary" onClick={handleStart} disabled={starting || activeJobId !== null}>
+            {activeJobId ? 'Job running…' : 'Start new job'}
+          </button>
+        </div>
       </div>
       {error && <p className="error-text">{error}</p>}
       {jobs.length === 0 ? (
