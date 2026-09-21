@@ -43,6 +43,13 @@ function resultsHtml(rows: Array<{ id: string; title: string; ref: string; categ
     .join('');
   return `<html><body>
     <a href="/">Search Active Tenders</a>
+    <!-- The real portal nests the results table several <table>/<tr>/<td>
+         levels deep inside page-layout tables (confirmed live). Wrapping it
+         here the same way is deliberate: it reproduces the real ambiguity
+         between the actual results table and its ancestor "layout" table,
+         which is exactly what searchCategory()'s table-selection logic
+         (smallest matching table wins) must resolve correctly. -->
+    <table><tbody><tr><td>
     <form id="activeTenders" action="/favorited" method="post">
       <table>
         <tr><td>S.No</td><td>Tender ID</td><td>Tender Title</td><td>Tender Reference Number</td><td>Product Category</td><td>Value in Rs</td><td>Favorite</td></tr>
@@ -66,6 +73,7 @@ function resultsHtml(rows: Array<{ id: string; title: string; ref: string; categ
       </script>
       <input type="submit" id="save" value="Set Open Tender as Favorite" onclick="return checkConformSaveDocuments('activeTenders','tender');">
     </form>
+    </td></tr></tbody></table>
   </body></html>`;
 }
 
