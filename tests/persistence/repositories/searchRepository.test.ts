@@ -10,10 +10,10 @@ describe('CONFIGURED_SEARCHES', () => {
   it('has exactly 7 configured searches matching the real portal Product Category values', () => {
     expect(CONFIGURED_SEARCHES).toHaveLength(7);
     expect(CONFIGURED_SEARCHES.map((s) => s.productCategory)).toEqual([
-      'Computer- H/W',
       'Computer- S/W',
       'Information Technology',
       'Info. Tech. Services',
+      'Documentary film,Video film',
       'Miscellaneous Goods',
       'Miscellaneous Services',
       'Miscellaneous Works',
@@ -45,27 +45,27 @@ describe('SearchRepository', () => {
   });
 
   it('creates a search in PENDING state', () => {
-    const search = repo.create(jobId, 'search_1', 'Computer- H/W');
+    const search = repo.create(jobId, 'search_1', 'Computer- S/W');
     expect(search.state).toBe('PENDING');
     expect(search.current_page).toBe(0);
     expect(search.result_count).toBeNull();
   });
 
   it('findByJobAndKey returns the matching row', () => {
-    repo.create(jobId, 'search_1', 'Computer- H/W');
+    repo.create(jobId, 'search_1', 'Computer- S/W');
     const found = repo.findByJobAndKey(jobId, 'search_1');
-    expect(found?.product_category).toBe('Computer- H/W');
+    expect(found?.product_category).toBe('Computer- S/W');
   });
 
   it('listForJob returns all searches for the job, ordered by search_key', () => {
     repo.create(jobId, 'search_3', 'Information Technology');
-    repo.create(jobId, 'search_1', 'Computer- H/W');
+    repo.create(jobId, 'search_1', 'Computer- S/W');
     const list = repo.listForJob(jobId);
     expect(list.map((s) => s.search_key)).toEqual(['search_1', 'search_3']);
   });
 
   it('updateState and updateProgress persist changes', () => {
-    const search = repo.create(jobId, 'search_1', 'Computer- H/W');
+    const search = repo.create(jobId, 'search_1', 'Computer- S/W');
     repo.updateState(search.id, 'RUNNING');
     repo.updateProgress(search.id, 2, 15);
 
@@ -76,8 +76,8 @@ describe('SearchRepository', () => {
   });
 
   it('findFirstIncomplete returns the first non-COMPLETE search in search_key order', () => {
-    const s1 = repo.create(jobId, 'search_1', 'Computer- H/W');
-    const s2 = repo.create(jobId, 'search_2', 'Computer- S/W');
+    const s1 = repo.create(jobId, 'search_1', 'Computer- S/W');
+    const s2 = repo.create(jobId, 'search_2', 'Information Technology');
     repo.updateState(s1.id, 'COMPLETE');
 
     const incomplete = repo.findFirstIncomplete(jobId);
@@ -85,7 +85,7 @@ describe('SearchRepository', () => {
   });
 
   it('findFirstIncomplete returns undefined when every search is COMPLETE', () => {
-    const s1 = repo.create(jobId, 'search_1', 'Computer- H/W');
+    const s1 = repo.create(jobId, 'search_1', 'Computer- S/W');
     repo.updateState(s1.id, 'COMPLETE');
 
     expect(repo.findFirstIncomplete(jobId)).toBeUndefined();
