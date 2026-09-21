@@ -13,7 +13,15 @@ export function App() {
     // back -- JobList itself unmounts/remounts on that navigation, which
     // previously reset this state and let the button re-enable mid-run.
     const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
-      setActiveJobId(update.outcome ? null : update.jobId);
+      // The auth phase's own SUCCESS is no longer the end of the run -- the
+      // search phase continues automatically on the same job. Only treat
+      // the run as over on a genuine failure (any phase), or the search
+      // phase's own terminal SUCCESS (phase: 'SEARCH').
+      const runOver =
+        update.outcome === 'TIMEOUT' ||
+        update.outcome === 'ABORTED' ||
+        (update.outcome === 'SUCCESS' && update.phase === 'SEARCH');
+      setActiveJobId(runOver ? null : update.jobId);
     });
     return unsubscribe;
   }, []);

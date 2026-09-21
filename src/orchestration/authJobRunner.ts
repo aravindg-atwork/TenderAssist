@@ -132,7 +132,7 @@ export async function runAuthJob(
   cdpEndpoint: string,
   portalUrl: string,
   onUpdate: (update: AuthJobUpdate) => void,
-  onAttached?: (page: Page) => void
+  onAttached?: (page: Page, stopWatchingSessionLoss: () => void) => void
 ): Promise<AuthJobUpdate> {
   const { jobs, sessions, jobMachine, authMachine } = deps;
   const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -154,7 +154,7 @@ export async function runAuthJob(
   if (attachResult.kind === 'error') throw attachResult.error;
   if (attachResult.kind === 'stalled') throw new Error('AuthFlow.start() did not settle in time');
   const { authSessionId } = attachResult.value;
-  onAttached?.(flow.getPage());
+  onAttached?.(flow.getPage(), () => flow.stop());
   jobMachine.transition(job.id, 'AUTH_PENDING', 'browser attached');
   const initialNav = await bounded(flow.getPage().goto(portalUrl), CDP_CALL_TIMEOUT_MS);
   if (initialNav.kind === 'error' || initialNav.kind === 'stalled') {
@@ -272,12 +272,6 @@ export async function runAuthJob(
   if (outcome === 'SUCCESS') {
     jobMachine.transition(job.id, 'AUTHENTICATED', 'auth flow confirmed dashboard indicators');
   }
-
-  // The outcome is now decided and recorded. A caller that closes the
-  // browser afterward (e.g. to free the Chrome profile lock for the next
-  // job) would otherwise have that deliberate close reported as a session
-  // loss, silently overwriting this terminal state -- see AuthFlow.stop().
-  flow.stop();
 
   const final: AuthJobUpdate = { ...snapshot(), outcome, abortReason };
   onUpdate(final);

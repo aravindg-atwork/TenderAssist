@@ -8,11 +8,15 @@ import { runMigrations } from '../persistence/migrate.js';
 import { JobRepository } from '../persistence/repositories/jobRepository.js';
 import { AuthSessionRepository } from '../persistence/repositories/authSessionRepository.js';
 import { StateTransitionRepository } from '../persistence/repositories/stateTransitionRepository.js';
+import { SearchRepository } from '../persistence/repositories/searchRepository.js';
+import { TenderRepository } from '../persistence/repositories/tenderRepository.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
 import { launchChrome, waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
+import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
+import type { Page } from 'playwright-core';
 import type { JobListItem, JobDetail } from './ipcTypes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +26,8 @@ runMigrations(db, join(process.cwd(), 'src', 'persistence', 'migrations'));
 const jobs = new JobRepository(db);
 const sessions = new AuthSessionRepository(db);
 const transitions = new StateTransitionRepository(db);
+const searches = new SearchRepository(db);
+const tenders = new TenderRepository(db);
 const jobMachine = new JobStateMachine(db, jobs, transitions);
 const authMachine = new AuthStateMachine(db, sessions, transitions);
 
@@ -118,6 +124,9 @@ ipcMain.handle('start-job', async () => {
   });
 
   let jobIdCaptured = false;
+  let capturedPage: Page | undefined;
+  let stopWatchingSessionLoss: (() => void) | undefined;
+
   const runPromise = runAuthJob(
     { jobs, sessions, jobMachine, authMachine },
     `http://127.0.0.1:${cdpPort}`,
@@ -129,8 +138,24 @@ ipcMain.handle('start-job', async () => {
         resolveStarted(update.jobId);
       }
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
+    },
+    (page, stop) => {
+      capturedPage = page;
+      stopWatchingSessionLoss = stop;
     }
-  );
+  ).then(async (authResult) => {
+    if (authResult.outcome !== 'SUCCESS' || !capturedPage) return authResult;
+
+    return runSearchPhase(
+      { jobs, sessions, jobMachine, searches, tenders },
+      capturedPage,
+      authResult.jobId,
+      authResult.authSessionId,
+      (update) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
+      }
+    );
+  });
 
   // runAuthJob only ever RESOLVES (with a terminal SUCCESS/TIMEOUT/ABORTED
   // AuthJobUpdate) -- a rejection here means something broke outside its own
@@ -166,6 +191,7 @@ ipcMain.handle('start-job', async () => {
     })
     .finally(() => {
       activeJobId = null;
+      stopWatchingSessionLoss?.();
       // Release the Chrome profile lock now that this job's run has settled --
       // without this, the NEXT start-job launches a Chrome that can't bind its
       // own CDP port (Chrome forwards to the already-running instance and
