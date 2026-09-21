@@ -702,12 +702,22 @@ export async function searchCategory(
  */
 export async function favoriteAllVisibleRows(page: Page): Promise<number> {
   const checkboxes = page.locator('input[type=checkbox]');
-  const count = await checkboxes.count();
-  if (count === 0) return 0;
+  const total = await checkboxes.count();
+  if (total === 0) return 0;
 
-  for (let i = 0; i < count; i += 1) {
+  for (let i = 0; i < total; i += 1) {
     await checkboxes.nth(i).check({ force: true }).catch(() => {});
   }
+
+  // count() alone would overstate success if a check() above silently
+  // failed to register (the same class of flaky click this codebase has
+  // hit before) -- verify actual checked state so a caller persisting
+  // "favorited" to the database (Task 5) never records a false positive.
+  let checkedCount = 0;
+  for (let i = 0; i < total; i += 1) {
+    if (await checkboxes.nth(i).isChecked().catch(() => false)) checkedCount += 1;
+  }
+  if (checkedCount === 0) return 0;
 
   const onDialog = (dialog: Dialog) => {
     void dialog.dismiss();
@@ -717,7 +727,7 @@ export async function favoriteAllVisibleRows(page: Page): Promise<number> {
   await page.waitForLoadState('load').catch(() => {});
   page.off('dialog', onDialog);
 
-  return count;
+  return checkedCount;
 }
 ```
 
