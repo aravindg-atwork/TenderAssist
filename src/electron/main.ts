@@ -16,6 +16,7 @@ import { getDatabasePath, getAppDataDir } from '../config/paths.js';
 import { launchChrome, waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
+import { attemptLogout } from '../browser/logoutController.js';
 import type { Page } from 'playwright-core';
 import type { JobListItem, JobDetail } from './ipcTypes.js';
 
@@ -191,9 +192,15 @@ ipcMain.handle('start-job', async () => {
         }
       }
     })
-    .finally(() => {
+    .finally(async () => {
       activeJobId = null;
       stopWatchingSessionLoss?.();
+      // Clean, server-side logout before force-closing the browser -- best
+      // effort only (attemptLogout swallows its own failures), since the
+      // Chrome process gets killed regardless right after this.
+      if (capturedPage) {
+        await attemptLogout(capturedPage);
+      }
       // Release the Chrome profile lock now that this job's run has settled --
       // without this, the NEXT start-job launches a Chrome that can't bind its
       // own CDP port (Chrome forwards to the already-running instance and
