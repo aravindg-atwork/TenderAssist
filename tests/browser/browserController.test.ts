@@ -27,8 +27,30 @@ describe.skipIf(!CHROME_PATH)('BrowserController', { timeout: 30_000 }, () => {
     server = http.createServer((req, res) => {
       if (req.url?.includes('page=CommonErrorPage')) {
         res.end('<html><body>Your session in the client area has expired.</body></html>');
+      } else if (req.url?.includes('/dashboard-image-logout')) {
+        // Matches the real TN Tenders markup exactly: the Logout control is
+        // an <img title="Logout"> with no alt attribute, not visible text, so
+        // innerText('body') alone never contains the word "Logout" even on a
+        // genuinely authenticated page. See extractPageText()'s comment.
+        // Checked before the plain '/dashboard' branch below, since that
+        // substring-matches this URL too.
+        res.end(
+          '<html><body>Welcome : test@example.com<br>Bid Management<br>' +
+            '<a href="/logout"><img src="logout.png" title="Logout"></a></body></html>'
+        );
       } else if (req.url?.includes('/dashboard')) {
         res.end('<html><body>Welcome : test@example.com<br>Bid Management<br>Logout</body></html>');
+      } else if (req.url?.includes('logout.png')) {
+        // A real 1x1 transparent PNG -- the image must actually load, or
+        // Chrome renders alt/title text as a broken-image fallback, which
+        // would make the test pass for the wrong reason (that fallback
+        // rendering doesn't happen on the real portal, where the icon loads).
+        const onePixelPng = Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          'base64'
+        );
+        res.setHeader('Content-Type', 'image/png');
+        res.end(onePixelPng);
       } else {
         res.end('<html><body>hello</body></html>');
       }
@@ -81,6 +103,21 @@ describe.skipIf(!CHROME_PATH)('BrowserController', { timeout: 30_000 }, () => {
     expect(text).toContain('Logout');
   });
 
+  it('extracts image title/alt text, not just visible innerText', async () => {
+    const controller = new BrowserController({
+      cdpEndpoint: `http://127.0.0.1:${cdpPort}`,
+      onSessionLost: () => {},
+    });
+    await controller.attach();
+
+    await controller.navigate(`http://127.0.0.1:${serverPort}/dashboard-image-logout`);
+    const text = await controller.extractPageText();
+
+    expect(text).toContain('Welcome : test@example.com');
+    expect(text).toContain('Bid Management');
+    expect(text).toContain('Logout');
+  });
+
   it('reports TAB_CLOSED when the retained page is closed', async () => {
     const losses: SessionLossReason[] = [];
     const controller = new BrowserController({
@@ -93,6 +130,24 @@ describe.skipIf(!CHROME_PATH)('BrowserController', { timeout: 30_000 }, () => {
     await waitFor(() => losses.includes('TAB_CLOSED'));
 
     expect(losses).toContain('TAB_CLOSED');
+  });
+
+  it('dispose() suppresses a subsequent tab-close from being reported as a loss', async () => {
+    const losses: SessionLossReason[] = [];
+    const controller = new BrowserController({
+      cdpEndpoint: `http://127.0.0.1:${cdpPort}`,
+      onSessionLost: (reason) => losses.push(reason),
+    });
+    await controller.attach();
+
+    controller.dispose();
+    await controller.getPage().close();
+    // Give the close event a moment to have been handled, if it were going
+    // to fire the callback at all -- there's no terminal state to wait for
+    // here since the whole point is that nothing should be reported.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(losses).toEqual([]);
   });
 
   it('reports SESSION_EXPIRED_PAGE when navigation lands on a session-expired page', async () => {

@@ -57,6 +57,17 @@ export class AuthFlow {
     return this.controller.getPage();
   }
 
+  /**
+   * Stops reacting to tab-close/target-destroy events. Call once the flow has
+   * reached a terminal outcome (SUCCESS/TIMEOUT/ABORTED) and the caller may
+   * go on to deliberately close the browser (e.g. to free the profile lock
+   * for the next job) -- without this, that deliberate close is reported as
+   * a session loss and overwrites the already-terminal auth state.
+   */
+  stop(): void {
+    this.controller?.dispose();
+  }
+
   private handleSessionLost(reason: SessionLossReason): void {
     if (!this.authSessionId) return;
     const current = this.deps.sessions.getById(this.authSessionId);

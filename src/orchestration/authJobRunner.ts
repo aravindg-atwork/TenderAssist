@@ -269,6 +269,12 @@ export async function runAuthJob(
     jobMachine.transition(job.id, 'AUTHENTICATED', 'auth flow confirmed dashboard indicators');
   }
 
+  // The outcome is now decided and recorded. A caller that closes the
+  // browser afterward (e.g. to free the Chrome profile lock for the next
+  // job) would otherwise have that deliberate close reported as a session
+  // loss, silently overwriting this terminal state -- see AuthFlow.stop().
+  flow.stop();
+
   const final: AuthJobUpdate = { ...snapshot(), outcome, abortReason };
   onUpdate(final);
   return final;

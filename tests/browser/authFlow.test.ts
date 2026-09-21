@@ -159,4 +159,29 @@ describe.skipIf(!CHROME_PATH)('AuthFlow', { timeout: 30_000 }, () => {
 
     expect(calls).toEqual([{ reason: 'TAB_CLOSED', terminalState: 'TAB_LOST' }]);
   });
+
+  it('stop() prevents a deliberate post-SUCCESS tab close from downgrading an already-AUTHENTICATED session', async () => {
+    // Reproduces the real bug: a caller (runAuthJob) closes Chrome right
+    // after reaching a terminal outcome, to free the profile lock for the
+    // next job. Without stop(), that close was reported as TAB_CLOSED and
+    // silently overwrote the just-recorded AUTHENTICATED state.
+    const calls: Array<{ reason: string; terminalState: string }> = [];
+    const flow = new AuthFlow({
+      sessions,
+      machine,
+      onAuthSessionLost: (reason, terminalState) => {
+        calls.push({ reason, terminalState });
+      },
+    });
+    const { authSessionId } = await flow.start(jobId, `http://127.0.0.1:${cdpPort}`);
+    await flow.getPage().goto(`http://127.0.0.1:${serverPort}/dashboard`);
+    expect(await flow.checkAuthenticated()).toBe(true);
+
+    flow.stop();
+    await flow.getPage().close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(sessions.getById(authSessionId)?.state).toBe('AUTHENTICATED');
+    expect(calls).toEqual([]);
+  });
 });

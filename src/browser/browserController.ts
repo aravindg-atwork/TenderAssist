@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import { isSessionExpiredPage } from './sessionExpiredDetector.js';
 
@@ -33,6 +34,14 @@ export class BrowserController {
     });
 
     const browserCdp = await this.browser.newBrowserCDPSession();
+    // Playwright's CDP session hijacks downloads by default (Browser.setDownloadBehavior
+    // 'allowAndName', writing to its own temp dir under a GUID filename with no
+    // extension) so it can fire page.on('download') events -- nothing in this
+    // codebase listens for those. TN Tenders' DSC login flow depends on a real,
+    // correctly-named signData.jnlp landing in the browser's normal downloads so
+    // Windows can open it via Java Web Start; without this override the human
+    // never gets an openable file. 'default' restores native per-profile behavior.
+    await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'default' });
     await browserCdp.send('Target.setDiscoverTargets', { discover: true });
     browserCdp.on('Target.targetDestroyed', (event) => {
       if (event.targetId === this.targetId) {
@@ -63,6 +72,18 @@ export class BrowserController {
     this.options.onSessionLost(reason);
   }
 
+  /**
+   * Marks this controller as done, so a subsequent tab-close/target-destroy
+   * event (e.g. a caller deliberately killing Chrome once a job has already
+   * reached SUCCESS/TIMEOUT/ABORTED, to free the profile lock for the next
+   * job) is not reported as a session loss and doesn't overwrite an
+   * already-terminal auth/job state. Reuses the same `lost` guard
+   * `reportLoss` already checks, just without invoking the callback.
+   */
+  dispose(): void {
+    this.lost = true;
+  }
+
   getPage(): Page {
     if (!this.page) throw new Error('BrowserController is not attached');
     return this.page;
@@ -78,6 +99,17 @@ export class BrowserController {
   }
 
   async extractPageText(): Promise<string> {
-    return this.getPage().innerText('body');
+    // TN Tenders renders some controls -- notably the Logout link -- as an
+    // <img title="..."> with no visible text (see logout2.png in the real
+    // portal markup), so innerText('body') alone misses them even on a
+    // genuinely authenticated page. Appending image title/alt attributes
+    // makes those accessible-but-not-visible labels available to detectors
+    // like isAuthenticatedDashboard() without changing what they match on.
+    return this.getPage().evaluate(() => {
+      const imageLabels = Array.from(document.images)
+        .map((img) => img.title || img.alt)
+        .filter(Boolean);
+      return [document.body.innerText, ...imageLabels].join('\n');
+    });
   }
 }
