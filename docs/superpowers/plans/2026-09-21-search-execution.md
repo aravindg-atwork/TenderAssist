@@ -499,6 +499,13 @@ function resultsHtml(rows: Array<{ id: string; title: string; ref: string; categ
     .join('');
   return `<html><body>
     <a href="/">Search Active Tenders</a>
+    <!-- The real portal nests the results table several <table>/<tr>/<td>
+         levels deep inside page-layout tables (confirmed live). Wrapping it
+         here the same way is deliberate: it reproduces the real ambiguity
+         between the actual results table and its ancestor "layout" table,
+         which is exactly what searchCategory()'s table-selection logic
+         (smallest matching table wins) must resolve correctly. -->
+    <table><tbody><tr><td>
     <form id="activeTenders" action="/favorited" method="post">
       <table>
         <tr><td>S.No</td><td>Tender ID</td><td>Tender Title</td><td>Tender Reference Number</td><td>Product Category</td><td>Value in Rs</td><td>Favorite</td></tr>
@@ -522,6 +529,7 @@ function resultsHtml(rows: Array<{ id: string; title: string; ref: string; categ
       </script>
       <input type="submit" id="save" value="Set Open Tender as Favorite" onclick="return checkConformSaveDocuments('activeTenders','tender');">
     </form>
+    </td></tr></tbody></table>
   </body></html>`;
 }
 
@@ -674,10 +682,22 @@ export async function searchCategory(
   await page.waitForLoadState('load').catch(() => {});
 
   const cellRows = await page.evaluate(() => {
-    const headerRow = Array.from(document.querySelectorAll('tr')).find(
-      (tr) => tr.innerText.includes('Tender ID') && tr.innerText.includes('Favorite')
+    // The real portal is a deeply nested-table page layout: an ANCESTOR <tr>
+    // (part of the outer page chrome) can also satisfy the text check below,
+    // since a <tr>'s innerText is a superset of everything nested inside it,
+    // including the real results table many levels down. document.querySelectorAll
+    // returns elements in document (pre-order) order, so a naive .find() on
+    // the first matching <tr>/<table> grabs that outer ancestor, not the real
+    // header row -- confirmed live: this produced whole-page header/nav text
+    // (e.g. "Welcome : ...") as "tender data" instead of real rows. Picking
+    // the SMALLEST matching table (by outerHTML length) reliably selects the
+    // innermost, real one instead -- the same technique used when the real
+    // Search Active Tenders markup was originally captured for this plan.
+    const candidateTables = Array.from(document.querySelectorAll('table')).filter(
+      (t) => t.innerText.includes('Tender ID') && t.innerText.includes('Favorite')
     );
-    const table = headerRow?.closest('table');
+    candidateTables.sort((a, b) => a.outerHTML.length - b.outerHTML.length);
+    const table = candidateTables[0];
     if (!table) return [] as string[][];
     return Array.from(table.querySelectorAll('tr'))
       .slice(1) // skip the header row
