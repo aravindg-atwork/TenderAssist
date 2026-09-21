@@ -1129,14 +1129,51 @@ git commit -m "feat: runSearchPhase orchestration, chained after a successful au
 ### Task 6: Wire the search phase into `start-job`
 
 **Files:**
+- Modify: `src/orchestration/authJobRunner.ts`
 - Modify: `src/electron/main.ts`
 - Modify: `renderer/src/App.tsx`
 
 **Interfaces:**
-- Consumes: `runSearchPhase`/`SearchPhaseDeps` (Task 5, `src/orchestration/searchPhaseRunner.js`), `onAttached` param on `runAuthJob` (Task 5), `SearchRepository`/`TenderRepository` (existing/Task 2).
+- Consumes: `runSearchPhase`/`SearchPhaseDeps` (Task 5, `src/orchestration/searchPhaseRunner.js`), `onAttached` param on `runAuthJob` (Task 5, corrected in Step 0 below), `SearchRepository`/`TenderRepository` (existing/Task 2).
 - Produces: `start-job`'s existing `{ jobId: string }` return shape is unchanged; the job now continues automatically through the search phase before Chrome is released. `App.tsx`'s `activeJobId` tracking now stays "running" through both phases.
 
-No automated tests for this task (Electron main-process wiring, consistent with every prior Electron-shell task in this project) — verified manually in Task 8.
+No automated tests for the `main.ts`/`App.tsx` changes (Electron main-process/renderer wiring, consistent with every prior task of this shape) — verified manually in Task 8. Step 0's `authJobRunner.ts` change DOES need its existing automated coverage re-confirmed (see that step) since it touches already-tested code.
+
+- [ ] **Step 0: Fix a real gap Task 5's review surfaced — `runAuthJob` must not permanently disable session-loss detection when a continuation phase follows**
+
+Context for whoever implements this: `runAuthJob` currently calls `flow.stop()` unconditionally right before it returns (see the comment already in the file at that line) — this was a deliberate, correct fix for an earlier bug where `start-job`'s own deliberate Chrome-kill (to free the profile lock) was misreported as a real session loss (`TAB_LOST`), silently downgrading an already-recorded `AUTHENTICATED` state. That fix is still correct for a job that ends at auth. But now that a successful auth is followed by `runSearchPhase` continuing to use the SAME page, `flow.stop()` firing immediately after auth succeeds disables session-loss detection (the `TAB_LOST`/`SESSION_EXPIRED` transitions `runSearchPhase`'s own error handling depends on) for the entire search phase too — before the search phase has even started. If the tab is genuinely lost during search, nothing will ever populate that state.
+
+The fix: `runAuthJob` should stop deciding when to disable session-loss detection — that's the job of whoever actually closes the browser. Give the caller control over the timing instead.
+
+In `src/orchestration/authJobRunner.ts`, change the `onAttached` parameter's type and its one call site:
+
+```ts
+  onAttached?: (page: Page, stopWatchingSessionLoss: () => void) => void
+```
+
+(This replaces the existing `onAttached?: (page: Page) => void` in the `runAuthJob` signature — every other parameter stays exactly as-is.)
+
+```ts
+  onAttached?.(flow.getPage(), () => flow.stop());
+```
+
+(This replaces the existing `onAttached?.(flow.getPage());` call site — same location, right after `const { authSessionId } = attachResult.value;`.)
+
+Then DELETE the now-unconditional internal call and its comment, a few lines further down:
+
+```ts
+  // The outcome is now decided and recorded. A caller that closes the
+  // browser afterward (e.g. to free the Chrome profile lock for the next
+  // job) would otherwise have that deliberate close reported as a session
+  // loss, silently overwriting this terminal state -- see AuthFlow.stop().
+  flow.stop();
+
+```
+
+(Delete this whole block, comment included — `runAuthJob` no longer decides this. The line `const final: AuthJobUpdate = { ...snapshot(), outcome, abortReason };` that follows it stays.)
+
+Run: `npm test -- tests/orchestration/authJobRunner.test.ts`
+Expected: 3 passed, unchanged — none of the 3 existing tests exercise a post-outcome close, so this is safe to confirm before moving on.
 
 - [ ] **Step 1: Construct the new repositories and wire `onAttached` + phase-chaining in `main.ts`**
 
@@ -1161,6 +1198,7 @@ Replace the `start-job` handler's body from `const runPromise = runAuthJob(` thr
 
 ```ts
   let capturedPage: Page | undefined;
+  let stopWatchingSessionLoss: (() => void) | undefined;
 
   const runPromise = runAuthJob(
     { jobs, sessions, jobMachine, authMachine },
@@ -1174,8 +1212,9 @@ Replace the `start-job` handler's body from `const runPromise = runAuthJob(` thr
       }
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
     },
-    (page) => {
+    (page, stop) => {
       capturedPage = page;
+      stopWatchingSessionLoss = stop;
     }
   ).then(async (authResult) => {
     if (authResult.outcome !== 'SUCCESS' || !capturedPage) return authResult;
@@ -1192,7 +1231,18 @@ Replace the `start-job` handler's body from `const runPromise = runAuthJob(` thr
   });
 ```
 
-The rest of the handler (the `runPromise.catch(...)` and `.finally(...)` blocks, and `const jobId = await started; return { jobId };`) stays exactly as it is today — `.finally()`'s Chrome-kill now naturally fires only after BOTH phases settle, since `runPromise` itself now resolves only once the chained `runSearchPhase` call (when reached) also finishes.
+The `runPromise.catch(...)` block stays exactly as it is today. In the `.finally(...)` block that follows it, add one line — call `stopWatchingSessionLoss()` right before the existing Chrome-kill, since that kill is now the ONE place in this handler that deliberately closes the browser (whether the run ended at auth or continued through search):
+
+```ts
+    .finally(() => {
+      activeJobId = null;
+      stopWatchingSessionLoss?.();
+      // Release the Chrome profile lock now that this job's run has settled --
+```
+
+(This is the same `.finally()` block already in the file — only the new `stopWatchingSessionLoss?.();` line is added, positioned right after `activeJobId = null;` and before the existing Chrome-kill comment/code, which is otherwise unchanged.)
+
+`const jobId = await started; return { jobId };` at the end of the handler stays exactly as it is today. The Chrome-kill now naturally fires only after BOTH phases settle, since `runPromise` itself now resolves only once the chained `runSearchPhase` call (when reached) also finishes — and session-loss detection now stays live for the whole run, only disabled at the exact moment Chrome is deliberately killed.
 
 - [ ] **Step 2: Update `App.tsx`'s "is a job still running" logic**
 
@@ -1220,15 +1270,15 @@ with:
     });
 ```
 
-- [ ] **Step 3: Run typecheck**
+- [ ] **Step 3: Run the full suite and typecheck**
 
-Run: `npm run typecheck`
-Expected: clean on all three configs.
+Run: `npm test && npm run typecheck`
+Expected: all passing (Step 0's `authJobRunner.ts` change is covered by its own 3 existing tests, already re-confirmed in Step 0 — this is the full-suite confirmation that nothing else regressed), typecheck clean on all three configs.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/electron/main.ts renderer/src/App.tsx
+git add src/orchestration/authJobRunner.ts src/electron/main.ts renderer/src/App.tsx
 git commit -m "feat: chain the search phase after a successful auth in start-job"
 ```
 
