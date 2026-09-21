@@ -34,4 +34,10 @@ describe('isSessionExpiredPage', () => {
     const text = 'Your session in the client area\nhas expired.';
     expect(isSessionExpiredPage(url, text)).toBe(true);
   });
+
+  it('returns true for the real "Unauthorized Page" redirect (page=NoAuthorizationPage), confirmed live 2026-09-21', () => {
+    const url = 'https://tntenders.gov.in/nicgep/app?page=NoAuthorizationPage&service=page';
+    const text = 'Unauthorized Page\n \nYou are attempting to access an unauthorized area..\n \n« Click here to Re-Login »';
+    expect(isSessionExpiredPage(url, text)).toBe(true);
+  });
 });
