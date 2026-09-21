@@ -52,4 +52,14 @@ describe('StateTransitionRepository', () => {
     expect(rows[0].occurred_at >= before).toBe(true);
     expect(rows[0].occurred_at <= after).toBe(true);
   });
+
+  it('deleteFor removes every transition for that entity, leaving other entities untouched', () => {
+    repo.record('JOB', 'job-1', null, 'SCHEDULED');
+    repo.record('JOB', 'job-2', null, 'SCHEDULED');
+
+    repo.deleteFor('JOB', 'job-1');
+
+    expect(repo.listFor('JOB', 'job-1')).toHaveLength(0);
+    expect(repo.listFor('JOB', 'job-2')).toHaveLength(1);
+  });
 });

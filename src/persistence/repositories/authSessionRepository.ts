@@ -50,6 +50,16 @@ export class AuthSessionRepository {
       .get(jobId) as AuthSessionRow | undefined;
   }
 
+  listAllForJob(jobId: string): AuthSessionRow[] {
+    return this.db
+      .prepare('SELECT * FROM auth_sessions WHERE job_id = ? ORDER BY created_at ASC, rowid ASC')
+      .all(jobId) as unknown as AuthSessionRow[];
+  }
+
+  deleteAllForJob(jobId: string): void {
+    this.db.prepare('DELETE FROM auth_sessions WHERE job_id = ?').run(jobId);
+  }
+
   /** @internal Use AuthStateMachine.transition() instead — calling this directly skips transition validation and the audit-log write. */
   updateState(id: string, state: AuthState): void {
     this.db

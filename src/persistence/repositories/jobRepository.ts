@@ -58,6 +58,10 @@ export class JobRepository {
       .run(state, new Date().toISOString(), id);
   }
 
+  delete(id: string): void {
+    this.db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
+  }
+
   findIncomplete(): JobRow | undefined {
     const placeholders = TERMINAL_STATES.map(() => '?').join(', ');
     return this.db

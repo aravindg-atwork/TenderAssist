@@ -1,7 +1,8 @@
 // renderer/src/components/JobList.tsx
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type MouseEvent } from 'react';
 import type { JobListItem } from '../../../src/electron/ipcTypes';
 import { StatePill } from './StatePill';
+import { TrashIcon } from './icons';
 
 export interface JobListProps {
   onSelectJob: (jobId: string) => void;
@@ -43,6 +44,18 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
     }
   };
 
+  const handleDelete = async (event: MouseEvent, jobId: string) => {
+    event.stopPropagation();
+    if (!window.confirm('Delete this job and its history? This cannot be undone.')) return;
+    setError(null);
+    try {
+      await window.tenderAssist.deleteJob(jobId);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <div>
       <div className="list-header">
@@ -65,6 +78,7 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
               <th>Auth state</th>
               <th>Created</th>
               <th>Updated</th>
+              <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -79,6 +93,18 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
                 </td>
                 <td>{job.createdAt}</td>
                 <td>{job.updatedAt}</td>
+                <td className="col-actions">
+                  {job.jobId !== activeJobId && (
+                    <button
+                      className="icon-btn icon-btn-danger"
+                      title="Delete job"
+                      aria-label="Delete job"
+                      onClick={(event) => handleDelete(event, job.jobId)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

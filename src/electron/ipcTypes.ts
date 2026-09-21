@@ -27,5 +27,6 @@ export interface TenderAssistApi {
   listJobs(): Promise<JobListItem[]>;
   startJob(): Promise<{ jobId: string }>;
   getJobDetail(jobId: string): Promise<JobDetail>;
+  deleteJob(jobId: string): Promise<void>;
   onJobUpdate(callback: (update: AuthJobUpdate) => void): () => void;
 }

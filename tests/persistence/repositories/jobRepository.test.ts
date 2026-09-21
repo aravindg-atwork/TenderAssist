@@ -60,4 +60,15 @@ describe('JobRepository', () => {
     const all = repo.listAll();
     expect(all.map((j) => j.id)).toEqual([second.id, first.id]);
   });
+
+  it('delete removes the job', () => {
+    const job = repo.create();
+    repo.delete(job.id);
+
+    expect(repo.getById(job.id)).toBeUndefined();
+  });
+
+  it('delete is a no-op for an unknown id', () => {
+    expect(() => repo.delete('does-not-exist')).not.toThrow();
+  });
 });

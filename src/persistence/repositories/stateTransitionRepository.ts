@@ -45,4 +45,10 @@ export class StateTransitionRepository {
       )
       .all(entityType, entityId) as unknown as StateTransitionRow[];
   }
+
+  deleteFor(entityType: string, entityId: string): void {
+    this.db
+      .prepare('DELETE FROM state_transitions WHERE entity_type = ? AND entity_id = ?')
+      .run(entityType, entityId);
+  }
 }

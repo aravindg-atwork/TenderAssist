@@ -6,6 +6,7 @@ const api: TenderAssistApi = {
   listJobs: () => ipcRenderer.invoke('list-jobs'),
   startJob: () => ipcRenderer.invoke('start-job'),
   getJobDetail: (jobId) => ipcRenderer.invoke('get-job-detail', jobId),
+  deleteJob: (jobId) => ipcRenderer.invoke('delete-job', jobId),
   onJobUpdate: (callback) => {
     const listener = (_event: IpcRendererEvent, update: AuthJobUpdate) => callback(update);
     ipcRenderer.on('job-updated', listener);

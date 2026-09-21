@@ -3,7 +3,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync } from 'node:fs';
-import { createDatabase } from '../persistence/db.js';
+import { createDatabase, withTransaction } from '../persistence/db.js';
 import { runMigrations } from '../persistence/migrate.js';
 import { JobRepository } from '../persistence/repositories/jobRepository.js';
 import { AuthSessionRepository } from '../persistence/repositories/authSessionRepository.js';
@@ -71,6 +71,20 @@ ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
     jobTransitions: transitions.listFor('JOB', jobId),
     authTransitions: session ? transitions.listFor('AUTH_SESSION', session.id) : [],
   };
+});
+
+ipcMain.handle('delete-job', (_event, jobId: string): void => {
+  if (jobId === activeJobId) {
+    throw new Error('Cannot delete a job that is currently running.');
+  }
+  withTransaction(db, () => {
+    transitions.deleteFor('JOB', jobId);
+    for (const session of sessions.listAllForJob(jobId)) {
+      transitions.deleteFor('AUTH_SESSION', session.id);
+    }
+    sessions.deleteAllForJob(jobId);
+    jobs.delete(jobId);
+  });
 });
 
 ipcMain.handle('start-job', async () => {

@@ -71,4 +71,28 @@ describe('AuthSessionRepository', () => {
   it('rejects an auth session for a non-existent job (foreign key)', () => {
     expect(() => repo.create('no-such-job')).toThrow();
   });
+
+  it('listAllForJob returns every session for that job, in creation order', () => {
+    const first = repo.create(jobId);
+    const second = repo.create(jobId);
+
+    const all = repo.listAllForJob(jobId);
+    expect(all.map((s) => s.id)).toEqual([first.id, second.id]);
+  });
+
+  it('listAllForJob returns an empty array when the job has no sessions', () => {
+    const otherJobId = jobs.create().id;
+    expect(repo.listAllForJob(otherJobId)).toEqual([]);
+  });
+
+  it('deleteAllForJob removes every session for that job, leaving other jobs untouched', () => {
+    const session = repo.create(jobId);
+    const otherJobId = jobs.create().id;
+    const otherSession = repo.create(otherJobId);
+
+    repo.deleteAllForJob(jobId);
+
+    expect(repo.getById(session.id)).toBeUndefined();
+    expect(repo.getById(otherSession.id)).toBeDefined();
+  });
 });
