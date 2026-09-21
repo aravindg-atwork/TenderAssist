@@ -1,6 +1,7 @@
 // renderer/src/components/JobDetail.tsx
 import { useEffect, useState } from 'react';
 import type { AuthJobUpdate, JobDetail as JobDetailData } from '../../../src/electron/ipcTypes';
+import { StatePill } from './StatePill';
 
 export interface JobDetailProps {
   jobId: string;
@@ -42,8 +43,10 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
   if (error) {
     return (
       <div>
-        <button onClick={onBack}>&larr; Back to jobs</button>
-        <p style={{ color: 'red' }}>Failed to load job: {error}</p>
+        <button className="btn-link detail-back" onClick={onBack}>
+          &larr; Jobs
+        </button>
+        <p className="error-text">Failed to load job: {error}</p>
       </div>
     );
   }
@@ -51,49 +54,87 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
   if (!detail) {
     return (
       <div>
-        <button onClick={onBack}>&larr; Back to jobs</button>
+        <button className="btn-link detail-back" onClick={onBack}>
+          &larr; Jobs
+        </button>
         <p>Loading...</p>
       </div>
     );
   }
 
-  const bannerColor =
-    latestUpdate?.outcome === 'SUCCESS' ? 'green' : latestUpdate?.outcome === 'ABORTED' ? 'red' : 'gray';
+  const bannerClass =
+    latestUpdate?.outcome === 'SUCCESS'
+      ? 'banner banner-success'
+      : latestUpdate?.outcome === 'ABORTED'
+        ? 'banner banner-error'
+        : 'banner';
 
   return (
     <div>
-      <button onClick={onBack}>&larr; Back to jobs</button>
-      <h1>Job {detail.jobId.slice(0, 8)}</h1>
+      <button className="btn-link detail-back" onClick={onBack}>
+        &larr; Jobs
+      </button>
+      <div className="detail-header">
+        <h1>Job {detail.jobId.slice(0, 8)}</h1>
+      </div>
+
       {latestUpdate?.outcome && (
-        <p style={{ color: bannerColor, fontWeight: 'bold' }}>
-          {latestUpdate.outcome}
-          {latestUpdate.abortReason ? `: ${latestUpdate.abortReason}` : ''}
-        </p>
+        <div className={bannerClass}>
+          <span className="banner__outcome">{latestUpdate.outcome}</span>
+          {latestUpdate.abortReason && <span>{latestUpdate.abortReason}</span>}
+        </div>
       )}
-      <p>
-        Job state: <strong>{detail.jobState}</strong>
-      </p>
-      <p>
-        Auth state: <strong>{detail.authState ?? '—'}</strong>
-      </p>
 
-      <h2>Job transitions</h2>
-      <ul>
-        {detail.jobTransitions.map((t) => (
-          <li key={t.id}>
-            {t.from_state ?? '(start)'} &rarr; {t.to_state} — {t.reason ?? ''} ({t.occurred_at})
-          </li>
-        ))}
-      </ul>
+      <div className="detail-meta">
+        <div className="detail-meta__item">
+          <span className="detail-meta__label">Job state</span>
+          <StatePill state={detail.jobState} />
+        </div>
+        <div className="detail-meta__item">
+          <span className="detail-meta__label">Auth state</span>
+          <StatePill state={detail.authState} />
+        </div>
+      </div>
 
-      <h2>Auth session transitions</h2>
-      <ul>
-        {detail.authTransitions.map((t) => (
-          <li key={t.id}>
-            {t.from_state ?? '(start)'} &rarr; {t.to_state} — {t.reason ?? ''} ({t.occurred_at})
-          </li>
-        ))}
-      </ul>
+      <div className="detail-columns">
+        <div>
+          <h2>Job transitions</h2>
+          {detail.jobTransitions.length === 0 ? (
+            <p className="timeline-empty">No transitions yet.</p>
+          ) : (
+            <ul className="timeline">
+              {detail.jobTransitions.map((t) => (
+                <li key={t.id}>
+                  <div className="timeline__transition">
+                    {t.from_state ?? '(start)'} &rarr; {t.to_state}
+                  </div>
+                  {t.reason && <div className="timeline__reason">{t.reason}</div>}
+                  <div className="timeline__time">{t.occurred_at}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div>
+          <h2>Auth session transitions</h2>
+          {detail.authTransitions.length === 0 ? (
+            <p className="timeline-empty">No transitions yet.</p>
+          ) : (
+            <ul className="timeline">
+              {detail.authTransitions.map((t) => (
+                <li key={t.id}>
+                  <div className="timeline__transition">
+                    {t.from_state ?? '(start)'} &rarr; {t.to_state}
+                  </div>
+                  {t.reason && <div className="timeline__reason">{t.reason}</div>}
+                  <div className="timeline__time">{t.occurred_at}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

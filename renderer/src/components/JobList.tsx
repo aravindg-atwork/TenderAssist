@@ -1,6 +1,7 @@
 // renderer/src/components/JobList.tsx
 import { useCallback, useEffect, useState } from 'react';
 import type { JobListItem } from '../../../src/electron/ipcTypes';
+import { StatePill } from './StatePill';
 
 export interface JobListProps {
   onSelectJob: (jobId: string) => void;
@@ -44,33 +45,45 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
 
   return (
     <div>
-      <h1>Jobs</h1>
-      <button onClick={handleStart} disabled={starting || activeJobId !== null}>
-        {activeJobId ? 'Job running…' : 'Start new job'}
-      </button>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      <table>
-        <thead>
-          <tr>
-            <th>Job ID</th>
-            <th>Job State</th>
-            <th>Auth State</th>
-            <th>Created</th>
-            <th>Updated</th>
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.map((job) => (
-            <tr key={job.jobId} onClick={() => onSelectJob(job.jobId)} style={{ cursor: 'pointer' }}>
-              <td>{job.jobId.slice(0, 8)}</td>
-              <td>{job.jobState}</td>
-              <td>{job.authState ?? '—'}</td>
-              <td>{job.createdAt}</td>
-              <td>{job.updatedAt}</td>
+      <div className="list-header">
+        <h1>Jobs</h1>
+        <button className="btn btn-primary" onClick={handleStart} disabled={starting || activeJobId !== null}>
+          {activeJobId ? 'Job running…' : 'Start new job'}
+        </button>
+      </div>
+      {error && <p className="error-text">{error}</p>}
+      {jobs.length === 0 ? (
+        <div className="data-table">
+          <p className="empty-state">No jobs yet. Start one to begin.</p>
+        </div>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Job state</th>
+              <th>Auth state</th>
+              <th>Created</th>
+              <th>Updated</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {jobs.map((job) => (
+              <tr key={job.jobId} onClick={() => onSelectJob(job.jobId)}>
+                <td className="job-id">{job.jobId.slice(0, 8)}</td>
+                <td>
+                  <StatePill state={job.jobState} />
+                </td>
+                <td>
+                  <StatePill state={job.authState} />
+                </td>
+                <td>{job.createdAt}</td>
+                <td>{job.updatedAt}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

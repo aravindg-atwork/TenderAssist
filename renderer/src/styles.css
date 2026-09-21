@@ -1,0 +1,371 @@
+/* TenderAssist renderer -- shared styles.
+   One accent color, used only for the primary action and links/hover;
+   everything else stays neutral so the accent keeps its meaning. */
+
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --border: #e2e4e8;
+  --text: #1a1d23;
+  --text-muted: #6b7280;
+  --accent: #3454d1;
+  --accent-hover: #2a44ad;
+
+  --state-pending-bg: #fef3c7;
+  --state-pending-fg: #b45309;
+  --state-success-bg: #dcfce7;
+  --state-success-fg: #15803d;
+  --state-error-bg: #fee2e2;
+  --state-error-fg: #b91c1c;
+  --state-neutral-bg: #f3f4f6;
+  --state-neutral-fg: #4b5563;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+  font-size: 13px;
+}
+
+a,
+.link-button {
+  color: var(--accent);
+}
+
+/* ---------- App shell ---------- */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.app-topbar__title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.app-main {
+  flex: 1;
+  padding: 24px;
+  max-width: 1040px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+  background: #c7cee8;
+  cursor: default;
+}
+
+.btn-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.btn-link:hover {
+  color: var(--text);
+}
+
+/* ---------- Job list table ---------- */
+
+.list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.list-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.data-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tbody tr {
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+.data-table tbody tr:hover {
+  background: #f5f6fa;
+}
+
+.data-table td.job-id {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.empty-state {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* ---------- State pill ---------- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pill-pending {
+  background: var(--state-pending-bg);
+  color: var(--state-pending-fg);
+}
+
+.pill-success {
+  background: var(--state-success-bg);
+  color: var(--state-success-fg);
+}
+
+.pill-error {
+  background: var(--state-error-bg);
+  color: var(--state-error-fg);
+}
+
+.pill-neutral {
+  background: var(--state-neutral-bg);
+  color: var(--state-neutral-fg);
+}
+
+/* ---------- Job detail ---------- */
+
+.detail-back {
+  margin-bottom: 16px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.detail-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.detail-meta {
+  display: flex;
+  gap: 24px;
+  margin: 16px 0 24px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.detail-meta__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-meta__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border-radius: 6px;
+  background: var(--state-neutral-bg);
+  color: var(--state-neutral-fg);
+  font-size: 13px;
+}
+
+.banner-success {
+  background: var(--state-success-bg);
+  color: var(--state-success-fg);
+}
+
+.banner-error {
+  background: var(--state-error-bg);
+  color: var(--state-error-fg);
+}
+
+.banner__outcome {
+  font-weight: 700;
+}
+
+.error-text {
+  color: var(--state-error-fg);
+}
+
+.detail-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+@media (max-width: 720px) {
+  .detail-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.detail-columns h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--border);
+}
+
+.timeline li {
+  position: relative;
+  padding-left: 20px;
+  padding-bottom: 16px;
+}
+
+.timeline li:last-child {
+  padding-bottom: 0;
+}
+
+.timeline li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+}
+
+.timeline__transition {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.timeline__reason {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.timeline__time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.timeline-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+}

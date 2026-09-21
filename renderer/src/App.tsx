@@ -18,14 +18,22 @@ export function App() {
     return unsubscribe;
   }, []);
 
-  if (selectedJobId) {
-    return <JobDetail jobId={selectedJobId} onBack={() => setSelectedJobId(null)} />;
-  }
   return (
-    <JobList
-      onSelectJob={setSelectedJobId}
-      activeJobId={activeJobId}
-      onActiveJobChange={setActiveJobId}
-    />
+    <div className="app-shell">
+      <header className="app-topbar">
+        <span className="app-topbar__title">TenderAssist</span>
+      </header>
+      <main className="app-main">
+        {selectedJobId ? (
+          <JobDetail jobId={selectedJobId} onBack={() => setSelectedJobId(null)} />
+        ) : (
+          <JobList
+            onSelectJob={setSelectedJobId}
+            activeJobId={activeJobId}
+            onActiveJobChange={setActiveJobId}
+          />
+        )}
+      </main>
+    </div>
   );
 }
