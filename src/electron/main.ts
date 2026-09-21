@@ -76,6 +76,8 @@ ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
     authState: session?.state ?? null,
     jobTransitions: transitions.listFor('JOB', jobId),
     authTransitions: session ? transitions.listFor('AUTH_SESSION', session.id) : [],
+    tenders: tenders.listForJob(jobId),
+    searches: searches.listForJob(jobId),
   };
 });
 

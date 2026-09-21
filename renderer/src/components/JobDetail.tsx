@@ -135,6 +135,34 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
           )}
         </div>
       </div>
+
+      {detail.tenders.length > 0 && (
+        <div>
+          <h2>Tenders found ({detail.tenders.length})</h2>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Tender ID</th>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Value (₹)</th>
+                <th>Favorited</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.tenders.map((t) => (
+                <tr key={t.id}>
+                  <td className="job-id">{t.tender_portal_id ?? t.tender_ref}</td>
+                  <td>{t.title}</td>
+                  <td>{t.product_category}</td>
+                  <td>{t.value_in_rupees}</td>
+                  <td>{t.favorited ? 'Yes' : 'No'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
