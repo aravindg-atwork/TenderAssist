@@ -21,6 +21,7 @@ describe('TenderRepository', () => {
     closingDate: '2026-09-25T15:00:00+05:30',
     openingDate: '2026-09-28T16:00:00+05:30',
     productCategory: 'Computer- S/W',
+    valueInRupees: 'NA',
     ...overrides,
   });
 
@@ -62,5 +63,21 @@ describe('TenderRepository', () => {
     repo.upsert(baseInput({ tenderRef: 'ref-2' }));
     const list = repo.listForJob(jobId);
     expect(list.map((t) => t.tender_ref)).toEqual(['ref-1', 'ref-2']);
+  });
+
+  it('upsert stores value_in_rupees and defaults favorited to false', () => {
+    const tender = repo.upsert(baseInput({ valueInRupees: '1,50,000' }));
+    expect(tender.value_in_rupees).toBe('1,50,000');
+    expect(tender.favorited).toBe(0);
+    expect(tender.favorited_at).toBeNull();
+  });
+
+  it('markFavorited sets favorited and favorited_at', () => {
+    const tender = repo.upsert(baseInput());
+    repo.markFavorited(tender.id, '2026-09-21T06:00:00.000Z');
+
+    const fetched = repo.findByJobAndRef(jobId, tender.tender_ref)!;
+    expect(fetched.favorited).toBe(1);
+    expect(fetched.favorited_at).toBe('2026-09-21T06:00:00.000Z');
   });
 });

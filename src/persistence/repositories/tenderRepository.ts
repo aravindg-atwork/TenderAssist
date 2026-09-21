@@ -12,6 +12,9 @@ export interface TenderRow {
   closing_date: string | null;
   opening_date: string | null;
   product_category: string;
+  value_in_rupees: string;
+  favorited: 0 | 1;
+  favorited_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -26,6 +29,7 @@ export interface CreateTenderInput {
   closingDate: string | null;
   openingDate: string | null;
   productCategory: string;
+  valueInRupees: string;
 }
 
 export class TenderRepository {
@@ -47,13 +51,16 @@ export class TenderRepository {
       closing_date: input.closingDate,
       opening_date: input.openingDate,
       product_category: input.productCategory,
+      value_in_rupees: input.valueInRupees,
+      favorited: 0,
+      favorited_at: null,
       created_at: now,
       updated_at: now,
     };
     this.db
       .prepare(
-        `INSERT INTO tenders (id, job_id, tender_ref, tender_portal_id, title, organisation_chain, published_date, closing_date, opening_date, product_category, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO tenders (id, job_id, tender_ref, tender_portal_id, title, organisation_chain, published_date, closing_date, opening_date, product_category, value_in_rupees, favorited, favorited_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         row.id,
@@ -66,6 +73,9 @@ export class TenderRepository {
         row.closing_date,
         row.opening_date,
         row.product_category,
+        row.value_in_rupees,
+        row.favorited,
+        row.favorited_at,
         row.created_at,
         row.updated_at
       );
@@ -82,5 +92,11 @@ export class TenderRepository {
     return this.db
       .prepare('SELECT * FROM tenders WHERE job_id = ? ORDER BY created_at ASC, rowid ASC')
       .all(jobId) as unknown as TenderRow[];
+  }
+
+  markFavorited(id: string, favoritedAt: string): void {
+    this.db
+      .prepare('UPDATE tenders SET favorited = 1, favorited_at = ?, updated_at = ? WHERE id = ?')
+      .run(favoritedAt, new Date().toISOString(), id);
   }
 }
