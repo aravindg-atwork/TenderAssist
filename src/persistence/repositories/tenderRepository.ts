@@ -15,6 +15,10 @@ export interface TenderRow {
   value_in_rupees: string;
   favorited: 0 | 1;
   favorited_at: string | null;
+  detail_product_category: string | null;
+  tender_category: string | null;
+  detail_text: string | null;
+  detail_reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +34,14 @@ export interface CreateTenderInput {
   openingDate: string | null;
   productCategory: string;
   valueInRupees: string;
+}
+
+export interface TenderDetailInput {
+  organisationChain: string | null;
+  publishedDate: string | null;
+  productCategory: string | null;
+  tenderCategory: string | null;
+  detailText: string;
 }
 
 export class TenderRepository {
@@ -54,6 +66,10 @@ export class TenderRepository {
       value_in_rupees: input.valueInRupees,
       favorited: 0,
       favorited_at: null,
+      detail_product_category: null,
+      tender_category: null,
+      detail_text: null,
+      detail_reviewed_at: null,
       created_at: now,
       updated_at: now,
     };
@@ -98,5 +114,35 @@ export class TenderRepository {
     this.db
       .prepare('UPDATE tenders SET favorited = 1, favorited_at = ?, updated_at = ? WHERE id = ?')
       .run(favoritedAt, new Date().toISOString(), id);
+  }
+
+  updateDetail(id: string, input: TenderDetailInput): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE tenders SET
+           organisation_chain = COALESCE(?, organisation_chain),
+           published_date = ?,
+           detail_product_category = ?,
+           tender_category = ?,
+           detail_text = ?,
+           detail_reviewed_at = ?,
+           updated_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        input.organisationChain,
+        input.publishedDate,
+        input.productCategory,
+        input.tenderCategory,
+        input.detailText,
+        now,
+        now,
+        id
+      );
+  }
+
+  deleteForJob(jobId: string): void {
+    this.db.prepare('DELETE FROM tenders WHERE job_id = ?').run(jobId);
   }
 }

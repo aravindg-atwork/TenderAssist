@@ -111,6 +111,27 @@ a,
   cursor: default;
 }
 
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--state-neutral-bg);
+}
+
+.btn-secondary:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid rgba(52, 84, 209, 0.24);
+  outline-offset: 2px;
+}
+
 .btn-link {
   appearance: none;
   background: none;
@@ -161,30 +182,6 @@ a,
   font-size: 18px;
   font-weight: 600;
   margin: 0;
-}
-
-.start-job-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.start-job-controls__date {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.start-job-controls__date input[type='date'] {
-  font-family: inherit;
-  font-size: 13px;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
 }
 
 .data-table {
@@ -312,6 +309,40 @@ a,
   color: var(--text-muted);
 }
 
+.run-config-summary {
+  margin: -8px 0 24px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.run-config-summary summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.run-config-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-top: 14px;
+}
+
+.run-config-summary__grid h3 {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.run-config-summary__grid p {
+  margin: 0;
+  font-size: 13px;
+}
+
 .banner {
   display: flex;
   flex-direction: column;
@@ -350,6 +381,10 @@ a,
 
 @media (max-width: 720px) {
   .detail-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .run-config-summary__grid {
     grid-template-columns: 1fr;
   }
 }
@@ -420,4 +455,171 @@ a,
 .timeline-empty {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* ---------- Run setup dialog ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(26, 29, 35, 0.45);
+}
+
+.setup-dialog {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(17, 24, 39, 0.22);
+}
+
+.setup-dialog__header,
+.setup-dialog__body,
+.setup-dialog__footer {
+  padding: 20px 24px;
+}
+
+.setup-dialog__header {
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-dialog__header h2 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+.setup-dialog__header p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+}
+
+.setup-dialog__body {
+  display: grid;
+  gap: 20px;
+}
+
+.setup-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.form-field {
+  display: grid;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.form-field input,
+.chip-entry input {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.form-field input[type='date'] {
+  width: min(240px, 100%);
+}
+
+.setup-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.setup-fieldset legend {
+  padding: 0;
+  font-weight: 600;
+}
+
+.field-helper {
+  margin: 4px 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 4px 5px 4px 10px;
+  border: 1px solid #d7dbeb;
+  border-radius: 999px;
+  background: #f4f6ff;
+  color: #263b93;
+  font-size: 12px;
+}
+
+.chip > span {
+  overflow-wrap: anywhere;
+}
+
+.chip__remove {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chip__remove:hover {
+  background: rgba(52, 84, 209, 0.12);
+}
+
+.chip-entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.form-error {
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .setup-dialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .setup-dialog__header,
+  .setup-dialog__body,
+  .setup-dialog__footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .chip-entry {
+    grid-template-columns: 1fr;
+  }
 }

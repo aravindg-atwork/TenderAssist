@@ -15,12 +15,12 @@ export function App() {
     const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
       // The auth phase's own SUCCESS is no longer the end of the run -- the
       // search phase continues automatically on the same job. Only treat
-      // the run as over on a genuine failure (any phase), or the search
-      // phase's own terminal SUCCESS (phase: 'SEARCH').
+      // the run as over on a genuine failure (any phase), or the
+      // classification phase's own terminal SUCCESS.
       const runOver =
         update.outcome === 'TIMEOUT' ||
         update.outcome === 'ABORTED' ||
-        (update.outcome === 'SUCCESS' && update.phase === 'SEARCH');
+        (update.outcome === 'SUCCESS' && update.phase === 'CLASSIFICATION');
       setActiveJobId(runOver ? null : update.jobId);
     });
     return unsubscribe;

@@ -22,7 +22,7 @@ export interface AuthJobUpdate {
   authState: AuthState;
   outcome?: 'SUCCESS' | 'TIMEOUT' | 'ABORTED';
   abortReason?: string;
-  phase?: 'AUTH' | 'SEARCH';
+  phase?: 'AUTH' | 'SEARCH' | 'CLASSIFICATION';
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;

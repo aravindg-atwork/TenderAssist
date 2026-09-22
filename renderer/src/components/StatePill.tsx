@@ -1,10 +1,11 @@
-const SUCCESS_STATES = new Set(['AUTHENTICATED', 'COMPLETE', 'SUCCESS']);
+const SUCCESS_STATES = new Set(['AUTHENTICATED', 'COMPLETE', 'SUCCESS', 'KEEP']);
 const ERROR_STATES = new Set([
   'SESSION_EXPIRED',
   'TAB_LOST',
   'FAILED_RETRYABLE',
   'FAILED_MANUAL',
   'ABORTED',
+  'REJECT',
 ]);
 
 function pillVariant(state: string): 'success' | 'error' | 'pending' {

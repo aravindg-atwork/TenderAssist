@@ -1,8 +1,10 @@
 // renderer/src/components/JobList.tsx
-import { useCallback, useEffect, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import type { JobListItem } from '../../../src/electron/ipcTypes';
+import type { RunConfiguration, RunDefaults } from '../../../src/config/runConfiguration';
 import { StatePill } from './StatePill';
 import { TrashIcon } from './icons';
+import { RunSetupDialog } from './RunSetupDialog';
 
 export interface JobListProps {
   onSelectJob: (jobId: string) => void;
@@ -22,7 +24,9 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchDate, setSearchDate] = useState(todayIso);
+  const [runDefaults, setRunDefaults] = useState<RunDefaults | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const startButtonRef = useRef<HTMLButtonElement>(null);
 
   const refresh = useCallback(() => {
     window.tenderAssist
@@ -33,24 +37,34 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
 
   useEffect(() => {
     refresh();
+    window.tenderAssist
+      .getRunDefaults()
+      .then(setRunDefaults)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
       if (update.outcome) refresh();
     });
     return unsubscribe;
   }, [refresh]);
 
-  const handleStart = async () => {
+  const handleStart = async (config: RunConfiguration) => {
     setStarting(true);
     setError(null);
     try {
-      const { jobId } = await window.tenderAssist.startJob(searchDate);
+      const { jobId } = await window.tenderAssist.startJob(config);
       onActiveJobChange(jobId);
+      setSetupOpen(false);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setStarting(false);
     }
+  };
+
+  const closeSetup = () => {
+    setSetupOpen(false);
+    requestAnimationFrame(() => startButtonRef.current?.focus());
   };
 
   const handleDelete = async (event: MouseEvent, jobId: string) => {
@@ -69,21 +83,14 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
     <div>
       <div className="list-header">
         <h1>Jobs</h1>
-        <div className="start-job-controls">
-          <label className="start-job-controls__date">
-            Published on
-            <input
-              type="date"
-              value={searchDate}
-              max={todayIso()}
-              disabled={starting || activeJobId !== null}
-              onChange={(event) => setSearchDate(event.target.value)}
-            />
-          </label>
-          <button className="btn btn-primary" onClick={handleStart} disabled={starting || activeJobId !== null}>
-            {activeJobId ? 'Job running…' : 'Start new job'}
-          </button>
-        </div>
+        <button
+          ref={startButtonRef}
+          className="btn btn-primary"
+          onClick={() => setSetupOpen(true)}
+          disabled={starting || activeJobId !== null || !runDefaults}
+        >
+          {activeJobId ? 'Job running…' : 'Start new job'}
+        </button>
       </div>
       {error && <p className="error-text">{error}</p>}
       {jobs.length === 0 ? (
@@ -130,6 +137,15 @@ export function JobList({ onSelectJob, activeJobId, onActiveJobChange }: JobList
             ))}
           </tbody>
         </table>
+      )}
+      {setupOpen && runDefaults && (
+        <RunSetupDialog
+          defaults={runDefaults}
+          today={todayIso()}
+          submitting={starting}
+          onCancel={closeSetup}
+          onSubmit={handleStart}
+        />
       )}
     </div>
   );

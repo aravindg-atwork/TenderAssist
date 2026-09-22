@@ -10,15 +10,19 @@ import { AuthSessionRepository } from '../persistence/repositories/authSessionRe
 import { StateTransitionRepository } from '../persistence/repositories/stateTransitionRepository.js';
 import { SearchRepository } from '../persistence/repositories/searchRepository.js';
 import { TenderRepository } from '../persistence/repositories/tenderRepository.js';
+import { RunConfigurationRepository } from '../persistence/repositories/runConfigurationRepository.js';
+import { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
 import { launchChrome, waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
+import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
 import type { Page } from 'playwright-core';
 import type { JobListItem, JobDetail } from './ipcTypes.js';
+import { normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +33,8 @@ const sessions = new AuthSessionRepository(db);
 const transitions = new StateTransitionRepository(db);
 const searches = new SearchRepository(db);
 const tenders = new TenderRepository(db);
+const runConfigurations = new RunConfigurationRepository(db);
+const classifications = new ClassificationRepository(db);
 const jobMachine = new JobStateMachine(db, jobs, transitions);
 const authMachine = new AuthStateMachine(db, sessions, transitions);
 
@@ -66,6 +72,8 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
   });
 });
 
+ipcMain.handle('get-run-defaults', () => runConfigurations.getDefaults());
+
 ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
   const job = jobs.getById(jobId);
   if (!job) throw new Error(`Job not found: ${jobId}`);
@@ -77,8 +85,13 @@ ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
     authState: session?.state ?? null,
     jobTransitions: transitions.listFor('JOB', jobId),
     authTransitions: session ? transitions.listFor('AUTH_SESSION', session.id) : [],
-    tenders: tenders.listForJob(jobId),
+    tenders: tenders.listForJob(jobId).map((tender) => ({
+      ...tender,
+      classification: classifications.getFinalForTender(tender.id),
+      classificationGates: classifications.listForTender(tender.id),
+    })),
     searches: searches.listForJob(jobId),
+    runConfiguration: runConfigurations.getForJob(jobId) ?? null,
   };
 });
 
@@ -92,20 +105,37 @@ ipcMain.handle('delete-job', (_event, jobId: string): void => {
       transitions.deleteFor('AUTH_SESSION', session.id);
     }
     sessions.deleteAllForJob(jobId);
+    classifications.deleteForJob(jobId);
+    tenders.deleteForJob(jobId);
+    searches.deleteForJob(jobId);
+    runConfigurations.deleteForJob(jobId);
     jobs.delete(jobId);
   });
 });
 
-ipcMain.handle('start-job', async (_event, searchDateIso?: string) => {
+ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) => {
   if (activeJobId) {
     throw new Error('A job is already running. Wait for it to finish before starting another.');
   }
   activeJobId = 'pending'; // synchronous claim -- closes the guard atomically, before any await
 
+  let config: RunConfiguration;
+  try {
+    config = normalizeRunConfiguration(requestedConfig);
+    runConfigurations.saveDefaults(config);
+  } catch (error) {
+    activeJobId = null;
+    throw error;
+  }
+
   // Append a local-midnight time so "YYYY-MM-DD" parses as the calendar day
   // the person actually picked, not UTC midnight (which rolls back a day in
-  // any timezone ahead of UTC). Falls back to today when omitted.
-  const searchDate = searchDateIso ? new Date(`${searchDateIso}T00:00:00`) : new Date();
+  // any timezone ahead of UTC).
+  const searchDate = new Date(`${config.searchDate}T00:00:00`);
+  const configuredSearches = config.productCategories.map((productCategory, index) => ({
+    searchKey: `search_${index + 1}`,
+    productCategory,
+  }));
 
   const profileDir = join(getAppDataDir(), 'chrome-profile');
   mkdirSync(profileDir, { recursive: true });
@@ -143,6 +173,7 @@ ipcMain.handle('start-job', async (_event, searchDateIso?: string) => {
       if (!jobIdCaptured) {
         jobIdCaptured = true;
         activeJobId = update.jobId;
+        runConfigurations.saveForJob(update.jobId, config);
         resolveStarted(update.jobId);
       }
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
@@ -151,7 +182,8 @@ ipcMain.handle('start-job', async (_event, searchDateIso?: string) => {
       capturedPage = page;
       stopWatchingSessionLoss = stop;
     }
-  ).then(async (authResult) => {
+  )
+  .then(async (authResult) => {
     if (authResult.outcome !== 'SUCCESS' || !capturedPage) return authResult;
 
     return runSearchPhase(
@@ -162,7 +194,23 @@ ipcMain.handle('start-job', async (_event, searchDateIso?: string) => {
       (update) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
       },
-      searchDate
+      searchDate,
+      configuredSearches
+    );
+  })
+  .then(async (searchResult) => {
+    if (searchResult.phase !== 'SEARCH' || searchResult.outcome !== 'SUCCESS' || !capturedPage) {
+      return searchResult;
+    }
+    return runClassificationPhase(
+      { jobs, sessions, jobMachine, tenders, classifications },
+      capturedPage,
+      searchResult.jobId,
+      searchResult.authSessionId,
+      config,
+      (update) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
+      }
     );
   });
 

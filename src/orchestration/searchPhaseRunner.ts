@@ -8,6 +8,7 @@ import type { TenderRepository } from '../persistence/repositories/tenderReposit
 import { CONFIGURED_SEARCHES } from '../search/searchConfig.js';
 import { searchCategory, favoriteAllVisibleRows } from '../browser/searchFormController.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
+import type { ConfiguredSearch } from '../search/searchConfig.js';
 
 export interface SearchPhaseDeps {
   jobs: JobRepository;
@@ -30,7 +31,8 @@ export async function runSearchPhase(
   jobId: string,
   authSessionId: string,
   onUpdate: (update: AuthJobUpdate) => void,
-  searchDate: Date = new Date()
+  searchDate: Date = new Date(),
+  configuredSearches: ConfiguredSearch[] = CONFIGURED_SEARCHES
 ): Promise<AuthJobUpdate> {
   const { jobs, sessions, jobMachine, searches, tenders } = deps;
 
@@ -50,7 +52,7 @@ export async function runSearchPhase(
 
   const targetDate = formatDdMmYyyy(searchDate);
 
-  for (const config of CONFIGURED_SEARCHES) {
+  for (const config of configuredSearches) {
     const existing = searches.findByJobAndKey(jobId, config.searchKey);
     const search = existing ?? searches.create(jobId, config.searchKey, config.productCategory);
     if (search.state === 'COMPLETE') continue;

@@ -86,4 +86,8 @@ export class SearchRepository {
       )
       .get(jobId) as SearchRow | undefined;
   }
+
+  deleteForJob(jobId: string): void {
+    this.db.prepare('DELETE FROM searches WHERE job_id = ?').run(jobId);
+  }
 }

@@ -94,7 +94,33 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
           <span className="detail-meta__label">Auth state</span>
           <StatePill state={detail.authState} />
         </div>
+        {detail.runConfiguration && (
+          <div className="detail-meta__item">
+            <span className="detail-meta__label">Published date</span>
+            <span>{detail.runConfiguration.searchDate}</span>
+          </div>
+        )}
       </div>
+
+      {detail.runConfiguration && (
+        <details className="run-config-summary">
+          <summary>Run intent and categories</summary>
+          <div className="run-config-summary__grid">
+            <div>
+              <h3>Product categories</h3>
+              <p>{detail.runConfiguration.productCategories.join(', ')}</p>
+            </div>
+            <div>
+              <h3>Intent keywords</h3>
+              <p>{detail.runConfiguration.keywords.join(', ')}</p>
+            </div>
+            <div>
+              <h3>Excluded scope</h3>
+              <p>{detail.runConfiguration.excludedKeywords.join(', ') || 'None'}</p>
+            </div>
+          </div>
+        </details>
+      )}
 
       <div className="detail-columns">
         <div>
@@ -147,6 +173,8 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
                 <th>Category</th>
                 <th>Value (₹)</th>
                 <th>Favorited</th>
+                <th>Detail reviewed</th>
+                <th>Intent decision</th>
               </tr>
             </thead>
             <tbody>
@@ -157,6 +185,8 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
                   <td>{t.product_category}</td>
                   <td>{t.value_in_rupees}</td>
                   <td>{t.favorited ? 'Yes' : 'No'}</td>
+                  <td>{t.detail_reviewed_at ? 'Yes' : 'No'}</td>
+                  <td><StatePill state={t.classification} /></td>
                 </tr>
               ))}
             </tbody>

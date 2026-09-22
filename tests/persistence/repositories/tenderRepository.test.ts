@@ -80,4 +80,20 @@ describe('TenderRepository', () => {
     expect(fetched.favorited).toBe(1);
     expect(fetched.favorited_at).toBe('2026-09-21T06:00:00.000Z');
   });
+
+  it('stores detail-page evidence separately from the search-result category', () => {
+    const tender = repo.upsert(baseInput({ productCategory: 'Miscellaneous Services' }));
+    repo.updateDetail(tender.id, {
+      organisationChain: 'IT Department',
+      publishedDate: '2026-09-21T10:00:00+05:30',
+      productCategory: 'Information Technology',
+      tenderCategory: 'Services',
+      detailText: 'Development of a web application',
+    });
+
+    const fetched = repo.findByJobAndRef(jobId, tender.tender_ref)!;
+    expect(fetched.product_category).toBe('Miscellaneous Services');
+    expect(fetched.detail_product_category).toBe('Information Technology');
+    expect(fetched.detail_reviewed_at).not.toBeNull();
+  });
 });

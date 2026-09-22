@@ -5,6 +5,16 @@ import type { StateTransitionRow } from '../persistence/repositories/stateTransi
 import type { AuthJobUpdate } from '../orchestration/authJobRunner.js';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { SearchRow } from '../persistence/repositories/searchRepository.js';
+import type { RunConfiguration, RunDefaults } from '../config/runConfiguration.js';
+import type {
+  ClassificationGateRow,
+  FinalClassification,
+} from '../persistence/repositories/classificationRepository.js';
+
+export interface TenderDetailItem extends TenderRow {
+  classification: FinalClassification;
+  classificationGates: ClassificationGateRow[];
+}
 
 export interface JobListItem {
   jobId: string;
@@ -21,16 +31,17 @@ export interface JobDetail {
   authState: AuthState | null;
   jobTransitions: StateTransitionRow[];
   authTransitions: StateTransitionRow[];
-  tenders: TenderRow[];
+  tenders: TenderDetailItem[];
   searches: SearchRow[];
+  runConfiguration: RunConfiguration | null;
 }
 
 export type { AuthJobUpdate };
 
 export interface TenderAssistApi {
   listJobs(): Promise<JobListItem[]>;
-  /** searchDate: "YYYY-MM-DD" (native <input type="date"> format). Omit for today. */
-  startJob(searchDate?: string): Promise<{ jobId: string }>;
+  getRunDefaults(): Promise<RunDefaults>;
+  startJob(config: RunConfiguration): Promise<{ jobId: string }>;
   getJobDetail(jobId: string): Promise<JobDetail>;
   deleteJob(jobId: string): Promise<void>;
   onJobUpdate(callback: (update: AuthJobUpdate) => void): () => void;
