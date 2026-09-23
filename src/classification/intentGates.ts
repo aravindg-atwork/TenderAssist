@@ -17,7 +17,10 @@ function matchingTerms(text: string, terms: string[]): string[] {
   const haystack = ` ${normalized(text)} `;
   return terms.filter((term) => {
     const needle = normalized(term);
-    return needle.length > 0 && haystack.includes(` ${needle} `);
+    if (!needle) return false;
+    if (haystack.includes(` ${needle} `)) return true;
+    const tokens = needle.split(' ');
+    return tokens.length > 1 && tokens.every((token) => haystack.includes(` ${token} `));
   });
 }
 

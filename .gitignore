@@ -1,6 +1,7 @@
 node_modules/
 dist/
 renderer/dist/
+release/
 *.db
 *.db-journal
 *.db-wal

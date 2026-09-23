@@ -3,6 +3,8 @@ import { CONFIGURED_SEARCHES } from '../search/searchConfig.js';
 export interface RunConfiguration {
   /** Native date-input format. */
   searchDate: string;
+  /** Defaults to Tamil Nadu for jobs created before multi-portal support. */
+  portalId?: string;
   productCategories: string[];
   keywords: string[];
   excludedKeywords: string[];
@@ -68,5 +70,6 @@ export function normalizeRunConfiguration(input: RunConfiguration): RunConfigura
   }
   const parsed = new Date(`${input.searchDate}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) throw new Error('Search date is invalid.');
-  return { searchDate: input.searchDate, ...normalizeRunDefaults(input) };
+  const portalId = typeof input.portalId === 'string' && input.portalId.trim() ? input.portalId.trim() : 'tamil-nadu';
+  return { searchDate: input.searchDate, portalId, ...normalizeRunDefaults(input) };
 }

@@ -240,9 +240,13 @@ describe.skipIf(!CHROME_PATH)('runAuthJob', { timeout: 60_000 }, () => {
     expect(result.jobState).toBe('AUTHENTICATED');
     expect(result.authState).toBe('AUTHENTICATED');
 
-    const authStates = updates.map((u) => u.authState);
-    for (let i = 1; i < authStates.length; i += 1) {
-      expect(authStates[i]).not.toBe(authStates[i - 1]);
+    // "Duplicate" means no meaningful change at all -- assisted login can
+    // legitimately emit several consecutive updates that share the same
+    // coarse authState (e.g. AUTH_PENDING) while authStep progresses
+    // (OPENING_PORTAL -> LOGIN_REQUIRED), so the full update is what must
+    // differ, not just the authState field.
+    for (let i = 1; i < updates.length; i += 1) {
+      expect(updates[i]).not.toEqual(updates[i - 1]);
     }
     expect(updates.at(-1)?.outcome).toBe('SUCCESS');
   });

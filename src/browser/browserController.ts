@@ -1,12 +1,23 @@
 /// <reference lib="dom" />
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { isSessionExpiredPage } from './sessionExpiredDetector.js';
+import {
+  finalizeDscDownload,
+  isTrustedDscDownload,
+  type DscDownloadCandidate,
+  type DscJnlpArtifact,
+} from './dscDownloadSecurity.js';
 
 export type SessionLossReason = 'TAB_CLOSED' | 'TARGET_DESTROYED' | 'SESSION_EXPIRED_PAGE';
 
 export interface BrowserControllerOptions {
   cdpEndpoint: string;
+  targetUrlPrefix?: string;
   onSessionLost: (reason: SessionLossReason) => void;
+  dscDownloadDirectory?: string;
+  onDscJnlpReady?: (artifact: DscJnlpArtifact) => void;
 }
 
 export class BrowserController {
@@ -19,9 +30,20 @@ export class BrowserController {
 
   async attach(): Promise<{ targetId: string }> {
     this.browser = await chromium.connectOverCDP(this.options.cdpEndpoint);
-    const context: BrowserContext = this.browser.contexts()[0] ?? (await this.browser.newContext());
-    const existingPages = context.pages();
-    this.page = existingPages.length > 0 ? existingPages[0] : await context.newPage();
+    const contexts = this.browser.contexts();
+    let context: BrowserContext;
+    if (this.options.targetUrlPrefix) {
+      const match = contexts
+        .flatMap((candidateContext) => candidateContext.pages().map((page) => ({ candidateContext, page })))
+        .find(({ page }) => page.url().startsWith(this.options.targetUrlPrefix!));
+      if (!match) throw new Error('The embedded TN Tenders page could not be found. Close the job and try again.');
+      context = match.candidateContext;
+      this.page = match.page;
+    } else {
+      context = contexts[0] ?? (await this.browser.newContext());
+      const existingPages = context.pages();
+      this.page = existingPages.length > 0 ? existingPages[0] : await context.newPage();
+    }
 
     const pageCdp: CDPSession = await context.newCDPSession(this.page);
     const targetInfo = await pageCdp.send('Target.getTargetInfo');
@@ -34,14 +56,42 @@ export class BrowserController {
     });
 
     const browserCdp = await this.browser.newBrowserCDPSession();
-    // Playwright's CDP session hijacks downloads by default (Browser.setDownloadBehavior
-    // 'allowAndName', writing to its own temp dir under a GUID filename with no
-    // extension) so it can fire page.on('download') events -- nothing in this
-    // codebase listens for those. TN Tenders' DSC login flow depends on a real,
-    // correctly-named signData.jnlp landing in the browser's normal downloads so
-    // Windows can open it via Java Web Start; without this override the human
-    // never gets an openable file. 'default' restores native per-profile behavior.
-    await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'default' });
+    const { dscDownloadDirectory } = this.options;
+    if (dscDownloadDirectory) {
+      mkdirSync(dscDownloadDirectory, { recursive: true });
+      const candidates = new Map<string, DscDownloadCandidate>();
+      await browserCdp.send('Browser.setDownloadBehavior', {
+        behavior: 'allowAndName',
+        downloadPath: dscDownloadDirectory,
+        eventsEnabled: true,
+      });
+      browserCdp.on('Browser.downloadWillBegin', (event) => {
+        const candidate = {
+          sourceUrl: event.url,
+          suggestedFilename: event.suggestedFilename,
+        };
+        if (isTrustedDscDownload(candidate)) candidates.set(event.guid, candidate);
+      });
+      browserCdp.on('Browser.downloadProgress', (event) => {
+        const candidate = candidates.get(event.guid);
+        if (!candidate || event.state === 'inProgress') return;
+        candidates.delete(event.guid);
+        if (event.state !== 'completed') return;
+        try {
+          const artifact = finalizeDscDownload(
+            join(dscDownloadDirectory, event.guid),
+            dscDownloadDirectory,
+            candidate
+          );
+          if (artifact) this.options.onDscJnlpReady?.(artifact);
+        } catch {
+          // Invalid, missing, or inaccessible downloads remain inert. They are
+          // never opened automatically and never surfaced as signer artifacts.
+        }
+      });
+    } else {
+      await browserCdp.send('Browser.setDownloadBehavior', { behavior: 'default' });
+    }
     await browserCdp.send('Target.setDiscoverTargets', { discover: true });
     browserCdp.on('Target.targetDestroyed', (event) => {
       if (event.targetId === this.targetId) {

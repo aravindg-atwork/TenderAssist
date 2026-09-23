@@ -89,11 +89,13 @@ describe('TenderRepository', () => {
       productCategory: 'Information Technology',
       tenderCategory: 'Services',
       detailText: 'Development of a web application',
+      documentLinks: [{ url: 'https://tntenders.gov.in/nicgep/file.pdf', fileName: 'Tender notice.pdf' }],
     });
 
     const fetched = repo.findByJobAndRef(jobId, tender.tender_ref)!;
     expect(fetched.product_category).toBe('Miscellaneous Services');
     expect(fetched.detail_product_category).toBe('Information Technology');
     expect(fetched.detail_reviewed_at).not.toBeNull();
+    expect(JSON.parse(fetched.document_links_json)).toHaveLength(1);
   });
 });

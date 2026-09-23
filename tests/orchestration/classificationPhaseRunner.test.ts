@@ -18,7 +18,16 @@ import { runClassificationPhase } from '../../src/orchestration/classificationPh
 import { CHROME_PATH } from '../support/chrome.js';
 import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
-const MY_TENDERS_HTML = `<html><body>
+const MY_TENDERS_PAGE_1_HTML = `<html><body>
+  <h1>My Tenders</h1>
+  <table>
+    <tr><td>Tender ID</td><td>Tender Title</td><td>Favorite</td></tr>
+    <tr><td>2026_OTHER_1</td><td>Unrelated tender</td><td>Already reviewed</td></tr>
+  </table>
+  <a href="/my?page=2" title="Next page">Next</a>
+</body></html>`;
+
+const MY_TENDERS_PAGE_2_HTML = `<html><body>
   <h1>My Tenders</h1>
   <table>
     <tr><td>Tender ID</td><td>Tender Title</td><td>Favorite</td></tr>
@@ -95,7 +104,8 @@ describe.skipIf(!CHROME_PATH)('runClassificationPhase', { timeout: 30_000 }, () 
     tenders.markFavorited(tender.id, new Date().toISOString());
 
     server = http.createServer((req, res) => {
-      if (req.url === '/my') res.end(MY_TENDERS_HTML);
+      if (req.url === '/my') res.end(MY_TENDERS_PAGE_1_HTML);
+      else if (req.url === '/my?page=2') res.end(MY_TENDERS_PAGE_2_HTML);
       else if (req.url === '/detail') res.end(DETAIL_HTML);
       else res.end('<html><body><a href="/my">My Tenders</a></body></html>');
     });

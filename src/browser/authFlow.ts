@@ -4,16 +4,26 @@ import type { AuthStateMachine } from '../state/authStateMachine.js';
 import { BrowserController, type SessionLossReason } from './browserController.js';
 import { isAuthenticatedDashboard } from './authDetector.js';
 import { isSessionExpiredPage } from './sessionExpiredDetector.js';
+import { preparePortalLogin, refillVisiblePortalLogin, type AssistedLoginStep, type PortalCredentials } from './portalLoginController.js';
+import type { DscJnlpArtifact } from './dscDownloadSecurity.js';
+import { detectPortalAuthIssue, type PortalAuthIssue } from './portalAuthIssueDetector.js';
+import { clickDscLoginIfAvailable } from './dscLoginController.js';
+import type { PaceAction } from '../orchestration/actionPacer.js';
 
 export interface AuthFlowDeps {
   sessions: AuthSessionRepository;
   machine: AuthStateMachine;
   onAuthSessionLost?: (reason: SessionLossReason, terminalState: 'TAB_LOST' | 'SESSION_EXPIRED') => void;
+  dscDownloadDirectory?: string;
+  onDscJnlpReady?: (artifact: DscJnlpArtifact) => void;
+  targetUrlPrefix?: string;
+  paceAction?: PaceAction;
 }
 
 export class AuthFlow {
   private controller: BrowserController | undefined;
   private authSessionId: string | undefined;
+  private dscLoginStarted = false;
 
   constructor(private deps: AuthFlowDeps) {}
 
@@ -23,7 +33,10 @@ export class AuthFlow {
 
     this.controller = new BrowserController({
       cdpEndpoint,
+      targetUrlPrefix: this.deps.targetUrlPrefix,
       onSessionLost: (reason) => this.handleSessionLost(reason),
+      dscDownloadDirectory: this.deps.dscDownloadDirectory,
+      onDscJnlpReady: this.deps.onDscJnlpReady,
     });
     const { targetId } = await this.controller.attach();
 
@@ -50,6 +63,31 @@ export class AuthFlow {
 
     this.deps.machine.transition(this.authSessionId, 'AUTHENTICATED', 'dashboard indicators detected');
     return true;
+  }
+
+  async prepareLogin(credentials?: PortalCredentials): Promise<AssistedLoginStep> {
+    if (!this.controller) throw new Error('AuthFlow.start() must be called before prepareLogin()');
+    return preparePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction);
+  }
+
+  async refillVisibleLogin(credentials: PortalCredentials): Promise<boolean> {
+    if (!this.controller) throw new Error('AuthFlow.start() must be called before refillVisibleLogin()');
+    const refilled = await refillVisiblePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction);
+    if (refilled) this.dscLoginStarted = false;
+    return refilled;
+  }
+
+  async detectAuthIssue(): Promise<PortalAuthIssue | null> {
+    if (!this.controller) throw new Error('AuthFlow.start() must be called before detectAuthIssue()');
+    return detectPortalAuthIssue(await this.controller.extractPageText());
+  }
+
+  async startDscLoginIfAvailable(): Promise<boolean> {
+    if (!this.controller) throw new Error('AuthFlow.start() must be called before startDscLoginIfAvailable()');
+    if (this.dscLoginStarted) return false;
+    const started = await clickDscLoginIfAvailable(this.controller.getPage(), this.deps.paceAction);
+    if (started) this.dscLoginStarted = true;
+    return started;
   }
 
   getPage(): Page {

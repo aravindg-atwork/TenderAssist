@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  root: __dirname,
+  root: import.meta.dirname,
   // Relative asset paths -- required for the built index.html to load
   // correctly under Electron's file:// protocol via loadFile(). Without
   // this, Vite emits absolute "/assets/..." paths that resolve against the

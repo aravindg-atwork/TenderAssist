@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import http, { type Server } from 'node:http';
 import { chromium } from 'playwright-core';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
-import { searchCategory, favoriteAllVisibleRows } from '../../src/browser/searchFormController.js';
+import { searchCategory, favoriteAllVisibleRows, favoriteVisibleRows } from '../../src/browser/searchFormController.js';
 import { CHROME_PATH } from '../support/chrome.js';
 import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
@@ -37,7 +37,7 @@ function resultsHtml(rows: Array<{ id: string; title: string; ref: string; categ
         <td>${r.ref}</td>
         <td>${r.category}</td>
         <td>${r.value}</td>
-        <td><input type="checkbox" name="Checkbox" id="Checkbox"></td>
+        <td><input type="checkbox" name="Checkbox" id="Checkbox" value="${r.ref}"></td>
       </tr>`
     )
     .join('');
@@ -84,14 +84,17 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
   let chromeProc: ReturnType<typeof launchChrome>;
   let cdpPort: number;
   let currentRows: Array<{ id: string; title: string; ref: string; category: string; value: string }> = [];
+  let lastFavoriteBody = '';
 
   beforeEach(async () => {
     currentRows = [];
+    lastFavoriteBody = '';
     server = http.createServer((req, res) => {
       if (req.url?.startsWith('/results')) {
         res.end(resultsHtml(currentRows));
       } else if (req.url?.startsWith('/favorited')) {
-        res.end('<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>');
+        req.on('data', (chunk) => { lastFavoriteBody += chunk.toString(); });
+        req.on('end', () => res.end('<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>'));
       } else {
         res.end(SEARCH_FORM_HTML);
       }
@@ -180,5 +183,21 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
 
     expect(count).toBe(0);
     expect(page.url()).not.toContain('/favorited');
+  });
+
+  it('favoriteVisibleRows submits only the title-screened tender references', async () => {
+    currentRows = [
+      { id: 'id-1', title: 'Office chairs', ref: 'ref-reject', category: 'Information Technology', value: 'NA' },
+      { id: 'id-2', title: 'Citizen web application', ref: 'ref-keep', category: 'Information Technology', value: 'NA' },
+    ];
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/results`);
+
+    const selected = await favoriteVisibleRows(page, ['ref-keep']);
+
+    expect(selected).toEqual(['ref-keep']);
+    expect(lastFavoriteBody).toContain('ref-keep');
+    expect(lastFavoriteBody).not.toContain('ref-reject');
   });
 });

@@ -2,6 +2,9 @@
 // src/browser/searchFormController.ts
 import type { Page, Dialog } from 'playwright-core';
 import { parseActiveTenderRow, type ParsedActiveTenderRow } from '../search/activeTenderRowParser.js';
+import type { PaceAction } from '../orchestration/actionPacer.js';
+
+const noPacing: PaceAction = async () => {};
 
 /**
  * Runs one category's search: clicks back to Search Active Tenders (a real
@@ -15,12 +18,17 @@ import { parseActiveTenderRow, type ParsedActiveTenderRow } from '../search/acti
 export async function searchCategory(
   page: Page,
   productCategory: string,
-  fromToDateDdMmYyyy: string
+  fromToDateDdMmYyyy: string,
+  paceAction: PaceAction = noPacing
 ): Promise<ParsedActiveTenderRow[]> {
+  await paceAction();
   await page.click('text=Search Active Tenders');
   await page.waitForSelector('#ProductCategory');
+  await paceAction();
   await page.selectOption('#ProductCategory', { label: productCategory });
+  await paceAction();
   await page.selectOption('#dateCriteria', { label: 'Published Date' });
+  await paceAction();
   await page.evaluate((date) => {
     const from = document.getElementById('fromDate') as HTMLInputElement | null;
     const to = document.getElementById('toDate') as HTMLInputElement | null;
@@ -28,6 +36,7 @@ export async function searchCategory(
     if (to) to.value = date;
   }, fromToDateDdMmYyyy);
 
+  await paceAction();
   await page.click('#submit');
   await page.waitForLoadState('load').catch(() => {});
 
@@ -70,7 +79,7 @@ export async function searchCategory(
  * register (observed as a real, if rare, failure mode elsewhere in this
  * codebase's live testing).
  */
-export async function favoriteAllVisibleRows(page: Page): Promise<number> {
+export async function favoriteAllVisibleRows(page: Page, paceAction: PaceAction = noPacing): Promise<number> {
   const checkboxes = page.locator('input[type=checkbox]');
   const total = await checkboxes.count();
   if (total === 0) return 0;
@@ -87,6 +96,7 @@ export async function favoriteAllVisibleRows(page: Page): Promise<number> {
   let checkedCount = 0;
   for (let i = 0; i < total; i += 1) {
     const checkbox = checkboxes.nth(i);
+    await paceAction();
     let isChecked = false;
     for (let attempt = 0; attempt < 3 && !isChecked; attempt += 1) {
       await checkbox.check({ force: true }).catch(() => {});
@@ -100,9 +110,42 @@ export async function favoriteAllVisibleRows(page: Page): Promise<number> {
     void dialog.dismiss();
   };
   page.on('dialog', onDialog);
+  await paceAction();
   await page.click('#save');
   await page.waitForLoadState('load').catch(() => {});
   page.off('dialog', onDialog);
 
   return checkedCount;
+}
+
+/** Selects only the identified result rows, preserving scarce My Tenders slots. */
+export async function favoriteVisibleRows(
+  page: Page,
+  tenderReferences: string[],
+  paceAction: PaceAction = noPacing
+): Promise<string[]> {
+  const checkedReferences: string[] = [];
+  for (const reference of tenderReferences) {
+    const row = page.locator('tr').filter({ hasText: reference }).last();
+    if ((await row.count()) === 0) continue;
+    const checkbox = row.locator('input[type=checkbox]').first();
+    if ((await checkbox.count()) === 0) continue;
+
+    await paceAction();
+    let isChecked = false;
+    for (let attempt = 0; attempt < 3 && !isChecked; attempt += 1) {
+      await checkbox.check({ force: true }).catch(() => {});
+      isChecked = await checkbox.isChecked().catch(() => false);
+    }
+    if (isChecked) checkedReferences.push(reference);
+  }
+  if (checkedReferences.length === 0) return [];
+
+  const onDialog = (dialog: Dialog) => { void dialog.dismiss(); };
+  page.on('dialog', onDialog);
+  await paceAction();
+  await page.click('#save');
+  await page.waitForLoadState('load').catch(() => {});
+  page.off('dialog', onDialog);
+  return checkedReferences;
 }

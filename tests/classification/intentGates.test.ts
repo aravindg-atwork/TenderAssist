@@ -15,6 +15,15 @@ describe('intent gates', () => {
     expect(evaluateIntentKeywords('Supply of office chairs', ['software development']).result).toBe('REJECT');
   });
 
+  it('matches a multi-word intent when portal wording changes the word order', () => {
+    const result = evaluateIntentKeywords(
+      'The scope covers development, implementation, and support of custom software.',
+      ['software development']
+    );
+    expect(result.result).toBe('PASS');
+    expect(result.matchedTerms).toEqual(['software development']);
+  });
+
   it('rejects excluded primary-scope terms', () => {
     const result = evaluateExcludedScope('Annual Maintenance Contract for desktop computer', [
       'AMC',

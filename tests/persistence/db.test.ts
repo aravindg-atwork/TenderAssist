@@ -1,9 +1,9 @@
 // tests/persistence/db.test.ts
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDatabase, withTransaction } from '../../src/persistence/db.js';
+import { createDatabase, quarantineStaleSharedMemory, withTransaction } from '../../src/persistence/db.js';
 
 describe('createDatabase', () => {
   let tempDirs: string[] = [];
@@ -34,6 +34,24 @@ describe('createDatabase', () => {
     const mode = db.prepare('PRAGMA journal_mode').get() as { journal_mode: string };
     expect(mode.journal_mode).toBe('wal');
     db.close();
+  });
+
+  it('quarantines a stale SQLite shared-memory file without losing database data', () => {
+    const base = mkdtempSync(join(tmpdir(), 'tenderassist-db-'));
+    tempDirs.push(base);
+    const dbPath = join(base, 'tenderassist.db');
+
+    const original = createDatabase(dbPath);
+    original.exec("CREATE TABLE t (value TEXT); INSERT INTO t VALUES ('preserved')");
+    original.close();
+    writeFileSync(`${dbPath}-shm`, Buffer.alloc(32_768, 0x7f));
+
+    expect(quarantineStaleSharedMemory(dbPath, new Date('2026-09-23T10:00:00.000Z')))
+      .toBe(`${dbPath}-shm.stale-2026-09-23T10-00-00.000Z`);
+    const recovered = createDatabase(dbPath);
+    expect(recovered.prepare('SELECT value FROM t').get()).toEqual({ value: 'preserved' });
+    recovered.close();
+    expect(readdirSync(base).some((name) => name.startsWith('tenderassist.db-shm.stale-'))).toBe(true);
   });
 });
 

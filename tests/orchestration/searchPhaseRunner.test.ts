@@ -12,6 +12,7 @@ import { AuthSessionRepository } from '../../src/persistence/repositories/authSe
 import { StateTransitionRepository } from '../../src/persistence/repositories/stateTransitionRepository.js';
 import { SearchRepository } from '../../src/persistence/repositories/searchRepository.js';
 import { TenderRepository } from '../../src/persistence/repositories/tenderRepository.js';
+import { ClassificationRepository } from '../../src/persistence/repositories/classificationRepository.js';
 import { JobStateMachine } from '../../src/state/jobStateMachine.js';
 import { AuthStateMachine } from '../../src/state/authStateMachine.js';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
@@ -78,6 +79,7 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
   let authMachine: AuthStateMachine;
   let searches: SearchRepository;
   let tenders: TenderRepository;
+  let classifications: ClassificationRepository;
   let jobId: string;
   let authSessionId: string;
   let server: Server;
@@ -98,6 +100,7 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
     authMachine = new AuthStateMachine(db, sessions, transitions);
     searches = new SearchRepository(db);
     tenders = new TenderRepository(db);
+    classifications = new ClassificationRepository(db);
 
     const job = jobs.create();
     jobId = job.id;
@@ -148,11 +151,14 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
 
     const updates: AuthJobUpdate[] = [];
     const result = await runSearchPhase(
-      { jobs, sessions, jobMachine, searches, tenders },
+      { jobs, sessions, jobMachine, searches, tenders, classifications },
       page,
       jobId,
       authSessionId,
-      (u) => updates.push(u)
+      (u) => updates.push(u),
+      new Date(),
+      undefined,
+      { keywords: ['title'], excludedKeywords: [] }
     );
 
     expect(result.outcome).toBe('SUCCESS');
@@ -180,12 +186,14 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
 
     const explicitDate = new Date(2026, 8, 19); // 19 September 2026 (JS months are 0-indexed)
     await runSearchPhase(
-      { jobs, sessions, jobMachine, searches, tenders },
+      { jobs, sessions, jobMachine, searches, tenders, classifications },
       page,
       jobId,
       authSessionId,
       () => {},
-      explicitDate
+      explicitDate,
+      undefined,
+      { keywords: ['title'], excludedKeywords: [] }
     );
 
     expect(submittedDates).toHaveLength(7);

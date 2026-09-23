@@ -1,6 +1,8 @@
 {
   "name": "tenderassist",
-  "version": "0.1.0",
+  "version": "0.3.2",
+  "description": "Desktop automation for finding and shortlisting relevant government tenders",
+  "author": "TenderAssist",
   "private": true,
   "type": "module",
   "main": "dist/electron/main.js",
@@ -11,9 +13,14 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p renderer/tsconfig.json",
     "verify:auth": "node dist/scripts/manualAuthVerification.js",
     "renderer:build": "vite build --config renderer/vite.config.ts",
-    "electron": "npm run build && npm run renderer:build && electron ."
+    "electron": "npm run build && npm run renderer:build && electron .",
+    "package": "npm run build && npm run renderer:build && electron-builder --dir",
+    "dist:win": "npm run build && npm run renderer:build && electron-builder --win nsis --x64",
+    "dist:mac": "npm run build && npm run renderer:build && electron-builder --mac dmg --x64 --arm64"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
+    "exceljs": "^4.4.0",
     "playwright-core": "^1.63.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
@@ -24,8 +31,67 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "electron": "^44.4.2",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.7.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  },
+  "build": {
+    "appId": "in.tenderassist.desktop",
+    "productName": "TenderAssist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "renderer/dist/**/*",
+      "src/persistence/migrations/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "aravindg-atwork",
+        "repo": "TenderAssist"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "TenderAssist-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "TenderAssist"
+    },
+    "mac": {
+      "category": "public.app-category.business",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "TenderAssist-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "TenderAssist ${version}"
+    }
   }
 }

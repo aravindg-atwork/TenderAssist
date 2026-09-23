@@ -5,13 +5,15 @@ import type { TenderRepository } from '../persistence/repositories/tenderReposit
 import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
-import { navigateToMyTenders, reviewTenderFromMyTenders } from '../browser/myTendersController.js';
+import { navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
 import { evaluateIntentKeywords, evaluateExcludedScope } from '../classification/intentGates.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
+import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
+import type { PaceAction } from './actionPacer.js';
 
-const CLASSIFIER_VERSION = 'deterministic-detail-v1';
+const CLASSIFIER_VERSION = 'deterministic-detail-v2';
 
 export interface ClassificationPhaseDeps {
   jobs: JobRepository;
@@ -19,6 +21,8 @@ export interface ClassificationPhaseDeps {
   jobMachine: JobStateMachine;
   tenders: TenderRepository;
   classifications: ClassificationRepository;
+  signal?: AbortSignal;
+  paceAction?: PaceAction;
 }
 
 function sameCategory(actual: string, configured: string): boolean {
@@ -31,7 +35,8 @@ export async function runClassificationPhase(
   jobId: string,
   authSessionId: string,
   config: RunConfiguration,
-  onUpdate: (update: AuthJobUpdate) => void
+  onUpdate: (update: AuthJobUpdate) => void,
+  portalStateName?: string
 ): Promise<AuthJobUpdate> {
   const { jobs, sessions, jobMachine, tenders, classifications } = deps;
   const snapshot = (outcome?: 'SUCCESS' | 'ABORTED', abortReason?: string): AuthJobUpdate => ({
@@ -44,6 +49,15 @@ export async function runClassificationPhase(
     phase: 'CLASSIFICATION',
   });
 
+  const cancelled = (): AuthJobUpdate => {
+    markJobCancelled(jobs, jobMachine, jobId);
+    const final = snapshot('ABORTED', USER_CANCELLED_REASON);
+    onUpdate(final);
+    return final;
+  };
+
+  if (isCancellationRequested(deps.signal)) return cancelled();
+
   onUpdate(snapshot());
   const currentJobTenders = tenders.listForJob(jobId).filter((tender) => tender.favorited === 1);
   if (currentJobTenders.length === 0) {
@@ -54,8 +68,10 @@ export async function runClassificationPhase(
   }
 
   try {
-    await navigateToMyTenders(page);
+    await navigateToMyTenders(page, deps.paceAction);
+    if (isCancellationRequested(deps.signal)) return cancelled();
   } catch (error) {
+    if (isCancellationRequested(deps.signal)) return cancelled();
     if (jobs.getById(jobId)?.state === 'CLASSIFYING') {
       jobMachine.transition(jobId, 'FAILED_RETRYABLE', 'could not open My Tenders for classification');
     }
@@ -65,20 +81,40 @@ export async function runClassificationPhase(
   }
 
   const evaluatedAgainst = `${config.searchDate}T23:59:59+05:30`;
+  const reviewBatch = await reviewTendersFromMyTenders(page, currentJobTenders, 100, deps.paceAction);
+  if (isCancellationRequested(deps.signal)) return cancelled();
   for (const tender of currentJobTenders) {
+    if (isCancellationRequested(deps.signal)) return cancelled();
     try {
-      const detail = await reviewTenderFromMyTenders(page, tender);
+      const detail = reviewBatch.reviewed.get(tender.id);
+      if (!detail) throw reviewBatch.errors.get(tender.id) ?? new Error('Tender detail review did not return a result.');
       const publishedDate = detail.publishedDateRaw ? parseTenderPortalDate(detail.publishedDateRaw) : null;
-      const detailProductCategory = detail.productCategories[0] ?? null;
+      const actualCategories = detail.productCategories.length > 0
+        ? detail.productCategories
+        : [tender.product_category].filter(Boolean);
+      const detailProductCategory = actualCategories[0] ?? null;
       tenders.updateDetail(tender.id, {
         organisationChain: detail.organisationChain,
+        department: detail.department ?? detail.organisationChain?.split('||').map((part) => part.trim()).find(Boolean) ?? null,
+        stateName: detail.stateName ?? portalStateName ?? null,
         publishedDate,
         productCategory: detailProductCategory,
         tenderCategory: detail.tenderCategory,
         detailText: detail.bodyText,
+        documentLinks: detail.documentLinks,
       });
 
-      const g1 = evaluateGate1(publishedDate, evaluatedAgainst, 7);
+      const g1 = publishedDate
+        ? evaluateGate1(publishedDate, evaluatedAgainst, 7)
+        : {
+            result: 'PASS' as const,
+            reason_code: 'SEARCH_DATE_FILTER_MATCH',
+            published_at: null,
+            evaluated_against: evaluatedAgainst,
+            age_days: 0,
+            max_age_days: 7,
+            search_date: config.searchDate,
+          };
       classifications.saveGate({
         tenderId: tender.id,
         gate: 'G1',
@@ -88,19 +124,21 @@ export async function runClassificationPhase(
         classifierVersion: CLASSIFIER_VERSION,
       });
 
-      const matchedCategories = detail.productCategories.filter((actual) =>
+      const matchedCategories = actualCategories.filter((actual) =>
         config.productCategories.some((configured) => sameCategory(actual, configured))
       );
       classifications.saveGate({
         tenderId: tender.id,
         gate: 'G2',
         result: matchedCategories.length > 0 ? 'PASS' : 'REJECT',
-        reasonCode: matchedCategories.length > 0 ? 'PRODUCT_CATEGORY_MATCH' : 'PRODUCT_CATEGORY_MISMATCH',
-        evidence: { actual: detail.productCategories, configured: config.productCategories, matched: matchedCategories },
+        reasonCode: matchedCategories.length > 0
+          ? detail.productCategories.length > 0 ? 'PRODUCT_CATEGORY_MATCH' : 'SEARCH_RESULT_CATEGORY_MATCH'
+          : 'PRODUCT_CATEGORY_MISMATCH',
+        evidence: { actual: actualCategories, configured: config.productCategories, matched: matchedCategories },
         classifierVersion: CLASSIFIER_VERSION,
       });
 
-      const g3 = evaluateIntentKeywords(detail.bodyText, config.keywords);
+      const g3 = evaluateIntentKeywords(`${tender.title} ${detail.bodyText}`, config.keywords);
       classifications.saveGate({
         tenderId: tender.id,
         gate: 'G3',
@@ -136,6 +174,7 @@ export async function runClassificationPhase(
     onUpdate(snapshot());
   }
 
+  if (isCancellationRequested(deps.signal)) return cancelled();
   const authState = sessions.getById(authSessionId)!.state;
   if (authState === 'TAB_LOST' || authState === 'SESSION_EXPIRED') {
     const final = snapshot('ABORTED', `auth session reached terminal state ${authState} during classification`);

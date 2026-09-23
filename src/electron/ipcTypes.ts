@@ -10,10 +10,54 @@ import type {
   ClassificationGateRow,
   FinalClassification,
 } from '../persistence/repositories/classificationRepository.js';
+import type { PublishingSettings } from '../persistence/repositories/publishingSettingsRepository.js';
+import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow, ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
+import type { UpdateStatus } from './updateService.js';
+import type { PreflightReport } from '../system/preflight.js';
+import type { AutomationPacingSettings } from '../persistence/repositories/automationSettingsRepository.js';
+
+export interface RunSettingsState {
+  defaults: RunDefaults;
+  configured: boolean;
+}
+
+export interface PortalCredentialSettings {
+  loginId: string;
+  hasSavedPassword: boolean;
+  encryptionAvailable: boolean;
+}
+
+export interface RunHistorySummary {
+  recentRunDates: string[];
+  missedDates: string[];
+}
+
+export interface SavePortalCredentialInput {
+  loginId: string;
+  password?: string;
+  rememberPassword: boolean;
+}
+
+export interface PortalBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface TenderDetailItem extends TenderRow {
   classification: FinalClassification;
   classificationGates: ClassificationGateRow[];
+  manualReview: TenderReviewRow | null;
+  effectiveClassification: 'KEEP' | 'REJECT' | 'UNCERTAIN' | 'NOT_RUN';
+  documents: TenderDocumentRow[];
+  requirements: TenderRequirementRow | null;
+}
+
+export interface RecoveryJob {
+  jobId: string;
+  state: JobState;
+  config: RunConfiguration;
 }
 
 export interface JobListItem {
@@ -22,6 +66,8 @@ export interface JobListItem {
   authState: AuthState | null;
   createdAt: string;
   updatedAt: string;
+  portalId: string;
+  searchDate: string | null;
 }
 
 export interface JobDetail {
@@ -40,7 +86,32 @@ export type { AuthJobUpdate };
 
 export interface TenderAssistApi {
   listJobs(): Promise<JobListItem[]>;
-  getRunDefaults(): Promise<RunDefaults>;
+  getRunSettings(): Promise<RunSettingsState>;
+  saveRunSettings(defaults: RunDefaults): Promise<RunSettingsState>;
+  getPortalCredentialSettings(portalId: string): Promise<PortalCredentialSettings>;
+  savePortalCredentials(portalId: string, input: SavePortalCredentialInput): Promise<PortalCredentialSettings>;
+  getPublishingSettings(portalId: string): Promise<PublishingSettings>;
+  savePublishingSettings(portalId: string, settings: PublishingSettings): Promise<PublishingSettings>;
+  getAutomationPacing(): Promise<AutomationPacingSettings>;
+  saveAutomationPacing(settings: AutomationPacingSettings): Promise<AutomationPacingSettings>;
+  selectPublishingFolder(initialPath?: string): Promise<string | null>;
+  getRunHistory(portalId: string): Promise<RunHistorySummary>;
+  openJobOutput(jobId: string): Promise<void>;
+  getRecoveryJob(): Promise<RecoveryJob | null>;
+  dismissRecoveryJob(jobId: string): Promise<void>;
+  saveTenderReview(tenderId: string, decision: ManualTenderDecision, reason?: string): Promise<TenderReviewRow>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+  checkForUpdates(): Promise<UpdateStatus>;
+  restartToInstallUpdate(): Promise<void>;
+  onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
+  runPreflight(portalId: string): Promise<PreflightReport>;
+  setPortalBounds(bounds: PortalBounds): Promise<void>;
+  setPortalVisible(visible: boolean): Promise<void>;
+  portalGoBack(): Promise<void>;
+  portalReload(): Promise<void>;
+  launchDscSigner(jobId: string): Promise<void>;
+  cancelJob(jobId: string): Promise<void>;
+  confirmDocumentSelection(jobId: string, tenderIds: string[]): Promise<void>;
   startJob(config: RunConfiguration): Promise<{ jobId: string }>;
   getJobDetail(jobId: string): Promise<JobDetail>;
   deleteJob(jobId: string): Promise<void>;

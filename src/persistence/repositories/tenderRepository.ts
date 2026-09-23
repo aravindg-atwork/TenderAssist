@@ -8,6 +8,8 @@ export interface TenderRow {
   tender_portal_id: string | null;
   title: string;
   organisation_chain: string | null;
+  department?: string | null;
+  state_name?: string | null;
   published_date: string | null;
   closing_date: string | null;
   opening_date: string | null;
@@ -19,6 +21,7 @@ export interface TenderRow {
   tender_category: string | null;
   detail_text: string | null;
   detail_reviewed_at: string | null;
+  document_links_json: string;
   created_at: string;
   updated_at: string;
 }
@@ -29,6 +32,8 @@ export interface CreateTenderInput {
   tenderPortalId: string | null;
   title: string;
   organisationChain: string | null;
+  department?: string | null;
+  stateName?: string | null;
   publishedDate: string | null;
   closingDate: string | null;
   openingDate: string | null;
@@ -38,10 +43,13 @@ export interface CreateTenderInput {
 
 export interface TenderDetailInput {
   organisationChain: string | null;
+  department?: string | null;
+  stateName?: string | null;
   publishedDate: string | null;
   productCategory: string | null;
   tenderCategory: string | null;
   detailText: string;
+  documentLinks?: Array<{ url: string; fileName: string }>;
 }
 
 export class TenderRepository {
@@ -59,6 +67,8 @@ export class TenderRepository {
       tender_portal_id: input.tenderPortalId,
       title: input.title,
       organisation_chain: input.organisationChain,
+      department: input.department ?? null,
+      state_name: input.stateName ?? null,
       published_date: input.publishedDate,
       closing_date: input.closingDate,
       opening_date: input.openingDate,
@@ -70,13 +80,14 @@ export class TenderRepository {
       tender_category: null,
       detail_text: null,
       detail_reviewed_at: null,
+      document_links_json: '[]',
       created_at: now,
       updated_at: now,
     };
     this.db
       .prepare(
-        `INSERT INTO tenders (id, job_id, tender_ref, tender_portal_id, title, organisation_chain, published_date, closing_date, opening_date, product_category, value_in_rupees, favorited, favorited_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO tenders (id, job_id, tender_ref, tender_portal_id, title, organisation_chain, department, state_name, published_date, closing_date, opening_date, product_category, value_in_rupees, favorited, favorited_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         row.id,
@@ -85,6 +96,8 @@ export class TenderRepository {
         row.tender_portal_id,
         row.title,
         row.organisation_chain,
+        row.department ?? null,
+        row.state_name ?? null,
         row.published_date,
         row.closing_date,
         row.opening_date,
@@ -122,20 +135,26 @@ export class TenderRepository {
       .prepare(
         `UPDATE tenders SET
            organisation_chain = COALESCE(?, organisation_chain),
+           department = COALESCE(?, department),
+           state_name = COALESCE(?, state_name),
            published_date = ?,
            detail_product_category = ?,
            tender_category = ?,
            detail_text = ?,
+           document_links_json = ?,
            detail_reviewed_at = ?,
            updated_at = ?
          WHERE id = ?`
       )
       .run(
         input.organisationChain,
+        input.department ?? null,
+        input.stateName ?? null,
         input.publishedDate,
         input.productCategory,
         input.tenderCategory,
         input.detailText,
+        JSON.stringify(input.documentLinks ?? []),
         now,
         now,
         id

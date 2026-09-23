@@ -18,6 +18,7 @@ export type JobState =
   | 'REPORTING'
   | 'COMPLETE'
   | 'FAILED_RETRYABLE'
+  | 'CANCELLED'
   | 'FAILED_MANUAL';
 
 export interface JobRow {
@@ -27,7 +28,7 @@ export interface JobRow {
   updated_at: string;
 }
 
-const TERMINAL_STATES: JobState[] = ['COMPLETE', 'FAILED_MANUAL'];
+const TERMINAL_STATES: JobState[] = ['COMPLETE', 'CANCELLED', 'FAILED_MANUAL'];
 
 export class JobRepository {
   constructor(private db: DatabaseSync) {}

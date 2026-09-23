@@ -5,6 +5,11 @@ import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { AuthStateMachine } from '../state/authStateMachine.js';
 import { AuthFlow } from '../browser/authFlow.js';
 import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
+import type { AssistedLoginStep, PortalCredentials } from '../browser/portalLoginController.js';
+import type { DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
+import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
+import { shouldSurfacePortalAuthIssue } from '../browser/portalAuthIssueDetector.js';
+import type { PaceAction } from './actionPacer.js';
 
 export interface AuthJobRunnerDeps {
   jobs: JobRepository;
@@ -13,7 +18,25 @@ export interface AuthJobRunnerDeps {
   authMachine: AuthStateMachine;
   pollIntervalMs?: number;
   timeoutMs?: number;
+  portalCredentials?: PortalCredentials;
+  dscDownloadDirectory?: string;
+  targetUrlPrefix?: string;
+  registerDscReady?: (listener: (artifact: DscJnlpArtifact) => void) => () => void;
+  onDscJnlpReady?: (jobId: string, artifact: DscJnlpArtifact) => void;
+  signal?: AbortSignal;
+  paceAction?: PaceAction;
 }
+
+export type AuthAssistStep =
+  | 'OPENING_PORTAL'
+  | 'LOGIN_REQUIRED'
+  | 'CAPTCHA_REQUIRED'
+  | 'WAITING_FOR_AUTHENTICATION'
+  | 'DSC_LOGIN_STARTING'
+  | 'DSC_READY'
+  | 'DSC_LAUNCHED'
+  | 'AUTH_ERROR'
+  | 'AUTHENTICATED';
 
 export interface AuthJobUpdate {
   jobId: string;
@@ -22,7 +45,12 @@ export interface AuthJobUpdate {
   authState: AuthState;
   outcome?: 'SUCCESS' | 'TIMEOUT' | 'ABORTED';
   abortReason?: string;
-  phase?: 'AUTH' | 'SEARCH' | 'CLASSIFICATION';
+  phase?: 'AUTH' | 'SEARCH' | 'CLASSIFICATION' | 'ACQUISITION' | 'EXTRACTION' | 'PUBLISHING';
+  authStep?: AuthAssistStep;
+  dscFileName?: string;
+  authErrorCode?: string;
+  recoveryAction?: string;
+  statusMessage?: string;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
@@ -56,8 +84,18 @@ const TRANSIENT_FAILURE_BUDGET_MS = 15000;
 // their own Chrome instance).
 const CDP_CALL_TIMEOUT_MS = 5000;
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    const onAbort = () => done();
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 type BoundedOutcome<T> = { kind: 'ok'; value: T } | { kind: 'error'; error: unknown } | { kind: 'stalled' };
@@ -141,10 +179,17 @@ export async function runAuthJob(
   const job = jobs.create();
   jobMachine.transition(job.id, 'AUTH_REQUIRED', 'UI-initiated auth job');
 
+  let emitDscReady: ((artifact: DscJnlpArtifact) => void) | undefined;
+  let dscFlowStarted = false;
+
   const flow = new AuthFlow({
     sessions,
     machine: authMachine,
     onAuthSessionLost: reactToAuthSessionLoss(jobMachine, job.id),
+    dscDownloadDirectory: deps.dscDownloadDirectory,
+    targetUrlPrefix: deps.targetUrlPrefix,
+    paceAction: deps.paceAction,
+    onDscJnlpReady: (artifact) => emitDscReady?.(artifact),
   });
   // Bounded so a CDP attach that never settles (observed under heavier
   // concurrent real-Chrome load) surfaces as a clear, finite rejection
@@ -156,6 +201,7 @@ export async function runAuthJob(
   const { authSessionId } = attachResult.value;
   onAttached?.(flow.getPage(), () => flow.stop());
   jobMachine.transition(job.id, 'AUTH_PENDING', 'browser attached');
+  await deps.paceAction?.();
   const initialNav = await bounded(flow.getPage().goto(portalUrl), CDP_CALL_TIMEOUT_MS);
   if (initialNav.kind === 'error' || initialNav.kind === 'stalled') {
     // This one-time convenience navigation can lose a race against another
@@ -172,14 +218,53 @@ export async function runAuthJob(
     }
   }
 
+  let authStep: AuthAssistStep = 'OPENING_PORTAL';
+  let dscFileName: string | undefined;
+  let authErrorCode: string | undefined;
+  let recoveryAction: string | undefined;
   const snapshot = (): AuthJobUpdate => ({
     jobId: job.id,
     authSessionId,
     jobState: jobs.getById(job.id)!.state,
     authState: sessions.getById(authSessionId)!.state,
+    phase: 'AUTH',
+    authStep,
+    dscFileName,
+    authErrorCode,
+    recoveryAction,
   });
 
+  emitDscReady = (artifact) => {
+    dscFlowStarted = true;
+    authStep = 'DSC_READY';
+    dscFileName = artifact.fileName;
+    authErrorCode = undefined;
+    recoveryAction = undefined;
+    deps.onDscJnlpReady?.(job.id, artifact);
+    onUpdate(snapshot());
+  };
+  const stopWatchingExternalDsc = deps.registerDscReady?.((artifact) => emitDscReady?.(artifact));
+
   let lastAuthState: AuthState = sessions.getById(authSessionId)!.state;
+  onUpdate(snapshot());
+
+  let activeCredentials = deps.portalCredentials;
+  const prepared = await bounded(flow.prepareLogin(activeCredentials), CDP_CALL_TIMEOUT_MS);
+  // Remove the password from the caller-owned dependency object immediately.
+  // A local reference is retained only during the bounded authentication
+  // phase so a portal-returned login form can be restored automatically.
+  deps.portalCredentials = undefined;
+  if (prepared.kind === 'ok') {
+    const step: AssistedLoginStep = prepared.value;
+    authStep =
+      step === 'ALREADY_AUTHENTICATED'
+        ? 'WAITING_FOR_AUTHENTICATION'
+        : step === 'CAPTCHA_REQUIRED'
+          ? 'CAPTCHA_REQUIRED'
+          : 'LOGIN_REQUIRED';
+  } else {
+    authStep = 'LOGIN_REQUIRED';
+  }
   onUpdate(snapshot());
 
   const deadline = Date.now() + timeoutMs;
@@ -192,7 +277,18 @@ export async function runAuthJob(
   let lastFailure: unknown = null;
 
   while (Date.now() < deadline) {
+    if (isCancellationRequested(deps.signal)) {
+      outcome = 'ABORTED';
+      abortReason = USER_CANCELLED_REASON;
+      break;
+    }
     const check = await checkAuthenticatedBounded(flow, CDP_CALL_TIMEOUT_MS);
+
+    if (isCancellationRequested(deps.signal)) {
+      outcome = 'ABORTED';
+      abortReason = USER_CANCELLED_REASON;
+      break;
+    }
 
     if (check.kind === 'error' || check.kind === 'stalled') {
       // checkAuthenticated() can fail transiently for a reason that has
@@ -239,7 +335,7 @@ export async function runAuthJob(
         break;
       }
 
-      await delay(pollIntervalMs);
+      await delay(pollIntervalMs, deps.signal);
       continue;
     }
 
@@ -248,6 +344,42 @@ export async function runAuthJob(
     // already-resolved hiccup can't count against a later, unrelated one.
     failureStreakStartedAt = null;
     lastFailure = null;
+
+    if (!check.authenticated) {
+      if (activeCredentials) {
+        const refill = await bounded(flow.refillVisibleLogin(activeCredentials), CDP_CALL_TIMEOUT_MS);
+        if (refill.kind === 'ok' && refill.value) {
+          authStep = 'CAPTCHA_REQUIRED';
+          authErrorCode = undefined;
+          recoveryAction = undefined;
+          onUpdate(snapshot());
+        }
+      }
+
+      const issueResult = await bounded(flow.detectAuthIssue(), CDP_CALL_TIMEOUT_MS);
+      if (
+        issueResult.kind === 'ok' &&
+        issueResult.value &&
+        shouldSurfacePortalAuthIssue(issueResult.value, dscFlowStarted) &&
+        issueResult.value.code !== authErrorCode
+      ) {
+        authStep = 'AUTH_ERROR';
+        authErrorCode = issueResult.value.code;
+        recoveryAction = `${issueResult.value.message} ${issueResult.value.recovery}`;
+        onUpdate(snapshot());
+      }
+
+      if (!dscFileName) {
+        const dscStart = await bounded(flow.startDscLoginIfAvailable(), CDP_CALL_TIMEOUT_MS);
+        if (dscStart.kind === 'ok' && dscStart.value && !dscFileName) {
+          dscFlowStarted = true;
+          authStep = 'DSC_LOGIN_STARTING';
+          authErrorCode = undefined;
+          recoveryAction = undefined;
+          onUpdate(snapshot());
+        }
+      }
+    }
 
     if (check.authenticated) {
       outcome = 'SUCCESS';
@@ -266,12 +398,22 @@ export async function runAuthJob(
       break;
     }
 
-    await delay(pollIntervalMs);
+    await delay(pollIntervalMs, deps.signal);
+  }
+
+  if (isCancellationRequested(deps.signal)) {
+    outcome = 'ABORTED';
+    abortReason = USER_CANCELLED_REASON;
+    markJobCancelled(jobs, jobMachine, job.id);
   }
 
   if (outcome === 'SUCCESS') {
     jobMachine.transition(job.id, 'AUTHENTICATED', 'auth flow confirmed dashboard indicators');
+    authStep = 'AUTHENTICATED';
   }
+
+  activeCredentials = undefined;
+  stopWatchingExternalDsc?.();
 
   const final: AuthJobUpdate = { ...snapshot(), outcome, abortReason };
   onUpdate(final);

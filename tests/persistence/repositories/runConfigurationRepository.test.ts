@@ -18,8 +18,25 @@ describe('RunConfigurationRepository', () => {
     jobId = new JobRepository(db).create().id;
   });
 
+  it('lists the five most recent run dates for one portal, including interrupted runs', () => {
+    const jobs = new JobRepository(db);
+    const first = jobId;
+    repo.saveForJob(first, { searchDate: '2026-09-20', portalId: 'tamil-nadu', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
+    db.prepare("UPDATE jobs SET state = 'COMPLETE' WHERE id = ?").run(first);
+    const second = jobs.create().id;
+    repo.saveForJob(second, { searchDate: '2026-09-22', portalId: 'tamil-nadu', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
+    db.prepare("UPDATE jobs SET state = 'COMPLETE' WHERE id = ?").run(second);
+    const interrupted = jobs.create().id;
+    repo.saveForJob(interrupted, { searchDate: '2026-09-21', portalId: 'tamil-nadu', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
+    const other = jobs.create().id;
+    repo.saveForJob(other, { searchDate: '2026-09-23', portalId: 'kerala', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
+    db.prepare("UPDATE jobs SET state = 'COMPLETE' WHERE id = ?").run(other);
+    expect(repo.listRecentRunDates('tamil-nadu')).toEqual(['2026-09-22', '2026-09-21', '2026-09-20']);
+  });
+
   it('returns safe built-in defaults before the user saves anything', () => {
     expect(repo.getDefaults()).toEqual(DEFAULT_RUN_DEFAULTS);
+    expect(repo.hasSavedDefaults()).toBe(false);
   });
 
   it('normalizes, de-duplicates, and persists future-run defaults', () => {
@@ -33,6 +50,7 @@ describe('RunConfigurationRepository', () => {
       keywords: ['Web Application', 'Digitization'],
       excludedKeywords: ['AMC'],
     });
+    expect(repo.hasSavedDefaults()).toBe(true);
   });
 
   it('snapshots a job configuration independently of later default changes', () => {
@@ -50,6 +68,7 @@ describe('RunConfigurationRepository', () => {
 
     expect(repo.getForJob(jobId)).toEqual({
       searchDate: '2026-09-21',
+      portalId: 'tamil-nadu',
       productCategories: ['Information Technology'],
       keywords: ['software development'],
       excludedKeywords: ['hardware'],

@@ -41,6 +41,17 @@ describe('JobStateMachine', () => {
     expect(() => machine.transition('missing-job', 'AUTH_REQUIRED')).toThrow('Job not found: missing-job');
   });
 
+  it('records a user cancellation as its own terminal state', () => {
+    const job = jobs.create();
+    machine.transition(job.id, 'AUTH_REQUIRED');
+    machine.transition(job.id, 'AUTH_PENDING');
+    machine.transition(job.id, 'CANCELLED', 'user stopped the job');
+
+    expect(jobs.getById(job.id)?.state).toBe('CANCELLED');
+    expect(jobs.findIncomplete()).toBeUndefined();
+    expect(() => machine.transition(job.id, 'AUTH_REQUIRED')).toThrow(IllegalJobTransitionError);
+  });
+
   it('allows the full acquisition happy path in sequence', () => {
     const job = jobs.create();
     const path: Array<[string, string?]> = [
