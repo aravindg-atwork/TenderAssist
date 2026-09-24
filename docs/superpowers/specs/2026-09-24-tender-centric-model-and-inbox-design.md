@@ -1,7 +1,7 @@
 # Tender-centric data model and Inbox — design
 
 Date: 2026-09-24
-Status: Decisions recorded 2026-09-24. Slices 1–4 delivered: data model, run sync, Inbox, bulk decisions, keyboard review, Tenders view with history, and run download selection that honours Inbox decisions. Possible-retender links are detected (same reference number, or a near-identical title from the same department) on every run and at app start, and shown on Inbox and Tenders rows. Recording a corrigendum is idempotent per portal-listed number. Next: parsing the portal's corrigendum listing (needs a saved detail-page fixture) and downloading approved tenders outside a run.
+Status: Decisions recorded 2026-09-24. Slices 1–4 delivered: data model, run sync, Inbox, bulk decisions, keyboard review, Tenders view with history, and run download selection that honours Inbox decisions. Possible-retender links are detected (same reference number, or a near-identical title from the same department) on every run and at app start, and shown on Inbox and Tenders rows. Recording a corrigendum is idempotent per portal-listed number; `src/review/corrigenda.ts` classifies what each corrigendum changed and cancels tenders the portal withdrew, so the portal parser only has to produce `PortalCorrigendum` rows. Next: parsing the portal's corrigendum listing (needs a saved detail-page fixture) and downloading approved tenders outside a run.
 Backlog: Recommended delivery order step 2
 
 ## Goal

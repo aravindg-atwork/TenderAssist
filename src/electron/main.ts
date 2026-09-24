@@ -23,6 +23,7 @@ import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments
 import { buildInbox, type InboxView } from '../review/inbox.js';
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
+import { collectAuditHistory, writeAuditWorkbook } from '../review/auditHistory.js';
 import type { OperatorDecision } from '../state/opportunityLifecycle.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
@@ -186,12 +187,35 @@ function navigateApplication(view: 'inbox' | 'tenders' | 'jobs' | 'settings', se
   mainWindow.webContents.send('app-navigate', { view, section });
 }
 
+async function exportAuditHistory(): Promise<void> {
+  const stamp = new Date().toLocaleDateString('en-CA');
+  const options: Electron.SaveDialogOptions = {
+    title: 'Export audit history',
+    defaultPath: join(app.getPath('documents'), `TenderAssist audit history ${stamp}.xlsx`),
+    filters: [{ name: 'Excel workbook', extensions: ['xlsx'] }],
+  };
+  const choice = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+  if (choice.canceled || !choice.filePath) return;
+  try {
+    const entries = collectAuditHistory(db);
+    await writeAuditWorkbook(entries, choice.filePath);
+    shell.showItemInFolder(choice.filePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // A workbook left open in Excel is the usual cause.
+    dialog.showErrorBox('Audit history not exported', `${message}
+
+If the file is open in Excel, close it and try again.`);
+  }
+}
+
 function configureApplicationMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     {
       label: 'File',
       submenu: [
         { label: 'Output folders and naming…', accelerator: 'CmdOrCtrl+Shift+O', click: () => navigateApplication('settings', 'folders') },
+        { label: 'Export audit history…', click: () => void exportAuditHistory() },
         { type: 'separator' },
         { role: process.platform === 'darwin' ? 'close' : 'quit' },
       ],

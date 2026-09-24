@@ -80,7 +80,7 @@ Before GeM becomes selectable for live runs, add a dedicated adapter for public 
 
 Delivered on 2026-09-24: configurable `Month/Day/NN_Title` output structure, same-day conflict rules, and frozen per-job output plans. Jobs sharing a day folder continue its S.No sequence, and later runs write `Approved-Tenders-… (run N).xlsx` beside the first. Each job's root, date, and templates are saved at first publish, so template changes never move earlier jobs. Numbers from deleted jobs are never reused because their folders stay on disk.
 
-- Export an audit history covering searches, decisions, downloads, and manual overrides.
+- ~~Export an audit history covering searches, decisions, downloads, and manual overrides.~~ Delivered 2026-09-24: File → Export audit history… writes one time-ordered Excel sheet of tender events, run and sign-in states, searches, and document downloads (with SHA-256).
 - Include output-folder writability and Drive sync-root availability in the preflight health check.
 
 ### Browser readiness
@@ -152,8 +152,8 @@ Prerequisite for the Inbox, duplicate detection, corrigendum linking, and outcom
 ### Duplicate and change detection
 
 - Detect tenders already seen in previous jobs, across dates and portals.
-- Link corrigenda to their original tender and highlight date extensions, value changes, and document revisions.
-- Group similar opportunities (same buyer, overlapping scope) for comparison.
+- Link corrigenda to their original tender and highlight date extensions, value changes, and document revisions. *(2026-09-24: storage, change classification, cancellation, and Inbox wording done; the TN Tenders corrigendum-listing parser waits for a captured detail page.)*
+- Group similar opportunities (same buyer, overlapping scope) for comparison. *(2026-09-24: possible-retender links by reference or near-identical title, with Not related dismissal.)*
 - Avoid repeating unchanged tenders in the daily review queue.
 
 ### Relevance scoring
