@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import type { RunDefaults } from '../../../src/config/runConfiguration';
 import type { PortalCredentialSettings, RunSettingsState } from '../../../src/electron/ipcTypes';
@@ -15,7 +16,7 @@ export interface SettingsPageProps {
   onSaved: (settings: RunSettingsState) => void;
   selectedPortalId: string;
   onPortalChange: (portalId: string) => void;
-  focusRequest?: { section: 'folders'; requestId: number } | null;
+  focusRequest?: { section: SettingsSection; requestId: number } | null;
 }
 
 export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChange, focusRequest }: SettingsPageProps) {
@@ -33,6 +34,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const foldersSectionRef = useRef<HTMLElement>(null);
+  const relevanceSectionRef = useRef<HTMLElement>(null);
   const folderCustomizerRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
@@ -69,6 +71,12 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     window.tenderAssist.getUpdateStatus().then(setUpdateStatus).catch(() => {});
     return window.tenderAssist.onUpdateStatus(setUpdateStatus);
   }, []);
+
+  useEffect(() => {
+    if (focusRequest?.section !== 'relevance') return;
+    relevanceSectionRef.current?.scrollIntoView({ block: 'start' });
+    relevanceSectionRef.current?.focus({ preventScroll: true });
+  }, [focusRequest]);
 
   useEffect(() => {
     if (focusRequest?.section !== 'folders') return;
@@ -356,7 +364,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         </div>
       </section>
 
-      <section className="settings-card">
+      <section className="settings-card" ref={relevanceSectionRef} tabIndex={-1}>
         <div className="settings-card__intro">
           <div>
             <h2>Search categories</h2>

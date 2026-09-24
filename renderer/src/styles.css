@@ -2735,3 +2735,80 @@ input:focus-visible {
   margin: 8px 0 0;
   padding-left: 1.25rem;
 }
+
+/* ---------- No matching tenders ---------- */
+
+.no-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.live-shortlist .no-matches {
+  padding: 0;
+  border: 0;
+}
+
+.no-matches h2 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.no-matches h3 {
+  margin: 6px 0 4px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.no-matches p {
+  margin: 0;
+}
+
+.no-matches__categories {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.no-matches__categories li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+.no-matches__count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.no-matches__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.no-matches__chips .chip {
+  padding-right: 10px;
+}
+
+.chip--muted {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+}
+
+.no-matches__hint {
+  color: var(--text-muted);
+}
+
+.no-matches .btn {
+  align-self: flex-start;
+}

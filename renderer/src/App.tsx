@@ -5,7 +5,7 @@ import { JobDetail } from './components/JobDetail';
 import { SettingsPage } from './components/SettingsPage';
 import { Inbox } from './components/Inbox';
 import { TendersPage } from './components/TendersPage';
-import type { AuthJobUpdate, RunSettingsState } from '../../src/electron/ipcTypes';
+import type { AuthJobUpdate, RunSettingsState, SettingsSection } from '../../src/electron/ipcTypes';
 import { DEFAULT_PORTAL_ID } from '../../src/config/portalRegistry';
 import { applyTextSize } from './display';
 
@@ -16,7 +16,13 @@ export function App() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJobUpdate, setActiveJobUpdate] = useState<AuthJobUpdate | null>(null);
   const [view, setView] = useState<AppView>('jobs');
-  const [settingsFocus, setSettingsFocus] = useState<{ section: 'folders'; requestId: number } | null>(null);
+  const [settingsFocus, setSettingsFocus] = useState<{ section: SettingsSection; requestId: number } | null>(null);
+  const openSettings = (section?: SettingsSection) => {
+    setNavigated(true);
+    setSelectedJobId(null);
+    setView('settings');
+    setSettingsFocus(section ? { section, requestId: Date.now() } : null);
+  };
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
   const [inboxCount, setInboxCount] = useState(0);
   const [navigated, setNavigated] = useState(false);
@@ -124,7 +130,7 @@ export function App() {
         ) : view === 'settings' ? (
           <SettingsPage settings={settings} onSaved={setSettings} selectedPortalId={selectedPortalId} onPortalChange={setSelectedPortalId} focusRequest={settingsFocus} />
         ) : selectedJobId ? (
-          <JobDetail jobId={selectedJobId} onBack={() => setSelectedJobId(null)} />
+          <JobDetail jobId={selectedJobId} onBack={() => setSelectedJobId(null)} onOpenSettings={openSettings} />
         ) : (
           <JobList
             onSelectJob={setSelectedJobId}
@@ -132,7 +138,7 @@ export function App() {
             activeJobUpdate={activeJobUpdate}
             onActiveJobChange={setActiveJobId}
             settings={settings}
-            onOpenSettings={() => setView('settings')}
+            onOpenSettings={openSettings}
             selectedPortalId={selectedPortalId}
             onPortalChange={setSelectedPortalId}
           />

@@ -1,6 +1,6 @@
 // renderer/src/components/JobList.tsx
 import { useCallback, useEffect, useState, type MouseEvent } from 'react';
-import type { AuthJobUpdate, JobListItem, RecoveryJob, RunHistorySummary, RunSettingsState } from '../../../src/electron/ipcTypes';
+import type { AuthJobUpdate, JobListItem, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
 import { StatePill } from './StatePill';
 import { TrashIcon } from './icons';
 import type { PreflightReport } from '../../../src/system/preflight';
@@ -15,7 +15,7 @@ export interface JobListProps {
   activeJobUpdate: AuthJobUpdate | null;
   onActiveJobChange: (jobId: string | null) => void;
   settings: RunSettingsState | null;
-  onOpenSettings: () => void;
+  onOpenSettings: (section?: SettingsSection) => void;
   selectedPortalId: string;
   onPortalChange: (portalId: string) => void;
 }
@@ -127,7 +127,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
 
   const handleStart = async () => {
     if (!settings?.configured) {
-      onOpenSettings();
+      onOpenSettings('relevance');
       return;
     }
     setStarting(true);
@@ -261,7 +261,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
             )}
           </section>
 
-          {activeJobUpdate?.awaitingSelection && <LiveShortlist key={activeJobUpdate.jobId} jobId={activeJobUpdate.jobId} />}
+          {activeJobUpdate?.awaitingSelection && <LiveShortlist key={activeJobUpdate.jobId} jobId={activeJobUpdate.jobId} onEditSettings={() => onOpenSettings('relevance')} />}
 
           {error && <p className="error-text run-sidebar__error">{error}</p>}
           <div className="run-sidebar__footer">
@@ -332,7 +332,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
       {settings && !settings.configured && (
         <div className="notice notice-attention setup-notice">
           <span>Finish the relevance settings before your first run.</span>
-          <button className="btn btn-secondary" onClick={onOpenSettings}>Open settings</button>
+          <button className="btn btn-secondary" onClick={() => onOpenSettings('relevance')}>Open settings</button>
         </div>
       )}
       {recoveryJob && !activeJobId && (

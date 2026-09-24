@@ -43,6 +43,7 @@ import type {
   PortalCredentialSettings,
   SavePortalCredentialInput,
   AuthJobUpdate,
+  SettingsSection,
 } from './ipcTypes.js';
 import { normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
@@ -198,7 +199,7 @@ function createWindow(): void {
   void mainWindow.loadFile(join(__dirname, '..', '..', 'renderer', 'dist', 'index.html'));
 }
 
-function navigateApplication(view: 'inbox' | 'tenders' | 'jobs' | 'settings', section?: 'folders'): void {
+function navigateApplication(view: 'inbox' | 'tenders' | 'jobs' | 'settings', section?: SettingsSection): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();

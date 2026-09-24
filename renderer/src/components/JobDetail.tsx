@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { NoMatchesSummary } from './NoMatchesSummary';
+import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { describePortalError } from '../../../src/orchestration/transientRetry';
 import type {
   AuthJobUpdate,
@@ -12,6 +14,7 @@ import { getPortalDefinition } from '../../../src/config/portalRegistry';
 export interface JobDetailProps {
   jobId: string;
   onBack: () => void;
+  onOpenSettings: (section?: SettingsSection) => void;
 }
 
 const FLOW_STAGES = [
@@ -135,7 +138,7 @@ function TenderCard({ tender, onReviewed }: { tender: TenderDetailItem; onReview
   );
 }
 
-export function JobDetail({ jobId, onBack }: JobDetailProps) {
+export function JobDetail({ jobId, onBack, onOpenSettings }: JobDetailProps) {
   const [detail, setDetail] = useState<JobDetailData | null>(null);
   const [latestUpdate, setLatestUpdate] = useState<AuthJobUpdate | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -287,7 +290,9 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
             />
           ))}</div>
         ) : (
-          <div className="empty-panel">No tender passed every intent gate in this job.</div>
+          uncertain.length === 0 && (detail.jobState === 'COMPLETE' || detail.jobState === 'SHORTLISTED')
+            ? <NoMatchesSummary detail={detail} onEditSettings={() => onOpenSettings('relevance')} />
+            : <div className="empty-panel">No tender passed every intent gate in this job.</div>
         )}
       </section>
 

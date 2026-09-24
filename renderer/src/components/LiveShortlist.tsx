@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TenderDetailItem } from '../../../src/electron/ipcTypes';
+import type { JobDetail } from '../../../src/electron/ipcTypes';
+import { NoMatchesSummary } from './NoMatchesSummary';
 import { defaultSelection, selectionCandidates } from '../../../src/ui/shortlistSelection';
 
 export interface LiveShortlistProps {
   jobId: string;
+  onEditSettings: () => void;
 }
 
 /**
@@ -11,8 +13,9 @@ export interface LiveShortlistProps {
  * Nothing downloads until the operator confirms; the portal stays signed in
  * while they decide.
  */
-export function LiveShortlist({ jobId }: LiveShortlistProps) {
-  const [tenders, setTenders] = useState<TenderDetailItem[] | null>(null);
+export function LiveShortlist({ jobId, onEditSettings }: LiveShortlistProps) {
+  const [detail, setDetail] = useState<JobDetail | null>(null);
+  const [tenders, setTenders] = useState<JobDetail['tenders'] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,6 +25,7 @@ export function LiveShortlist({ jobId }: LiveShortlistProps) {
     let current = true;
     window.tenderAssist.getJobDetail(jobId).then((detail) => {
       if (!current) return;
+      setDetail(detail);
       const candidates = selectionCandidates(detail.tenders);
       setTenders(candidates);
       setSelected(defaultSelection(candidates));
@@ -51,7 +55,7 @@ export function LiveShortlist({ jobId }: LiveShortlistProps) {
     }
   };
 
-  if (!tenders) return <p className="live-shortlist__loading">{error ?? 'Loading the shortlist…'}</p>;
+  if (!tenders || !detail) return <p className="live-shortlist__loading">{error ?? 'Loading the shortlist…'}</p>;
 
   const groups = [
     { title: 'Shortlisted', items: tenders.filter((tender) => tender.effectiveClassification === 'KEEP') },
@@ -60,10 +64,10 @@ export function LiveShortlist({ jobId }: LiveShortlistProps) {
 
   return (
     <section ref={sectionRef} className="live-shortlist" aria-labelledby="live-shortlist-title">
-      <h2 id="live-shortlist-title">Choose tenders to download</h2>
       {groups.length === 0 ? (
-        <p>No tender passed screening in this run. Confirm to finish the run and create the report.</p>
-      ) : groups.map((group) => (
+        <NoMatchesSummary detail={detail} onEditSettings={onEditSettings} />
+      ) : <h2 id="live-shortlist-title">Choose tenders to download</h2>}
+      {groups.map((group) => (
         <fieldset key={group.title} className="live-shortlist__group">
           <legend>{group.title} ({group.items.length})</legend>
           {group.items.map((tender) => (
@@ -78,7 +82,7 @@ export function LiveShortlist({ jobId }: LiveShortlistProps) {
         </fieldset>
       ))}
       <button className="btn btn-primary live-shortlist__confirm" type="button" onClick={confirm} disabled={confirming}>
-        {confirming ? 'Starting…' : selected.size === 0 ? 'Finish without downloading' : `Download documents for ${selected.size} tender${selected.size === 1 ? '' : 's'}`}
+        {confirming ? 'Starting…' : groups.length === 0 ? 'Finish run' : selected.size === 0 ? 'Finish without downloading' : `Download documents for ${selected.size} tender${selected.size === 1 ? '' : 's'}`}
       </button>
       {error && <p className="error-text">{error}</p>}
     </section>

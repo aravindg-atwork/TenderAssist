@@ -56,9 +56,11 @@ export interface PortalBounds {
   height: number;
 }
 
+export type SettingsSection = 'folders' | 'relevance';
+
 export interface AppNavigationCommand {
   view: 'inbox' | 'tenders' | 'jobs' | 'settings';
-  section?: 'folders';
+  section?: SettingsSection;
 }
 
 export interface TenderDetailItem extends TenderRow {
