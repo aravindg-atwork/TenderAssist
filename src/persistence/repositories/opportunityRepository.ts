@@ -165,6 +165,8 @@ export class OpportunityRepository {
    * Attaches a per-run `tenders` row to its opportunity, creating the
    * opportunity on first sight. Changes to tracked fields are logged and,
    * on a tender the operator already decided, flagged for another look.
+   * Safe to call again for the same row: it refreshes values without
+   * logging another SEEN.
    */
   recordSighting(tender: TenderRow, portalId: string, context: EventContext = {}): OpportunityRow {
     const at = context.at ?? new Date().toISOString();
@@ -176,6 +178,8 @@ export class OpportunityRepository {
       value_in_rupees: meaningful(tender.value_in_rupees),
     };
     return this.inTransaction(() => {
+      const alreadyLinked = Boolean((this.db.prepare('SELECT opportunity_id FROM tenders WHERE id = ?')
+        .get(tender.id) as { opportunity_id: string | null } | undefined)?.opportunity_id);
       let opportunity = this.findByIdentity(portalId, identityKey);
       if (!opportunity) {
         const id = randomUUID();
@@ -216,15 +220,25 @@ export class OpportunityRepository {
           flag, at, tender.id, at, opportunity.id);
       }
       this.db.prepare('UPDATE tenders SET opportunity_id = ? WHERE id = ?').run(opportunity.id, tender.id);
-      this.insertEvent(opportunity.id, 'SEEN', 'automation', { ...context, at, note: null }, { tenderId: tender.id });
+      if (!alreadyLinked) {
+        this.insertEvent(opportunity.id, 'SEEN', 'automation', { ...context, at, note: null }, { tenderId: tender.id });
+      }
       return this.getById(opportunity.id)!;
     });
   }
 
-  /** Stores the automatic recommendation. It never rejects on its own; only the operator does. */
+  /**
+   * Stores the automatic recommendation. It never rejects on its own; only
+   * the operator does. Repeating the same result for the same run is a no-op.
+   */
   recordScreening(opportunityId: string, recommendation: Recommendation, context: EventContext = {}, evidence: Record<string, unknown> = {}): OpportunityRow {
     return this.inTransaction(() => {
       const opportunity = this.require(opportunityId);
+      if (context.jobId && opportunity.recommendation === recommendation && this.db.prepare(
+        `SELECT 1 FROM opportunity_events WHERE opportunity_id = ? AND kind = 'SCREENED' AND job_id = ?`
+      ).get(opportunityId, context.jobId)) {
+        return opportunity;
+      }
       const at = context.at ?? new Date().toISOString();
       if (opportunity.lifecycle === 'NEW') assertTransition('NEW', 'SCREENED');
       this.db.prepare(
@@ -305,6 +319,37 @@ export class OpportunityRepository {
         this.insertEvent(id, 'EXPIRED', 'automation', { at: nowIso }, { from: opportunity.lifecycle, closingAt: opportunity.closing_at });
       }
       return overdue.length;
+    });
+  }
+
+  /**
+   * Detaches a run that is being deleted. Tenders the operator acted on keep
+   * their record and history; tenders only automation touched, and seen by
+   * no other run, are removed with it. Call before deleting the job's rows.
+   */
+  releaseJob(jobId: string): void {
+    this.inTransaction(() => {
+      const linked = this.db.prepare(
+        'SELECT DISTINCT opportunity_id AS id FROM tenders WHERE job_id = ? AND opportunity_id IS NOT NULL'
+      ).all(jobId) as Array<{ id: string }>;
+      this.db.prepare('UPDATE tenders SET opportunity_id = NULL WHERE job_id = ?').run(jobId);
+      for (const { id } of linked) {
+        const opportunity = this.getById(id);
+        if (!opportunity) continue;
+        const remaining = this.db.prepare(
+          'SELECT id FROM tenders WHERE opportunity_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
+        ).get(id) as { id: string } | undefined;
+        const operatorTouched = this.db.prepare(
+          `SELECT 1 FROM opportunity_events WHERE opportunity_id = ? AND actor = 'operator' LIMIT 1`
+        ).get(id);
+        if (!remaining && !operatorTouched) {
+          this.db.prepare('DELETE FROM opportunity_links WHERE from_opportunity_id = ? OR to_opportunity_id = ?').run(id, id);
+          this.db.prepare('DELETE FROM opportunity_events WHERE opportunity_id = ?').run(id);
+          this.db.prepare('DELETE FROM opportunities WHERE id = ?').run(id);
+        } else {
+          this.db.prepare('UPDATE opportunities SET latest_sighting_id = ? WHERE id = ?').run(remaining?.id ?? null, id);
+        }
+      }
     });
   }
 

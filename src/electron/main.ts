@@ -18,6 +18,8 @@ import { PublishingSettingsRepository } from '../persistence/repositories/publis
 import { AutomationSettingsRepository } from '../persistence/repositories/automationSettingsRepository.js';
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
+import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
+import { applyTenderDecision, recordCollectedDocuments, recordDownloadSelection, syncJobOpportunities } from '../orchestration/opportunitySync.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
@@ -74,6 +76,15 @@ const workflow = new TenderWorkflowRepository(db);
 const publishingSettings = new PublishingSettingsRepository(db, join(homedir(), 'Documents', 'TenderAssist'));
 const automationSettings = new AutomationSettingsRepository(db);
 const jobOutputs = new JobOutputRepository(db);
+const opportunities = new OpportunityRepository(db);
+const opportunitySync = { tenders, classifications, opportunities, workflow };
+
+// Tender records are a view over run data; a failure to update them must
+// never fail the run itself, so report and carry on.
+function syncOpportunities(label: string, fn: () => void): void {
+  try { fn(); } catch (error) { console.error(`[TenderAssist] tender record sync failed (${label}):`, error); }
+}
+syncOpportunities('expiry sweep', () => opportunities.expireOverdue());
 const jobMachine = new JobStateMachine(db, jobs, transitions);
 const authMachine = new AuthStateMachine(db, sessions, transitions);
 
@@ -346,6 +357,8 @@ ipcMain.handle('save-tender-review', async (_event, tenderId: string, decision: 
   const tender = db.prepare('SELECT job_id FROM tenders WHERE id = ?').get(tenderId) as { job_id: string } | undefined;
   if (!tender) throw new Error('Tender not found.');
   const review = workflow.saveReview(tenderId, decision, reason);
+  const opportunityId = (db.prepare('SELECT opportunity_id FROM tenders WHERE id = ?').get(tenderId) as { opportunity_id: string | null }).opportunity_id;
+  syncOpportunities('review', () => applyTenderDecision(opportunitySync, opportunityId, decision === 'KEEP' ? 'APPROVE' : 'REJECT', { jobId: tender.job_id, note: reason }));
   const job = jobs.getById(tender.job_id);
   if (job?.state === 'COMPLETE' || job?.state === 'REPORTING') await publishStoredJob(tender.job_id);
   return review;
@@ -491,6 +504,7 @@ ipcMain.handle('delete-job', (_event, jobId: string): void => {
       transitions.deleteFor('AUTH_SESSION', session.id);
     }
     sessions.deleteAllForJob(jobId);
+    opportunities.releaseJob(jobId);
     classifications.deleteForJob(jobId);
     workflow.deleteForJob(jobId);
     tenders.deleteForJob(jobId);
@@ -618,6 +632,8 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     );
   })
   .then(async (searchResult) => {
+    // Record what the run saw even if the search stopped part-way.
+    syncOpportunities('search', () => syncJobOpportunities(opportunitySync, searchResult.jobId, portal.id, { screening: false }));
     if (searchResult.phase !== 'SEARCH' || searchResult.outcome !== 'SUCCESS' || !capturedPage) {
       return searchResult;
     }
@@ -634,6 +650,7 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     );
   })
   .then(async (classificationResult) => {
+    syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, classificationResult.jobId, portal.id, { screening: classificationResult.outcome === 'SUCCESS' }));
     if (classificationResult.phase !== 'CLASSIFICATION' || classificationResult.outcome !== 'SUCCESS' || !capturedPage) {
       return classificationResult;
     }
@@ -642,7 +659,8 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     // downloads. cancel-job aborts this wait too (see waitForDocumentSelection).
     const selectedTenderIds = await waitForDocumentSelection(classificationResult.jobId, abortController.signal);
     if (selectedTenderIds === null) return classificationResult;
-    return runPostProcessing(
+    syncOpportunities('selection', () => recordDownloadSelection(opportunitySync, classificationResult.jobId, selectedTenderIds));
+    const postProcessingResult = await runPostProcessing(
       { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: abortController.signal },
       capturedPage,
       classificationResult.jobId,
@@ -657,6 +675,8 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
       selectedTenderIds,
       outputSettings.structure
     );
+    syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, classificationResult.jobId));
+    return postProcessingResult;
   });
 
   // runAuthJob only ever RESOLVES (with a terminal SUCCESS/TIMEOUT/ABORTED

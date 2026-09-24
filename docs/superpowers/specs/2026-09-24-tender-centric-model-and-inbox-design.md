@@ -1,7 +1,7 @@
 # Tender-centric data model and Inbox — design
 
 Date: 2026-09-24
-Status: Decisions recorded 2026-09-24. Slice 1 delivered (migration 010, `OpportunityRepository`, `src/state/opportunityLifecycle.ts`, backfill). Slice 2 next.
+Status: Decisions recorded 2026-09-24. Slices 1–2 delivered (migration 010, `OpportunityRepository`, `src/state/opportunityLifecycle.ts`, backfill, `src/orchestration/opportunitySync.ts` wired into runs, review, and job deletion). Slice 3 (Inbox UI) next.
 Backlog: Recommended delivery order step 2
 
 ## Goal
@@ -150,7 +150,13 @@ Each Inbox row shows one plain sentence built from the existing gate rows (`tend
 
 ### 6. Job deletion
 
-Deleting a job deletes its run history (sightings, gates, searches, transitions) only when no opportunity depends on a sighting for a human decision or downloaded documents. Otherwise the sightings stay and are marked orphaned (`job_id` kept, job row gone). Decisions must never disappear because a run was cleaned up. The UI copy changes from "Delete job" to "Remove from run history".
+Deleting a job removes its run history (sightings, gates, searches, transitions). Tender records are handled by `OpportunityRepository.releaseJob` before the rows go:
+
+- A tender the operator acted on (any `operator` event) keeps its record and full event log, even with no sightings left.
+- A tender seen by another run keeps its record; `latest_sighting_id` moves to that run's row.
+- A tender only automation touched and only this run saw is removed with its events and links.
+
+Decisions never disappear because a run was cleaned up. Sighting rows cannot outlive their job because `tenders.job_id` is a foreign key, so the record rather than the sighting is what survives.
 
 ### 7. Migration (010)
 
