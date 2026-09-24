@@ -9,9 +9,11 @@ import {
 export interface PortalViewportProps {
   portalId: string;
   portalName: string;
+  /** False hides the native portal view without reloading it (another tab, or a divider drag). */
+  active?: boolean;
 }
 
-export function PortalViewport({ portalId, portalName }: PortalViewportProps) {
+export function PortalViewport({ portalId, portalName, active = true }: PortalViewportProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(DEFAULT_PORTAL_ZOOM_PERCENT);
 
@@ -25,7 +27,10 @@ export function PortalViewport({ portalId, portalName }: PortalViewportProps) {
 
   useEffect(() => {
     const surface = surfaceRef.current;
-    if (!surface) return;
+    if (!surface || !active) {
+      void window.tenderAssist.setPortalVisible(false);
+      return;
+    }
 
     let frame = 0;
     const syncBounds = () => {
@@ -55,7 +60,7 @@ export function PortalViewport({ portalId, portalName }: PortalViewportProps) {
       window.removeEventListener('scroll', syncBounds, true);
       void window.tenderAssist.setPortalVisible(false);
     };
-  }, []);
+  }, [active]);
 
   return (
     <section className="portal-workspace" aria-label={`${portalName} workspace`}>
@@ -105,7 +110,9 @@ export function PortalViewport({ portalId, portalName }: PortalViewportProps) {
           </button>
         </div>
       </div>
-      <div ref={surfaceRef} className="portal-viewport__surface" />
+      <div ref={surfaceRef} className="portal-viewport__surface">
+        {!active && <p className="portal-viewport__paused">The portal is still signed in. It will reappear when you release the divider or return to this tab.</p>}
+      </div>
     </section>
   );
 }

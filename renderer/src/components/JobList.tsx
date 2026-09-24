@@ -4,7 +4,7 @@ import type { AuthJobUpdate, JobListItem, RecoveryJob, RunHistorySummary, RunSet
 import { StatePill } from './StatePill';
 import { TrashIcon } from './icons';
 import type { PreflightReport } from '../../../src/system/preflight';
-import { PortalViewport } from './PortalViewport';
+import { RunWorkspace } from './RunWorkspace';
 import { DEFAULT_PORTAL_ID, getPortalDefinition } from '../../../src/config/portalRegistry';
 import { PortalCompatibilityBadge, PortalSelect } from './PortalSelect';
 
@@ -204,8 +204,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     const currentPhaseIndex = RUN_PHASES.findIndex((item) => item.phase === currentPhase);
     const activeState = activeJobUpdate?.jobState ?? 'SCHEDULED';
 
-    return (
-      <div className="running-workspace">
+    const guide = (
         <aside className="run-sidebar" aria-label="Job progress and controls">
           <div className="run-sidebar__header">
             <div>
@@ -251,9 +250,8 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
             </button>
           </div>
         </aside>
-        <PortalViewport portalId={selectedPortal.id} portalName={selectedPortal.name} />
-      </div>
     );
+    return <RunWorkspace guide={guide} portalId={selectedPortal.id} portalName={selectedPortal.name} update={activeJobUpdate} />;
   }
 
   return (
