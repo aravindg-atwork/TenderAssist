@@ -18,6 +18,7 @@ const api: TenderAssistApi = {
   openJobOutput: (jobId) => ipcRenderer.invoke('open-job-output', jobId),
   getRecoveryJob: () => ipcRenderer.invoke('get-recovery-job'),
   dismissRecoveryJob: (jobId) => ipcRenderer.invoke('dismiss-recovery-job', jobId),
+  resumeJob: (jobId) => ipcRenderer.invoke('resume-job', jobId),
   saveTenderReview: (tenderId, decision, reason) => ipcRenderer.invoke('save-tender-review', tenderId, decision, reason),
   getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),

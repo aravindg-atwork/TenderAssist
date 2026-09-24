@@ -34,6 +34,15 @@ describe('RunConfigurationRepository', () => {
     expect(repo.listRecentRunDates('tamil-nadu')).toEqual(['2026-09-22', '2026-09-21', '2026-09-20']);
   });
 
+  it('remembers the confirmed tender selection, including an empty one', () => {
+    repo.saveForJob(jobId, { searchDate: '2026-09-20', portalId: 'tamil-nadu', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
+    expect(repo.getSelection(jobId)).toBeNull();
+    repo.saveSelection(jobId, ['t1', 't2', 't1']);
+    expect(repo.getSelection(jobId)).toEqual(['t1', 't2']);
+    repo.saveSelection(jobId, []);
+    expect(repo.getSelection(jobId)).toEqual([]);
+  });
+
   it('returns safe built-in defaults before the user saves anything', () => {
     expect(repo.getDefaults()).toEqual(DEFAULT_RUN_DEFAULTS);
     expect(repo.hasSavedDefaults()).toBe(false);

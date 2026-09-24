@@ -99,6 +99,24 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     } finally { setStarting(false); }
   };
 
+  const resumeInterruptedJob = async () => {
+    if (!recoveryJob) return;
+    setStarting(true);
+    setError(null);
+    try {
+      setSearchDate(recoveryJob.config.searchDate);
+      onPortalChange(recoveryJob.config.portalId ?? DEFAULT_PORTAL_ID);
+      const { jobId, plan } = await window.tenderAssist.resumeJob(recoveryJob.jobId);
+      setRecoveryJob(null);
+      onActiveJobChange(jobId);
+      // The tender choice is made on the run's review page.
+      if (plan === 'SELECT_TENDERS') onSelectJob(jobId);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setStarting(false); }
+  };
+
   const dismissInterruptedJob = async () => {
     if (!recoveryJob) return;
     try {
@@ -316,10 +334,17 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
       )}
       {recoveryJob && !activeJobId && (
         <section className="recovery-panel" aria-live="polite">
-          <div><h2>Interrupted job found</h2><p>Job {recoveryJob.jobId.slice(0, 8)} stopped during {recoveryJob.state.toLowerCase().replaceAll('_', ' ')}. Retry it with the same date and relevance settings.</p></div>
+          <div><h2>Interrupted job found</h2><p>Job {recoveryJob.jobId.slice(0, 8)} stopped during {recoveryJob.state.toLowerCase().replaceAll('_', ' ')}. {recoveryJob.resumeDescription}</p></div>
           <div className="recovery-panel__actions">
             <button className="btn btn-secondary" onClick={dismissInterruptedJob}>End job</button>
-            <button className="btn btn-primary" onClick={retryInterruptedJob} disabled={starting}>Retry job</button>
+            {recoveryJob.resume === 'START_OVER' ? (
+              <button className="btn btn-primary" onClick={retryInterruptedJob} disabled={starting}>Start again</button>
+            ) : (
+              <>
+                <button className="btn btn-secondary" onClick={retryInterruptedJob} disabled={starting}>Start again</button>
+                <button className="btn btn-primary" onClick={resumeInterruptedJob} disabled={starting}>Continue job</button>
+              </>
+            )}
           </div>
         </section>
       )}

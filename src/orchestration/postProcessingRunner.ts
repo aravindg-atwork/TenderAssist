@@ -78,7 +78,8 @@ function linksFor(tender: TenderRow): Array<{ url: string; fileName: string }> {
 
 export async function runPostProcessing(
   deps: PostProcessingDeps,
-  page: Page,
+  /** Undefined when no portal is signed in: saved work continues, and the first download needed asks for sign-in. */
+  page: Page | undefined,
   jobId: string,
   authSessionId: string,
   config: RunConfiguration,
@@ -91,7 +92,7 @@ export async function runPostProcessing(
 ): Promise<AuthJobUpdate> {
   const snapshot = (phase: AuthJobUpdate['phase'], outcome?: 'SUCCESS' | 'ABORTED', abortReason?: string): AuthJobUpdate => ({
     jobId, authSessionId, jobState: deps.jobs.getById(jobId)!.state,
-    authState: deps.sessions.getById(authSessionId)!.state, phase, outcome, abortReason,
+    authState: deps.sessions.getById(authSessionId)?.state ?? 'NOT_STARTED', phase, outcome, abortReason,
   });
   const allTenders = deps.tenders.listForJob(jobId);
   // selectedTenderIds carries the user's explicit tick-box choice from the
@@ -113,7 +114,10 @@ export async function runPostProcessing(
     const plan = deps.outputs.getOrCreatePlan(jobId, outputRoot, localDateFromTimestamp(jobCreatedAt ?? new Date()), outputStructure);
     const { outputDate, structure, jobDirectory } = plan;
     const authState = deps.sessions.getById(authSessionId)?.state;
-    if (authState === 'SESSION_EXPIRED' || authState === 'TAB_LOST') throw new PortalSessionExpiredError(PORTAL_SESSION_EXPIRED_REASON);
+    const pending = approved.some((tender) => linksFor(tender).some((link) => deps.workflow.findDocument(tender.id, link.url)?.state !== 'DOWNLOADED'));
+    if (pending && (!page || authState === 'SESSION_EXPIRED' || authState === 'TAB_LOST')) {
+      throw new PortalSessionExpiredError(PORTAL_SESSION_EXPIRED_REASON);
+    }
     deps.jobMachine.transition(jobId, 'ACQUIRING_DOCUMENTS', 'approved tender document acquisition started');
     onUpdate(snapshot('ACQUISITION'));
     for (const tender of approved) {
@@ -129,6 +133,7 @@ export async function runPostProcessing(
         if (document.state === 'DOWNLOADED') continue;
         try {
           if (!trustedPortalUrl(link.url, portalUrl)) throw new Error('Document URL is outside the selected portal HTTPS path.');
+          if (!page) throw new PortalSessionExpiredError(PORTAL_SESSION_EXPIRED_REASON);
           const response = await page.context().request.get(link.url, { timeout: 30_000 });
           throwIfCancellationRequested(deps.signal);
           if (!response.ok()) throw new Error(`Portal returned HTTP ${response.status()}.`);

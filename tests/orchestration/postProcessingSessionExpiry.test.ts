@@ -80,7 +80,7 @@ function setup() {
 
   const outputRoot = mkdtempSync(join(tmpdir(), 'tenderassist-expiry-test-'));
   const deps = { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs, signal: undefined };
-  const run = (page: Page, authSessionId: string) => runPostProcessing(
+  const run = (page: Page | undefined, authSessionId: string) => runPostProcessing(
     deps, page, job.id, authSessionId,
     { searchDate: '2026-09-23', productCategories: ['Information Technology'], keywords: [], excludedKeywords: [] },
     outputRoot, () => {}, '', PORTAL_URL, [tender.id]
@@ -149,5 +149,24 @@ describe('runPostProcessing when the session-loss watcher got there first', () =
     expect(result.abortReason).toBe(PORTAL_SESSION_EXPIRED_REASON);
     expect(result.outcome).toBeUndefined();
     expect(result.jobState).toBe('AUTH_REQUIRED');
+  });
+});
+
+describe('runPostProcessing without a portal page (resuming an interrupted run)', () => {
+  it('asks for sign-in when documents still need downloading', async () => {
+    const t = setup();
+    const result = await t.run(undefined, t.session.id);
+    expect(result.abortReason).toBe(PORTAL_SESSION_EXPIRED_REASON);
+    expect(result.jobState).toBe('SESSION_EXPIRED');
+  });
+
+  it('finishes the local output without the portal when every document is already saved', async () => {
+    const t = setup();
+    await t.run(fakePage(pdf, []), t.session.id);
+    // Simulate a crash during publishing: documents are saved, job not complete.
+    t.db.prepare("UPDATE jobs SET state = 'FAILED_RETRYABLE' WHERE id = ?").run(t.job.id);
+    const result = await t.run(undefined, t.session.id);
+    expect(result.outcome).toBe('SUCCESS');
+    expect(t.jobs.getById(t.job.id)?.state).toBe('COMPLETE');
   });
 });

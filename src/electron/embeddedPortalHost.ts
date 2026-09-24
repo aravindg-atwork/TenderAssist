@@ -114,6 +114,10 @@ export class EmbeddedPortalHost {
     this.view?.setBounds(this.bounds);
   }
 
+  get isOpen(): boolean {
+    return Boolean(this.view && !this.view.webContents.isDestroyed());
+  }
+
   get portalId(): string {
     return this.portal.id;
   }

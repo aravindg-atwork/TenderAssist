@@ -76,6 +76,9 @@ export interface RecoveryJob {
   jobId: string;
   state: JobState;
   config: RunConfiguration;
+  /** How Continue would pick the run back up; START_OVER means only a fresh run is possible. */
+  resume: 'SELECT_TENDERS' | 'COLLECT_DOCUMENTS' | 'START_OVER';
+  resumeDescription: string;
 }
 
 export interface JobListItem {
@@ -117,6 +120,8 @@ export interface TenderAssistApi {
   openJobOutput(jobId: string): Promise<void>;
   getRecoveryJob(): Promise<RecoveryJob | null>;
   dismissRecoveryJob(jobId: string): Promise<void>;
+  /** Continue an interrupted run on the same job from its shortlist or document collection. */
+  resumeJob(jobId: string): Promise<{ jobId: string; plan: RecoveryJob['resume'] }>;
   saveTenderReview(tenderId: string, decision: ManualTenderDecision, reason?: string): Promise<TenderReviewRow>;
   getUpdateStatus(): Promise<UpdateStatus>;
   checkForUpdates(): Promise<UpdateStatus>;

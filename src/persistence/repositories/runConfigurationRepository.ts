@@ -74,6 +74,25 @@ export class RunConfigurationRepository {
     return config;
   }
 
+  /** Remember the confirmed tender selection so an interrupted run can resume downloads. */
+  saveSelection(jobId: string, tenderIds: string[]): void {
+    this.db.prepare('UPDATE job_run_configs SET selected_tender_ids_json = ? WHERE job_id = ?')
+      .run(JSON.stringify([...new Set(tenderIds)]), jobId);
+  }
+
+  /** The confirmed selection, or null when the operator has not confirmed one. */
+  getSelection(jobId: string): string[] | null {
+    const row = this.db.prepare('SELECT selected_tender_ids_json FROM job_run_configs WHERE job_id = ?')
+      .get(jobId) as { selected_tender_ids_json: string | null } | undefined;
+    if (!row?.selected_tender_ids_json) return null;
+    try {
+      const parsed = JSON.parse(row.selected_tender_ids_json) as unknown;
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : null;
+    } catch {
+      return null;
+    }
+  }
+
   getForJob(jobId: string): RunConfiguration | undefined {
     const row = this.db
       .prepare(

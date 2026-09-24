@@ -14,7 +14,7 @@ import { TenderRepository } from '../persistence/repositories/tenderRepository.j
 import { RunConfigurationRepository } from '../persistence/repositories/runConfigurationRepository.js';
 import { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import { PortalCredentialRepository } from '../persistence/repositories/portalCredentialRepository.js';
-import { PublishingSettingsRepository } from '../persistence/repositories/publishingSettingsRepository.js';
+import { PublishingSettingsRepository, type PublishingSettings } from '../persistence/repositories/publishingSettingsRepository.js';
 import { AutomationSettingsRepository } from '../persistence/repositories/automationSettingsRepository.js';
 import { DisplaySettingsRepository, type TextSize } from '../persistence/repositories/displaySettingsRepository.js';
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
@@ -55,7 +55,9 @@ import { buildSupportBundle } from '../system/supportBundle.js';
 import { EmbeddedPortalHost, embeddedPortalTargetPrefix } from './embeddedPortalHost.js';
 import { markJobCancelled, USER_CANCELLED_REASON } from '../orchestration/jobCancellation.js';
 import { createActionPacer } from '../orchestration/actionPacer.js';
-import { DEFAULT_PORTAL_ID, getPortalDefinition } from '../config/portalRegistry.js';
+import { DEFAULT_PORTAL_ID, getPortalDefinition, type PortalDefinition } from '../config/portalRegistry.js';
+import { describeResumePlan, planResume, prepareForDocumentCollection } from '../orchestration/jobResume.js';
+import type { PaceAction } from '../orchestration/actionPacer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EMBEDDED_CDP_PORT = 18_000 + Math.floor(Math.random() * 10_000);
@@ -586,7 +588,9 @@ ipcMain.handle('get-recovery-job', () => {
   const job = jobs.findIncomplete();
   if (!job || job.id === activeJobId) return null;
   const config = runConfigurations.getForJob(job.id);
-  return config ? { jobId: job.id, state: job.state, config } : null;
+  if (!config) return null;
+  const plan = planResume({ jobState: job.state, selection: runConfigurations.getSelection(job.id) });
+  return { jobId: job.id, state: job.state, config, resume: plan.kind, resumeDescription: describeResumePlan(plan) };
 });
 
 ipcMain.handle('dismiss-recovery-job', (_event, jobId: string): void => {
@@ -734,38 +738,195 @@ ipcMain.handle('delete-job', (_event, jobId: string): void => {
   dscArtifacts.delete(jobId);
 });
 
-ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) => {
+// One active run at a time. The context carries what every stage of a run
+// shares, so a fresh run and a resumed one use the same portal, sign-in,
+// document collection, and cleanup steps.
+interface RunContext {
+  portal: PortalDefinition;
+  config: RunConfiguration;
+  outputSettings: PublishingSettings;
+  abortController: AbortController;
+  paceAction: PaceAction;
+  page?: Page;
+  stopWatchingSessionLoss?: () => void;
+}
+
+/** Claim the single active-run slot synchronously, before any await. */
+function claimRun(): { abortController: AbortController; paceAction: PaceAction } {
   if (activeJobId) {
     throw new Error('A job is already running. Wait for it to finish before starting another.');
   }
-  activeJobId = 'pending'; // synchronous claim -- closes the guard atomically, before any await
+  activeJobId = 'pending';
   const abortController = new AbortController();
-  const paceAction = createActionPacer(automationSettings.get(), abortController.signal);
   activeJobAbortController = abortController;
   activeStopWatchingSessionLoss = undefined;
   lastActiveJobUpdate = undefined;
+  return { abortController, paceAction: createActionPacer(automationSettings.get(), abortController.signal) };
+}
 
-  let config: RunConfiguration;
+function releaseRun(abortController: AbortController): void {
+  if (activeJobAbortController !== abortController) return;
+  activeJobId = null;
+  activeJobAbortController = undefined;
+  activeStopWatchingSessionLoss = undefined;
+  activeJobCompletion = undefined;
+  lastActiveJobUpdate = undefined;
+}
+
+async function checkReadiness(portal: PortalDefinition, outputSettings: PublishingSettings): Promise<void> {
+  const preflight = await runPreflight(outputSettings.localOutputRoot, portal.url, portal.name, outputSettings.driveOutputRoot);
+  const blocker = preflight.checks.find((check) => check.level === 'BLOCKED');
+  if (blocker) throw new Error(blocker.message);
+}
+
+async function openPortal(portal: PortalDefinition): Promise<void> {
+  portalHost?.close();
+  portalHost = new EmbeddedPortalHost(() => mainWindow, dscDownloadDirectory, portal);
+  portalHost.setZoomPercent(displaySettings.getPortalZoom(portal.id));
+  await portalHost.open(portal.url);
+  await waitForCdpReady(EMBEDDED_CDP_PORT, 15000);
+}
+
+/** Run assisted sign-in; with `existingJobId`, the same job signs in again. */
+function signIn(
+  ctx: RunContext,
+  credentials: PortalCredentials | undefined,
+  onUpdate: (update: AuthJobUpdate) => void,
+  existingJobId?: string
+): Promise<AuthJobUpdate> {
+  return runAuthJob(
+    {
+      jobs, sessions, jobMachine, authMachine,
+      portalCredentials: credentials,
+      targetUrlPrefix: embeddedPortalTargetPrefix(ctx.portal),
+      registerDscReady: (listener) => portalHost!.onDscReady(listener),
+      onDscJnlpReady: (jobId, artifact) => dscArtifacts.set(jobId, artifact),
+      signal: ctx.abortController.signal,
+      paceAction: ctx.paceAction,
+      existingJobId,
+    },
+    `http://127.0.0.1:${EMBEDDED_CDP_PORT}`,
+    ctx.portal.url,
+    onUpdate,
+    (page, stop) => {
+      ctx.page = page;
+      ctx.stopWatchingSessionLoss = stop;
+      activeStopWatchingSessionLoss = stop;
+    }
+  );
+}
+
+/**
+ * Download, extract, and publish for the confirmed selection. If the portal
+ * signs the operator out (or no portal is open yet, when resuming), keep
+ * the selection and saved files, ask for a fresh sign-in on the same job,
+ * and continue without repeating search or classification.
+ */
+async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: string, selectedTenderIds: string[]): Promise<AuthJobUpdate> {
+  let result: AuthJobUpdate;
+  for (let signIns = 0; ; signIns += 1) {
+    result = await runPostProcessing(
+      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: ctx.abortController.signal },
+      ctx.page,
+      jobId,
+      authSessionId,
+      ctx.config,
+      ctx.outputSettings.localOutputRoot,
+      emitJobUpdate,
+      ctx.outputSettings.driveOutputRoot,
+      ctx.portal.url,
+      selectedTenderIds,
+      ctx.outputSettings.structure
+    );
+    syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, jobId));
+    if (result.abortReason !== PORTAL_SESSION_EXPIRED_REASON || result.outcome || ctx.abortController.signal.aborted) return result;
+    if (signIns >= MAX_ACQUISITION_SIGN_INS) {
+      jobMachine.transition(jobId, 'FAILED_MANUAL', 'portal session kept expiring during document acquisition');
+      result = {
+        ...result,
+        jobState: 'FAILED_MANUAL',
+        outcome: 'ABORTED',
+        abortReason: 'The portal kept signing you out while documents downloaded. Files already saved are kept; start a new run to collect the rest.',
+      };
+      emitJobUpdate(result);
+      return result;
+    }
+    ctx.stopWatchingSessionLoss?.();
+    if (!portalHost?.isOpen) await openPortal(ctx.portal);
+    const credentials = await loadPortalCredentials(ctx.portal.id).catch(() => undefined);
+    const signedIn = await signIn(ctx, credentials, emitJobUpdate, jobId);
+    if (signedIn.outcome !== 'SUCCESS') return signedIn;
+    authSessionId = signedIn.authSessionId;
+  }
+}
+
+/** Wait for the operator's tender choice and remember it for resuming. */
+async function awaitSelection(ctx: RunContext, jobId: string): Promise<string[] | null> {
+  const selected = await waitForDocumentSelection(jobId, ctx.abortController.signal);
+  if (selected === null) return null;
+  runConfigurations.saveSelection(jobId, selected);
+  syncOpportunities('selection', () => recordDownloadSelection(opportunitySync, jobId, selected));
+  return selected;
+}
+
+/**
+ * The run only ever resolves with a terminal update; a rejection means
+ * something broke outside its own control loop (e.g. the portal view
+ * crashed). Report it so the UI never shows a dead run as running, then
+ * log out best-effort, close the portal, and free the run slot.
+ */
+function finishRun(ctx: RunContext, run: Promise<unknown>, onFailure: (err: unknown) => void): Promise<void> {
+  return run
+    .then(() => undefined)
+    .catch((err) => {
+      console.error('Run failed unexpectedly:', err);
+      onFailure(err);
+      const failedJobId = activeJobId;
+      if (failedJobId && failedJobId !== 'pending' && !ctx.abortController.signal.aborted) {
+        const job = jobs.getById(failedJobId);
+        const session = sessions.getLatestForJob(failedJobId);
+        emitJobUpdate({
+          jobId: failedJobId,
+          authSessionId: session?.id ?? '',
+          jobState: job?.state ?? 'FAILED_MANUAL',
+          authState: session?.state ?? 'TAB_LOST',
+          outcome: 'ABORTED',
+          abortReason: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })
+    .finally(async () => {
+      ctx.stopWatchingSessionLoss?.();
+      if (ctx.page) await attemptLogout(ctx.page);
+      portalHost?.close();
+      releaseRun(ctx.abortController);
+    });
+}
+
+ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) => {
+  const { abortController, paceAction } = claimRun();
+  let ctx: RunContext;
   let savedPortalCredentials: PortalCredentials | undefined;
-  let portal = getPortalDefinition(DEFAULT_PORTAL_ID);
-  let outputSettings = publishingSettings.get(DEFAULT_PORTAL_ID);
   try {
-    config = normalizeRunConfiguration(requestedConfig);
-    portal = getPortalDefinition(config.portalId);
+    const config = normalizeRunConfiguration(requestedConfig);
+    const portal = getPortalDefinition(config.portalId);
     config.portalId = portal.id;
-    outputSettings = publishingSettings.get(portal.id);
-    const preflight = await runPreflight(outputSettings.localOutputRoot, portal.url, portal.name, outputSettings.driveOutputRoot);
-    const blocker = preflight.checks.find((check) => check.level === 'BLOCKED');
-    if (blocker) throw new Error(blocker.message);
+    const outputSettings = publishingSettings.get(portal.id);
+    ctx = { portal, config, outputSettings, abortController, paceAction };
+    await checkReadiness(portal, outputSettings);
     if (!runConfigurations.hasSavedDefaults()) {
       throw new Error('Save your product categories and intent in Settings before starting a job.');
     }
     savedPortalCredentials = await loadPortalCredentials(portal.id);
+    await openPortal(portal);
   } catch (error) {
-    activeJobId = null;
-    activeJobAbortController = undefined;
+    // Claiming the slot synchronously means this handler owns freeing it on
+    // an early failure; otherwise no later job could ever start.
+    portalHost?.close();
+    releaseRun(abortController);
     throw error;
   }
+  const { portal, config } = ctx;
 
   // Append a local-midnight time so "YYYY-MM-DD" parses as the calendar day
   // the person actually picked, not UTC midnight (which rolls back a day in
@@ -776,226 +937,111 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     productCategory,
   }));
 
-  try {
-    portalHost?.close();
-    portalHost = new EmbeddedPortalHost(() => mainWindow, dscDownloadDirectory, portal);
-    portalHost.setZoomPercent(displaySettings.getPortalZoom(portal.id));
-    await portalHost.open(portal.url);
-    await waitForCdpReady(EMBEDDED_CDP_PORT, 15000);
-  } catch (err) {
-    // Making the guard atomic means WE now own resetting it on early failure --
-    // without this, a launch failure would permanently lock out all future jobs.
-    activeJobId = null;
-    activeJobAbortController = undefined;
-    portalHost?.close();
-    throw err;
-  }
-
-  // The `!` tells TypeScript this will definitely be assigned before use --
-  // true here because the Promise executor runs synchronously, but that
-  // fact isn't visible to TS's control-flow analysis across the closure.
   let resolveStarted!: (jobId: string) => void;
   let rejectStarted!: (err: unknown) => void;
   const started = new Promise<string>((resolve, reject) => {
     resolveStarted = resolve;
     rejectStarted = reject;
   });
-
   let jobIdCaptured = false;
-  let capturedPage: Page | undefined;
-  let stopWatchingSessionLoss: (() => void) | undefined;
 
-  const runPromise = runAuthJob(
-    {
-      jobs,
-      sessions,
-      jobMachine,
-      authMachine,
-      portalCredentials: savedPortalCredentials,
-      targetUrlPrefix: embeddedPortalTargetPrefix(portal),
-      registerDscReady: (listener) => portalHost!.onDscReady(listener),
-      onDscJnlpReady: (jobId, artifact) => dscArtifacts.set(jobId, artifact),
-      signal: abortController.signal,
-      paceAction,
-    },
-    `http://127.0.0.1:${EMBEDDED_CDP_PORT}`,
-    portal.url,
-    (update) => {
-      if (!jobIdCaptured) {
-        jobIdCaptured = true;
-        activeJobId = update.jobId;
-        runConfigurations.saveForJob(update.jobId, config);
-        resolveStarted(update.jobId);
-      }
-      emitJobUpdate(update);
-    },
-    (page, stop) => {
-      capturedPage = page;
-      stopWatchingSessionLoss = stop;
-      activeStopWatchingSessionLoss = stop;
+  const run = signIn(ctx, savedPortalCredentials, (update) => {
+    if (!jobIdCaptured) {
+      jobIdCaptured = true;
+      activeJobId = update.jobId;
+      runConfigurations.saveForJob(update.jobId, config);
+      resolveStarted(update.jobId);
     }
-  )
-  .then(async (authResult) => {
-    if (authResult.outcome !== 'SUCCESS' || !capturedPage) return authResult;
-
-    return runSearchPhase(
-      { jobs, sessions, jobMachine, searches, tenders, classifications, signal: abortController.signal, paceAction },
-      capturedPage,
-      authResult.jobId,
-      authResult.authSessionId,
-      (update) => {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
-      },
-      searchDate,
-      configuredSearches,
-      { keywords: config.keywords, excludedKeywords: config.excludedKeywords }
-    );
+    emitJobUpdate(update);
   })
-  .then(async (searchResult) => {
-    // Record what the run saw even if the search stopped part-way.
-    syncOpportunities('search', () => syncJobOpportunities(opportunitySync, searchResult.jobId, portal.id, { screening: false }));
-    if (searchResult.phase !== 'SEARCH' || searchResult.outcome !== 'SUCCESS' || !capturedPage) {
-      return searchResult;
-    }
-    return runClassificationPhase(
-      { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction },
-      capturedPage,
-      searchResult.jobId,
-      searchResult.authSessionId,
-      config,
-      (update) => {
-        emitJobUpdate(update);
-      },
-      portal.stateName
-    );
-  })
-  .then(async (classificationResult) => {
-    syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, classificationResult.jobId, portal.id, { screening: classificationResult.outcome === 'SUCCESS' }));
-    if (classificationResult.phase !== 'CLASSIFICATION' || classificationResult.outcome !== 'SUCCESS' || !capturedPage) {
-      return classificationResult;
-    }
-    // Job sits in SHORTLISTED here -- the renderer shows the review panel
-    // and waits for the user to tick tenders and confirm before anything
-    // downloads. cancel-job aborts this wait too (see waitForDocumentSelection).
-    const selectedTenderIds = await waitForDocumentSelection(classificationResult.jobId, abortController.signal);
-    if (selectedTenderIds === null) return classificationResult;
-    syncOpportunities('selection', () => recordDownloadSelection(opportunitySync, classificationResult.jobId, selectedTenderIds));
-    const jobId = classificationResult.jobId;
-    let authSessionId = classificationResult.authSessionId;
-    let postProcessingResult: AuthJobUpdate;
-    // If the portal signs the operator out while they choose tenders or while
-    // documents download, keep the selection and saved files, ask for a fresh
-    // sign-in in the same embedded portal, and continue acquisition without
-    // repeating search or classification.
-    for (let signIns = 0; ; signIns += 1) {
-      postProcessingResult = await runPostProcessing(
-        { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: abortController.signal },
-        capturedPage!,
-        jobId,
-        authSessionId,
-        config,
-        outputSettings.localOutputRoot,
-        (update) => {
-          emitJobUpdate(update);
-        },
-        outputSettings.driveOutputRoot,
-        portal.url,
-        selectedTenderIds,
-        outputSettings.structure
-      );
-      syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, jobId));
-      if (postProcessingResult.abortReason !== PORTAL_SESSION_EXPIRED_REASON || postProcessingResult.outcome || abortController.signal.aborted) break;
-      if (signIns >= MAX_ACQUISITION_SIGN_INS) {
-        jobMachine.transition(jobId, 'FAILED_MANUAL', 'portal session kept expiring during document acquisition');
-        postProcessingResult = {
-          ...postProcessingResult,
-          jobState: 'FAILED_MANUAL',
-          outcome: 'ABORTED',
-          abortReason: 'The portal kept signing you out while documents downloaded. Files already saved are kept; start a new run to collect the rest.',
-        };
-        emitJobUpdate(postProcessingResult);
-        break;
-      }
-      stopWatchingSessionLoss?.();
-      const credentials = await loadPortalCredentials(portal.id).catch(() => undefined);
-      const signIn = await runAuthJob(
-        {
-          jobs, sessions, jobMachine, authMachine,
-          portalCredentials: credentials,
-          targetUrlPrefix: embeddedPortalTargetPrefix(portal),
-          registerDscReady: (listener) => portalHost!.onDscReady(listener),
-          onDscJnlpReady: (id, artifact) => dscArtifacts.set(id, artifact),
-          signal: abortController.signal,
-          paceAction,
-          existingJobId: jobId,
-        },
-        `http://127.0.0.1:${EMBEDDED_CDP_PORT}`,
-        portal.url,
+    .then(async (authResult) => {
+      if (authResult.outcome !== 'SUCCESS' || !ctx.page) return authResult;
+      return runSearchPhase(
+        { jobs, sessions, jobMachine, searches, tenders, classifications, signal: abortController.signal, paceAction },
+        ctx.page,
+        authResult.jobId,
+        authResult.authSessionId,
         emitJobUpdate,
-        (page, stop) => {
-          capturedPage = page;
-          stopWatchingSessionLoss = stop;
-          activeStopWatchingSessionLoss = stop;
-        }
+        searchDate,
+        configuredSearches,
+        { keywords: config.keywords, excludedKeywords: config.excludedKeywords }
       );
-      if (signIn.outcome !== 'SUCCESS') return signIn;
-      authSessionId = signIn.authSessionId;
-    }
-    return postProcessingResult;
-  });
-
-  // runAuthJob only ever RESOLVES (with a terminal SUCCESS/TIMEOUT/ABORTED
-  // AuthJobUpdate) -- a rejection here means something broke outside its own
-  // control loop (e.g. Chrome crashed). Surface it instead of letting it
-  // become an unhandled rejection, since nothing else awaits this promise. It
-  // also rejects `started` -- a silent no-op if `started` already resolved,
-  // but load-bearing if runAuthJob fails before its first onUpdate call.
-  const completionPromise = runPromise
-    .catch((err) => {
-      console.error('runAuthJob failed unexpectedly:', err);
-      rejectStarted(err); // no-op if `started` already resolved
-      if (jobIdCaptured) {
-        // A rejection after the first onUpdate means the job genuinely died
-        // mid-run with no terminal AuthJobUpdate ever pushed -- without this,
-        // the UI has no way to learn the job is dead and stays stuck showing
-        // it as still running indefinitely.
-        const failedJobId = activeJobId;
-        if (failedJobId && failedJobId !== 'pending') {
-          const job = jobs.getById(failedJobId);
-          const session = sessions.getLatestForJob(failedJobId);
-          if (!abortController.signal.aborted) {
-            emitJobUpdate({
-              jobId: failedJobId,
-              authSessionId: session?.id ?? '',
-              jobState: job?.state ?? 'FAILED_MANUAL',
-              authState: session?.state ?? 'TAB_LOST',
-              outcome: 'ABORTED',
-              abortReason: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
-      }
     })
-    .finally(async () => {
-      stopWatchingSessionLoss?.();
-      // Clean, server-side logout before closing the embedded portal -- best
-      // effort only (attemptLogout swallows its own failures).
-      if (capturedPage) {
-        await attemptLogout(capturedPage);
+    .then(async (searchResult) => {
+      // Record what the run saw even if the search stopped part-way.
+      syncOpportunities('search', () => syncJobOpportunities(opportunitySync, searchResult.jobId, portal.id, { screening: false }));
+      if (searchResult.phase !== 'SEARCH' || searchResult.outcome !== 'SUCCESS' || !ctx.page) return searchResult;
+      return runClassificationPhase(
+        { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction },
+        ctx.page,
+        searchResult.jobId,
+        searchResult.authSessionId,
+        config,
+        emitJobUpdate,
+        portal.stateName
+      );
+    })
+    .then(async (classificationResult) => {
+      syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, classificationResult.jobId, portal.id, { screening: classificationResult.outcome === 'SUCCESS' }));
+      if (classificationResult.phase !== 'CLASSIFICATION' || classificationResult.outcome !== 'SUCCESS' || !ctx.page) {
+        return classificationResult;
       }
-      portalHost?.close();
-      if (activeJobAbortController === abortController) {
-        activeJobId = null;
-        activeJobAbortController = undefined;
-        activeStopWatchingSessionLoss = undefined;
-        activeJobCompletion = undefined;
-        lastActiveJobUpdate = undefined;
-      }
+      // Job sits in SHORTLISTED here -- the renderer shows the review panel
+      // and waits for the operator to tick tenders and confirm before
+      // anything downloads. cancel-job aborts this wait too.
+      const selectedTenderIds = await awaitSelection(ctx, classificationResult.jobId);
+      if (selectedTenderIds === null) return classificationResult;
+      return collectDocuments(ctx, classificationResult.jobId, classificationResult.authSessionId, selectedTenderIds);
     });
-  activeJobCompletion = completionPromise;
 
-  const jobId = await started;
-  return { jobId };
+  // rejectStarted is a no-op once `started` resolved, but load-bearing if
+  // sign-in fails before its first update.
+  activeJobCompletion = finishRun(ctx, run, rejectStarted);
+  return { jobId: await started };
+});
+
+ipcMain.handle('resume-job', async (_event, jobId: string) => {
+  const job = jobs.getById(jobId);
+  const config = runConfigurations.getForJob(jobId);
+  if (!job || !config) throw new Error('This run can no longer be resumed.');
+  const plan = planResume({ jobState: job.state, selection: runConfigurations.getSelection(jobId) });
+  if (plan.kind === 'START_OVER') throw new Error('This run stopped before the shortlist. Start it again instead.');
+
+  const { abortController, paceAction } = claimRun();
+  const portal = getPortalDefinition(config.portalId);
+  const outputSettings = publishingSettings.get(portal.id);
+  const ctx: RunContext = { portal, config, outputSettings, abortController, paceAction };
+  try {
+    await checkReadiness(portal, outputSettings);
+  } catch (error) {
+    releaseRun(abortController);
+    throw error;
+  }
+  activeJobId = jobId;
+  const latestSession = sessions.getLatestForJob(jobId);
+
+  // No portal is open yet: selection needs none, and document collection
+  // asks for sign-in only if something still has to be downloaded.
+  const run = (async () => {
+    let selection = plan.kind === 'COLLECT_DOCUMENTS' ? plan.selectedTenderIds : null;
+    if (!selection) {
+      emitJobUpdate({
+        jobId,
+        authSessionId: latestSession?.id ?? '',
+        jobState: 'SHORTLISTED',
+        authState: latestSession?.state ?? 'NOT_STARTED',
+        phase: 'CLASSIFICATION',
+        outcome: 'SUCCESS',
+        statusMessage: 'Choose which tenders to download. Search and screening are not repeated.',
+      });
+      selection = await awaitSelection(ctx, jobId);
+      if (selection === null) return;
+    }
+    prepareForDocumentCollection(jobs, jobMachine, jobId);
+    await collectDocuments(ctx, jobId, latestSession?.id ?? '', selection);
+  })();
+  activeJobCompletion = finishRun(ctx, run, () => {});
+  return { jobId, plan: plan.kind };
 });
 
   app.on('second-instance', () => {

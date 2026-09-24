@@ -53,6 +53,11 @@ export class TenderWorkflowRepository {
     return this.db.prepare('SELECT * FROM tender_reviews WHERE tender_id = ?').get(tenderId) as TenderReviewRow | undefined;
   }
 
+  findDocument(tenderId: string, sourceUrl: string): TenderDocumentRow | undefined {
+    return this.db.prepare('SELECT * FROM tender_documents WHERE tender_id = ? AND source_url = ?')
+      .get(tenderId, sourceUrl) as TenderDocumentRow | undefined;
+  }
+
   upsertDocument(tenderId: string, sourceUrl: string, fileName: string): TenderDocumentRow {
     const existing = this.db.prepare(
       'SELECT * FROM tender_documents WHERE tender_id = ? AND source_url = ?'
