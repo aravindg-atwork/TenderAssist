@@ -3,6 +3,7 @@ import type { ClassificationRepository } from '../persistence/repositories/class
 import type { TenderWorkflowRepository } from '../persistence/repositories/tenderWorkflowRepository.js';
 import type { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
 import { canTransition, DECISION_TARGETS, type OperatorDecision } from '../state/opportunityLifecycle.js';
+import { screeningEvidence } from '../review/tenderExplanation.js';
 
 // Bridges run-level rows (`tenders`, gates, reviews) to durable tender
 // records. Every function is idempotent, so a phase can call it again after
@@ -23,12 +24,9 @@ export function syncJobOpportunities(deps: OpportunitySyncDeps, jobId: string, p
   for (const tender of deps.tenders.listForJob(jobId)) {
     const opportunity = deps.opportunities.recordSighting(tender, portalId, { jobId });
     if (!options.screening) continue;
-    const gates = deps.classifications.listForTender(tender.id);
     const final = deps.classifications.getFinalForTender(tender.id);
     if (final === 'NOT_RUN') continue;
-    deps.opportunities.recordScreening(opportunity.id, final, { jobId }, {
-      gates: gates.map((gate) => ({ gate: gate.gate, result: gate.result, reasonCode: gate.reason_code, evidence: JSON.parse(gate.evidence_json) as unknown })),
-    });
+    deps.opportunities.recordScreening(opportunity.id, final, { jobId }, { ...screeningEvidence(deps.classifications.listForTender(tender.id)) });
   }
 }
 

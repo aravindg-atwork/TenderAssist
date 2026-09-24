@@ -43,6 +43,9 @@ const api: TenderAssistApi = {
     ipcRenderer.on('job-updated', listener);
     return () => ipcRenderer.removeListener('job-updated', listener);
   },
+  getInbox: () => ipcRenderer.invoke('get-inbox'),
+  decideTenders: (opportunityIds, decision, note) => ipcRenderer.invoke('decide-tenders', opportunityIds, decision, note),
+  acknowledgeRuns: (jobIds) => ipcRenderer.invoke('acknowledge-runs', jobIds),
   onAppNavigation: (callback) => {
     const listener = (_event: IpcRendererEvent, command: AppNavigationCommand) => callback(command);
     ipcRenderer.on('app-navigate', listener);

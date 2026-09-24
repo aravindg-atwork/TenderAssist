@@ -38,6 +38,7 @@ export interface OpportunityRow {
   lifecycle: OpportunityLifecycle;
   recommendation: Recommendation | null;
   changed_since_decision: 0 | 1;
+  inbox_hidden_at: string | null;
   first_seen_at: string;
   last_seen_at: string;
   latest_sighting_id: string | null;
@@ -73,6 +74,16 @@ export interface CorrigendumInput {
   /** e.g. 'DEADLINE', 'BOQ', 'FEE', 'TECHNICAL_DOCUMENT', 'CANCELLATION'. */
   changes: string[];
   description?: string | null;
+}
+
+/** An opportunity plus its latest automatic screening, for the Inbox. */
+export interface InboxRow extends OpportunityRow {
+  screening_json: string | null;
+  screening_job_id: string | null;
+  screening_job_reviewed_at: string | null;
+  screening_at: string | null;
+  /** Latest operator "Move to review"; beats an older automatic reject. */
+  reopened_at: string | null;
 }
 
 /** Optional context shared by every write: which run caused it and when it happened. */
@@ -149,6 +160,24 @@ export class OpportunityRepository {
     ).all(...params) as unknown as OpportunityRow[];
   }
 
+  /** Tenders awaiting a decision, and decided tenders that changed since. */
+  listInboxRows(): InboxRow[] {
+    return this.db.prepare(
+      `SELECT o.*, e.data_json AS screening_json, e.job_id AS screening_job_id, j.reviewed_at AS screening_job_reviewed_at,
+              e.created_at AS screening_at,
+              (SELECT MAX(created_at) FROM opportunity_events WHERE opportunity_id = o.id AND kind = 'REOPENED') AS reopened_at
+       FROM opportunities o
+       LEFT JOIN opportunity_events e ON e.id = (
+         SELECT id FROM opportunity_events
+         WHERE opportunity_id = o.id AND kind = 'SCREENED'
+         ORDER BY created_at DESC, rowid DESC LIMIT 1)
+       LEFT JOIN jobs j ON j.id = e.job_id
+       WHERE o.workspace_id = ?
+         AND ((o.lifecycle IN ('NEW', 'SCREENED') AND o.inbox_hidden_at IS NULL) OR o.changed_since_decision = 1)
+       ORDER BY o.closing_at IS NULL, o.closing_at ASC, o.last_seen_at DESC`
+    ).all(this.workspaceId) as unknown as InboxRow[];
+  }
+
   listEvents(opportunityId: string): OpportunityEventRow[] {
     return this.db.prepare(
       'SELECT * FROM opportunity_events WHERE opportunity_id = ? ORDER BY created_at ASC, rowid ASC'
@@ -212,12 +241,13 @@ export class OpportunityRepository {
              organisation_chain = COALESCE(?, organisation_chain), department = COALESCE(?, department),
              state_name = COALESCE(?, state_name), published_date = COALESCE(?, published_date),
              closing_date = ?, closing_at = ?, value_in_rupees = COALESCE(?, value_in_rupees),
-             changed_since_decision = ?, last_seen_at = ?, latest_sighting_id = ?, updated_at = ?
+             changed_since_decision = ?, last_seen_at = ?, latest_sighting_id = ?, updated_at = ?,
+             inbox_hidden_at = CASE WHEN ? THEN inbox_hidden_at ELSE NULL END
            WHERE id = ?`
         ).run(meaningful(tender.tender_portal_id), tender.title, tender.organisation_chain,
           tender.department ?? null, tender.state_name ?? null, tender.published_date,
           closingDate, toClosingAt(closingDate), incoming.value_in_rupees,
-          flag, at, tender.id, at, opportunity.id);
+          flag, at, tender.id, at, alreadyLinked ? 1 : 0, opportunity.id);
       }
       this.db.prepare('UPDATE tenders SET opportunity_id = ? WHERE id = ?').run(opportunity.id, tender.id);
       if (!alreadyLinked) {
@@ -261,7 +291,9 @@ export class OpportunityRepository {
       const opportunity = this.require(id);
       const at = context.at ?? new Date().toISOString();
       if (opportunity.lifecycle === target) {
-        if (!opportunity.changed_since_decision && !cleanNote(context.note)) return opportunity;
+        // REOPEN on a SCREENED auto-reject is the operator overriding
+        // automation ("Move to review"), so it is always recorded.
+        if (decision !== 'REOPEN' && !opportunity.changed_since_decision && !cleanNote(context.note)) return opportunity;
       } else {
         assertTransition(opportunity.lifecycle, target);
       }
@@ -302,6 +334,12 @@ export class OpportunityRepository {
     return this.db.prepare(
       `SELECT * FROM opportunity_links WHERE from_opportunity_id = ? AND to_opportunity_id = ? AND kind = 'POSSIBLE_RETENDER'`
     ).get(fromId, toId) as unknown as OpportunityLinkRow;
+  }
+
+  /** Keeps these tenders out of the Inbox until a run sees them again. */
+  hideFromInbox(ids: string[], at = new Date().toISOString()): void {
+    const update = this.db.prepare('UPDATE opportunities SET inbox_hidden_at = ? WHERE id = ? AND workspace_id = ?');
+    for (const id of ids) update.run(at, id, this.workspaceId);
   }
 
   /** Moves open tenders whose closing time has passed to EXPIRED. Returns how many moved. */

@@ -81,10 +81,32 @@ describe('migration 010 backfill', () => {
     expect(operatorReject).toMatchObject({ lifecycle: 'REJECTED', recommendation: 'UNCERTAIN' });
     expect(repo.listEvents(operatorReject.id).find((event) => event.kind === 'REJECTED')).toMatchObject({ actor: 'operator', note: 'hardware only' });
 
-    expect(repo.findByIdentity('tamil-nadu', '2026_ELCO_3_1')).toMatchObject({ lifecycle: 'SCREENED', recommendation: 'REJECT' });
+    const autoReject = repo.findByIdentity('tamil-nadu', '2026_ELCO_3_1')!;
+    expect(autoReject).toMatchObject({ lifecycle: 'SCREENED', recommendation: 'REJECT' });
+    const screening = repo.listEvents(autoReject.id).find((event) => event.kind === 'SCREENED')!;
+    expect(JSON.parse(screening.data_json).gates).toEqual([{ gate: 'G1', result: 'REJECT', reasonCode: 'TEST', evidence: {} }]);
     expect(repo.findByIdentity('kerala', '2026_ELCO_1_1')).toMatchObject({ lifecycle: 'NEW' });
+    expect(repo.findByIdentity('kerala', '2026_ELCO_1_1')?.inbox_hidden_at).not.toBeNull();
     expect(db.prepare('SELECT COUNT(*) AS n FROM tenders WHERE opportunity_id IS NULL').get()).toEqual({ n: 0 });
     expect(db.prepare('SELECT COUNT(*) AS n FROM jobs WHERE reviewed_at IS NULL').get()).toEqual({ n: 0 });
+
+    // Undecided history stays out of the Inbox; decided tenders are unaffected.
+    const hidden = db.prepare('SELECT identity_key FROM opportunities WHERE inbox_hidden_at IS NOT NULL ORDER BY identity_key').all()
+      .map((row) => (row as { identity_key: string }).identity_key);
+    expect(hidden).toEqual(['2026_ELCO_1_1', '2026_ELCO_3_1']);
+    expect(repo.listInboxRows().map((row) => row.identity_key)).toEqual([]);
+
+    // A new run seeing a hidden tender brings it back.
+    const wednesday = jobs.create();
+    const kerala = repo.findByIdentity('kerala', '2026_ELCO_1_1')!;
+    const seenAgain = tenders.upsert({
+      jobId: wednesday.id, tenderRef: 'REF-2026_ELCO_3_1', tenderPortalId: '2026_ELCO_3_1', title: 'Tender 2026_ELCO_3_1',
+      organisationChain: null, publishedDate: null, closingDate: null, openingDate: null,
+      productCategory: 'Information Technology', valueInRupees: 'NA',
+    });
+    repo.recordSighting(seenAgain, 'tamil-nadu', { jobId: wednesday.id });
+    expect(repo.findByIdentity('tamil-nadu', '2026_ELCO_3_1')?.inbox_hidden_at).toBeNull();
+    expect(repo.getById(kerala.id)?.inbox_hidden_at).not.toBeNull();
 
     // Re-running migrations is a no-op.
     runMigrations(db, MIGRATIONS);

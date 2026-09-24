@@ -19,6 +19,9 @@ CREATE TABLE opportunities (
   lifecycle TEXT NOT NULL,
   recommendation TEXT,
   changed_since_decision INTEGER NOT NULL DEFAULT 0,
+  -- Set on tenders carried over from before this migration so old history
+  -- does not flood the Inbox; cleared when a new run sees the tender again.
+  inbox_hidden_at TEXT,
   first_seen_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
   latest_sighting_id TEXT,

@@ -44,6 +44,12 @@ export class JobRepository {
     return row;
   }
 
+  /** Marks runs as reviewed; their automatic rejects then leave the Inbox. */
+  markReviewed(ids: string[], at = new Date().toISOString()): void {
+    const update = this.db.prepare('UPDATE jobs SET reviewed_at = ? WHERE id = ? AND reviewed_at IS NULL');
+    for (const id of ids) update.run(at, id);
+  }
+
   getById(id: string): JobRow | undefined {
     return this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as JobRow | undefined;
   }

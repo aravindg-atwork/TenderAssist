@@ -20,6 +20,8 @@ import { TenderWorkflowRepository, type ManualTenderDecision } from '../persiste
 import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
 import { applyTenderDecision, recordCollectedDocuments, recordDownloadSelection, syncJobOpportunities } from '../orchestration/opportunitySync.js';
+import { buildInbox, type InboxView } from '../review/inbox.js';
+import type { OperatorDecision } from '../state/opportunityLifecycle.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
@@ -173,7 +175,7 @@ function createWindow(): void {
   void mainWindow.loadFile(join(__dirname, '..', '..', 'renderer', 'dist', 'index.html'));
 }
 
-function navigateApplication(view: 'jobs' | 'settings', section?: 'folders'): void {
+function navigateApplication(view: 'inbox' | 'jobs' | 'settings', section?: 'folders'): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
@@ -203,8 +205,9 @@ function configureApplicationMenu(): void {
     {
       label: 'View',
       submenu: [
-        { label: 'Show Jobs', accelerator: 'CmdOrCtrl+1', click: () => navigateApplication('jobs') },
-        { label: 'Show Settings', accelerator: 'CmdOrCtrl+2', click: () => navigateApplication('settings') },
+        { label: 'Show Inbox', accelerator: 'CmdOrCtrl+1', click: () => navigateApplication('inbox') },
+        { label: 'Show Runs', accelerator: 'CmdOrCtrl+2', click: () => navigateApplication('jobs') },
+        { label: 'Show Settings', accelerator: 'CmdOrCtrl+3', click: () => navigateApplication('settings') },
         { type: 'separator' },
         { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' },
         { role: 'togglefullscreen' },
@@ -237,6 +240,25 @@ function configureApplicationMenu(): void {
   }
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+const OPERATOR_DECISIONS: readonly OperatorDecision[] = ['APPROVE', 'REJECT', 'DEFER', 'REOPEN'];
+
+ipcMain.handle('get-inbox', (): InboxView => buildInbox(opportunities));
+
+ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unknown, note?: unknown): InboxView => {
+  if (!Array.isArray(opportunityIds) || opportunityIds.length === 0 || !opportunityIds.every((id) => typeof id === 'string')) {
+    throw new Error('Choose at least one tender.');
+  }
+  if (!OPERATOR_DECISIONS.includes(decision as OperatorDecision)) throw new Error('Unknown decision.');
+  opportunities.decide(opportunityIds, decision as OperatorDecision, { note: typeof note === 'string' ? note : null });
+  return buildInbox(opportunities);
+});
+
+ipcMain.handle('acknowledge-runs', (_event, jobIds: unknown): InboxView => {
+  if (!Array.isArray(jobIds) || !jobIds.every((id) => typeof id === 'string')) throw new Error('Invalid runs.');
+  jobs.markReviewed(jobIds.filter((id) => id !== activeJobId));
+  return buildInbox(opportunities);
+});
 
 ipcMain.handle('list-jobs', (): JobListItem[] => {
   return jobs.listAll().map((job) => {

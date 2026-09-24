@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import { JobList } from './components/JobList';
 import { JobDetail } from './components/JobDetail';
 import { SettingsPage } from './components/SettingsPage';
+import { Inbox } from './components/Inbox';
 import type { AuthJobUpdate, RunSettingsState } from '../../src/electron/ipcTypes';
 import { DEFAULT_PORTAL_ID } from '../../src/config/portalRegistry';
 
-type AppView = 'jobs' | 'settings';
+type AppView = 'inbox' | 'jobs' | 'settings';
 
 export function App() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -15,6 +16,9 @@ export function App() {
   const [view, setView] = useState<AppView>('jobs');
   const [settingsFocus, setSettingsFocus] = useState<{ section: 'folders'; requestId: number } | null>(null);
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
+  const [inboxCount, setInboxCount] = useState(0);
+  const [navigated, setNavigated] = useState(false);
+  const navigate = (next: AppView) => { setNavigated(true); setView(next); setSelectedJobId(null); };
   const [selectedPortalId, setSelectedPortalIdState] = useState(() => localStorage.getItem('tenderassist.portal') || DEFAULT_PORTAL_ID);
   const setSelectedPortalId = (portalId: string) => {
     localStorage.setItem('tenderassist.portal', portalId);
@@ -23,9 +27,17 @@ export function App() {
 
   useEffect(() => {
     window.tenderAssist.getRunSettings().then(setSettings).catch(console.error);
+    window.tenderAssist.getInbox().then((inbox) => setInboxCount(inbox.attentionCount)).catch(console.error);
   }, []);
 
+  // Open on the Inbox when something needs a decision, unless the operator
+  // has already moved elsewhere.
+  useEffect(() => {
+    if (!navigated && inboxCount > 0 && view === 'jobs' && !activeJobId) setView('inbox');
+  }, [navigated, inboxCount, view, activeJobId]);
+
   useEffect(() => window.tenderAssist.onAppNavigation((command) => {
+    setNavigated(true);
     setView(command.view);
     setSelectedJobId(null);
     if (command.view === 'settings' && command.section) {
@@ -51,6 +63,9 @@ export function App() {
         (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING');
       setActiveJobId(runOver ? null : update.jobId);
       setActiveJobUpdate(runOver ? null : update);
+      if (update.outcome) {
+        window.tenderAssist.getInbox().then((inbox) => setInboxCount(inbox.attentionCount)).catch(console.error);
+      }
     });
     return unsubscribe;
   }, []);
@@ -60,21 +75,31 @@ export function App() {
       <header className="app-topbar">
         <button
           className="app-topbar__brand"
-          onClick={() => { setView('jobs'); setSelectedJobId(null); }}
+          onClick={() => navigate('inbox')}
         >
           <span className="brand-mark" aria-hidden="true">T</span>
           <span className="app-topbar__title">TenderAssist</span>
         </button>
         <nav className="app-nav" aria-label="Main navigation">
           <button
-            className={view === 'jobs' ? 'app-nav__item is-active' : 'app-nav__item'}
-            onClick={() => { setView('jobs'); setSelectedJobId(null); }}
+            className={view === 'inbox' ? 'app-nav__item is-active' : 'app-nav__item'}
+            aria-current={view === 'inbox' ? 'page' : undefined}
+            onClick={() => navigate('inbox')}
           >
-            Jobs
+            Inbox
+            {inboxCount > 0 && <span className="nav-count" aria-label={`${inboxCount} need a decision`}>{inboxCount}</span>}
+          </button>
+          <button
+            className={view === 'jobs' ? 'app-nav__item is-active' : 'app-nav__item'}
+            aria-current={view === 'jobs' ? 'page' : undefined}
+            onClick={() => navigate('jobs')}
+          >
+            Runs
           </button>
           <button
             className={view === 'settings' ? 'app-nav__item is-active' : 'app-nav__item'}
-            onClick={() => { setView('settings'); setSelectedJobId(null); }}
+            aria-current={view === 'settings' ? 'page' : undefined}
+            onClick={() => navigate('settings')}
           >
             Settings
             {settings && !settings.configured && <span className="nav-dot" aria-label="Setup required" />}
@@ -82,7 +107,9 @@ export function App() {
         </nav>
       </header>
       <main className={activeJobId && view === 'jobs' && !selectedJobId ? 'app-main app-main--portal' : 'app-main'}>
-        {view === 'settings' ? (
+        {view === 'inbox' ? (
+          <Inbox onStartDiscovery={() => navigate('jobs')} onCountChange={setInboxCount} />
+        ) : view === 'settings' ? (
           <SettingsPage settings={settings} onSaved={setSettings} selectedPortalId={selectedPortalId} onPortalChange={setSelectedPortalId} focusRequest={settingsFocus} />
         ) : selectedJobId ? (
           <JobDetail jobId={selectedJobId} onBack={() => setSelectedJobId(null)} />

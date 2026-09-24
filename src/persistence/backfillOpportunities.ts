@@ -3,6 +3,7 @@ import { ClassificationRepository } from './repositories/classificationRepositor
 import { OpportunityRepository } from './repositories/opportunityRepository.js';
 import type { TenderRow } from './repositories/tenderRepository.js';
 import { IllegalOpportunityTransitionError } from '../state/opportunityLifecycle.js';
+import { screeningEvidence } from '../review/tenderExplanation.js';
 
 interface BackfillRow extends TenderRow {
   portal_id: string | null;
@@ -37,7 +38,8 @@ export function backfillOpportunities(db: DatabaseSync, now = new Date()): void 
     const opportunity = opportunities.recordSighting(row, row.portal_id ?? 'tamil-nadu', context);
     const final = classifications.getFinalForTender(row.id);
     if (final !== 'NOT_RUN') {
-      opportunities.recordScreening(opportunity.id, final, { ...context, at: row.detail_reviewed_at ?? row.updated_at });
+      opportunities.recordScreening(opportunity.id, final, { ...context, at: row.detail_reviewed_at ?? row.updated_at },
+        { ...screeningEvidence(classifications.listForTender(row.id)) });
     }
     // Before this migration, ticking a tender for download was the approval.
     const approvedByDownload = row.downloaded_count > 0 && row.review_decision !== 'REJECT';
@@ -61,4 +63,11 @@ export function backfillOpportunities(db: DatabaseSync, now = new Date()): void 
     }
   }
   opportunities.expireOverdue(now);
+  // History the operator never decided was handled by not ticking it in
+  // the old flow; keep it out of the new Inbox (still under Tenders) until
+  // a new run sees it again.
+  const undecided = db.prepare(
+    "SELECT id FROM opportunities WHERE lifecycle IN ('NEW', 'SCREENED')"
+  ).all() as Array<{ id: string }>;
+  opportunities.hideFromInbox(undecided.map(({ id }) => id), now.toISOString());
 }

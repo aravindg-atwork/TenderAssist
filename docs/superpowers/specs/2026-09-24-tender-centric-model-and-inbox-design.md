@@ -1,7 +1,7 @@
 # Tender-centric data model and Inbox — design
 
 Date: 2026-09-24
-Status: Decisions recorded 2026-09-24. Slices 1–2 delivered (migration 010, `OpportunityRepository`, `src/state/opportunityLifecycle.ts`, backfill, `src/orchestration/opportunitySync.ts` wired into runs, review, and job deletion). Slice 3 (Inbox UI) next.
+Status: Decisions recorded 2026-09-24. Slices 1–3 delivered: migration 010, `OpportunityRepository`, lifecycle, backfill, `opportunitySync` wired into runs, and the Inbox (`src/review/`, `renderer/src/components/Inbox.tsx`). Slice 4 (bulk decisions, keyboard review, Tenders view) next.
 Backlog: Recommended delivery order step 2
 
 ## Goal
@@ -164,6 +164,7 @@ Decisions never disappear because a run was cleaned up. Sighting rows cannot out
 2. For every existing `tenders` row, in `created_at` order: compute `(portal_id from job_run_configs, identity_key)`, then find or create the opportunity and set `opportunity_id`.
 3. Lifecycle from the existing data: manual KEEP with downloaded documents → DOCUMENTS_COLLECTED; manual KEEP → APPROVED; manual REJECT → REJECTED; gates present → SCREENED; otherwise NEW. Closing date in the past on an open state → EXPIRED.
 4. Write one synthetic event per backfilled decision (`actor` from the source, `note` = old review reason).
+5. Hide carried-over undecided tenders from the Inbox (`inbox_hidden_at`). The old flow handled them by not ticking them; on the live data this would otherwise put 45 stale tenders in the new Inbox. A new run that sees one again clears the flag.
 
 Implemented as SQL + a TypeScript backfill step run once after the SQL migration. `runMigrations` only runs `.sql` files today, so this adds a small post-migration hook. It is covered by a test that seeds pre-010 rows and asserts the result.
 

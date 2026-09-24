@@ -258,7 +258,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     <div className="jobs-page">
       <div className="list-header">
         <div>
-          <h1>Jobs</h1>
+          <h1>Runs</h1>
           <p className="page-subtitle">Search, review, and shortlist tenders against your saved intent.</p>
         </div>
         <div className="run-controls">

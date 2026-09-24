@@ -15,6 +15,11 @@ import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow, ManualTe
 import type { UpdateStatus } from './updateService.js';
 import type { PreflightReport } from '../system/preflight.js';
 import type { AutomationPacingSettings } from '../persistence/repositories/automationSettingsRepository.js';
+import type { InboxView } from '../review/inbox.js';
+import type { OperatorDecision } from '../state/opportunityLifecycle.js';
+
+export type { InboxItem, InboxView } from '../review/inbox.js';
+export type { OperatorDecision } from '../state/opportunityLifecycle.js';
 
 export interface RunSettingsState {
   defaults: RunDefaults;
@@ -46,7 +51,7 @@ export interface PortalBounds {
 }
 
 export interface AppNavigationCommand {
-  view: 'jobs' | 'settings';
+  view: 'inbox' | 'jobs' | 'settings';
   section?: 'folders';
 }
 
@@ -122,4 +127,9 @@ export interface TenderAssistApi {
   deleteJob(jobId: string): Promise<void>;
   onJobUpdate(callback: (update: AuthJobUpdate) => void): () => void;
   onAppNavigation(callback: (command: AppNavigationCommand) => void): () => void;
+  getInbox(): Promise<InboxView>;
+  /** Approve, reject, defer, or reopen one or many tenders; all or nothing. */
+  decideTenders(opportunityIds: string[], decision: OperatorDecision, note?: string): Promise<InboxView>;
+  /** Acknowledge runs so their automatic rejects leave the Inbox. */
+  acknowledgeRuns(jobIds: string[]): Promise<InboxView>;
 }
