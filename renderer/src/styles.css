@@ -2,6 +2,13 @@
    One accent color, used only for the primary action and links/hover;
    everything else stays neutral so the accent keeps its meaning. */
 
+/* Text size: every type role is rem-based, so the root size reflows the whole
+   interface. Standard keeps a 16 px body floor; supporting text never drops
+   below 14 px at Standard. */
+html { font-size: 100%; }
+html[data-text-size='large'] { font-size: 112.5%; }
+html[data-text-size='extra-large'] { font-size: 125%; }
+
 :root {
   --bg: #fafafa;
   --surface: #ffffff;
@@ -37,7 +44,7 @@ body {
   color: var(--text);
   font-family:
     -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  font-size: 14px;
+  font-size: 1rem;
   line-height: 1.5;
 }
 
@@ -47,7 +54,7 @@ body {
 
 button {
   font-family: inherit;
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 a,
@@ -93,12 +100,12 @@ a,
   border-radius: 7px;
   background: var(--accent);
   color: #fff;
-  font-size: 14px;
+  font-size: 1rem;
   font-weight: 700;
 }
 
 .app-topbar__title {
-  font-size: 15px;
+  font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -145,9 +152,12 @@ a,
   margin: 0 auto;
 }
 
+.app-shell:has(.app-main--portal) {
+  height: 100vh;
+}
+
 .app-main--portal {
   max-width: none;
-  height: calc(100vh - 49px);
   min-height: 620px;
   padding: 14px 16px 16px;
   overflow: hidden;
@@ -155,7 +165,7 @@ a,
 
 .running-workspace {
   display: grid;
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(17.5rem, 20rem) minmax(0, 1fr);
   gap: 14px;
   height: 100%;
   min-height: 0;
@@ -182,7 +192,7 @@ a,
 
 .run-sidebar__header h1 {
   margin: 3px 0 0;
-  font-size: 18px;
+  font-size: 1.25rem;
   line-height: 1.25;
   letter-spacing: -0.02em;
 }
@@ -190,7 +200,7 @@ a,
 .run-sidebar__status-label {
   display: block;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -210,7 +220,7 @@ a,
 
 .run-sidebar__meta dt {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 0.875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -220,7 +230,7 @@ a,
   margin: 2px 0 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
@@ -261,7 +271,7 @@ a,
   border: 1px solid var(--border);
   border-radius: 50%;
   background: var(--surface);
-  font-size: 10px;
+  font-size: 0.875rem;
   font-weight: 700;
 }
 
@@ -273,12 +283,12 @@ a,
 .run-phase strong {
   margin-top: 1px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .run-phase div > span {
   margin-top: 1px;
-  font-size: 10px;
+  font-size: 0.875rem;
   line-height: 1.35;
 }
 
@@ -310,21 +320,21 @@ a,
 .run-context__label {
   display: block;
   color: var(--accent);
-  font-size: 9px;
+  font-size: 0.875rem;
   font-weight: 750;
   letter-spacing: 0.08em;
 }
 
 .run-action-card h2 {
   margin: 0 0 4px;
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .run-action-card p,
 .run-sidebar__footer p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   line-height: 1.45;
 }
 
@@ -335,7 +345,7 @@ a,
 
 .run-sidebar__error {
   margin: 10px 0 0;
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .run-sidebar__footer {
@@ -382,12 +392,12 @@ a,
 }
 
 .portal-toolbar__identity strong {
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .portal-toolbar__identity span {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .portal-live-dot {
@@ -400,6 +410,8 @@ a,
 
 .portal-toolbar__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -413,9 +425,14 @@ a,
 
 .btn {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 2.75rem;
   border: 1px solid transparent;
   border-radius: 6px;
-  padding: 7px 14px;
+  padding: 0.4375rem 0.875rem;
   font-weight: 600;
   cursor: pointer;
   transition: background-color 120ms ease;
@@ -480,7 +497,7 @@ input:focus-visible {
   padding: 0;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 1rem;
   font-weight: 500;
 }
 
@@ -521,7 +538,7 @@ input:focus-visible {
 }
 
 .list-header h1 {
-  font-size: 18px;
+  font-size: 1.25rem;
   font-weight: 600;
   margin: 0;
 }
@@ -544,7 +561,7 @@ input:focus-visible {
   display: grid;
   gap: 3px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -589,13 +606,13 @@ input:focus-visible {
 }
 
 .run-context__portal strong {
-  font-size: 14px;
+  font-size: 1rem;
 }
 
 .run-context__portal strong,
 .run-history__label,
 .missed-days > span {
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 650;
 }
 
@@ -605,7 +622,7 @@ input:focus-visible {
   width: fit-content;
   padding: 3px 7px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 0.875rem;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -629,20 +646,20 @@ input:focus-visible {
   color: var(--text-muted);
   background: var(--surface);
   font: inherit;
-  font-size: 11px;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 
 .run-history__empty,
 .missed-days p {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .run-history__hint {
   width: 100%;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 0.875rem;
 }
 
 .missed-days {
@@ -670,7 +687,7 @@ input:focus-visible {
 .data-table th {
   text-align: left;
   font-weight: 500;
-  font-size: 12px;
+  font-size: 0.875rem;
   color: var(--text-muted);
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
@@ -743,7 +760,7 @@ input:focus-visible {
   align-items: center;
   padding: 2px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -782,7 +799,7 @@ input:focus-visible {
 }
 
 .detail-header h1 {
-  font-size: 24px;
+  font-size: 1.625rem;
   font-weight: 600;
   margin: 2px 0 0;
   letter-spacing: -0.025em;
@@ -790,7 +807,7 @@ input:focus-visible {
 
 .eyebrow {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 0.875rem;
   font-weight: 700;
   letter-spacing: 0.1em;
 }
@@ -813,14 +830,14 @@ input:focus-visible {
 
 .section-heading h2 {
   margin: 2px 0 0;
-  font-size: 17px;
+  font-size: 1.1875rem;
 }
 
 .section-heading p,
 .flow-date {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .flow-rail {
@@ -862,7 +879,7 @@ input:focus-visible {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface);
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 700;
 }
 
@@ -873,13 +890,13 @@ input:focus-visible {
 
 .flow-step strong {
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .flow-step small {
-  max-width: 125px;
+  max-width: 8rem;
   margin-top: 1px;
-  font-size: 10px;
+  font-size: 0.875rem;
   line-height: 1.3;
 }
 
@@ -915,13 +932,13 @@ input:focus-visible {
 }
 
 .result-summary strong {
-  font-size: 20px;
+  font-size: 1.375rem;
   line-height: 1.2;
 }
 
 .result-summary span {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .result-summary .summary-keep strong {
@@ -951,7 +968,7 @@ input:focus-visible {
   align-items: center;
   gap: 6px;
   margin-right: auto;
-  font-size: 12px;
+  font-size: 0.875rem;
   color: var(--text-muted);
 }
 
@@ -988,14 +1005,14 @@ input:focus-visible {
 
 .tender-card__id {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 
 .tender-card h3 {
   max-width: 850px;
   margin: 8px 0 14px;
-  font-size: 16px;
+  font-size: 1.125rem;
   line-height: 1.4;
 }
 
@@ -1013,7 +1030,7 @@ input:focus-visible {
 .tender-facts dt {
   margin-bottom: 2px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 0.875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1022,7 +1039,7 @@ input:focus-visible {
 .tender-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .decision-strip {
@@ -1039,7 +1056,7 @@ input:focus-visible {
   align-items: flex-start;
   gap: 7px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .decision-dot {
@@ -1087,7 +1104,7 @@ input:focus-visible {
 
 .audit-timelines h3 {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .detail-meta {
@@ -1107,7 +1124,7 @@ input:focus-visible {
 }
 
 .detail-meta__label {
-  font-size: 12px;
+  font-size: 0.875rem;
   color: var(--text-muted);
 }
 
@@ -1134,7 +1151,7 @@ input:focus-visible {
 .run-config-summary__grid h3 {
   margin: 0 0 4px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1142,7 +1159,7 @@ input:focus-visible {
 
 .run-config-summary__grid p {
   margin: 0;
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .banner {
@@ -1154,7 +1171,7 @@ input:focus-visible {
   border-radius: 6px;
   background: var(--state-neutral-bg);
   color: var(--state-neutral-fg);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .banner-success {
@@ -1208,7 +1225,7 @@ input:focus-visible {
 }
 
 .detail-columns h2 {
-  font-size: 13px;
+  font-size: 1rem;
   font-weight: 600;
   margin: 0 0 12px;
 }
@@ -1253,18 +1270,18 @@ input:focus-visible {
 }
 
 .timeline__transition {
-  font-size: 13px;
+  font-size: 1rem;
   font-weight: 500;
 }
 
 .timeline__reason {
-  font-size: 12px;
+  font-size: 0.875rem;
   color: var(--text-muted);
   margin-top: 2px;
 }
 
 .timeline__time {
-  font-size: 11px;
+  font-size: 0.875rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   margin-top: 2px;
@@ -1272,7 +1289,7 @@ input:focus-visible {
 
 .timeline-empty {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 /* ---------- Settings ---------- */
@@ -1292,7 +1309,7 @@ input:focus-visible {
 
 .page-heading h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 1.5rem;
   letter-spacing: -0.02em;
 }
 
@@ -1314,13 +1331,13 @@ input:focus-visible {
 
 .settings-card__intro h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 1.0625rem;
 }
 
 .settings-card__intro p {
   margin: 5px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .settings-card--portal .settings-card__intro {
@@ -1330,7 +1347,7 @@ input:focus-visible {
 .portal-field {
   gap: 7px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .portal-field select {
@@ -1352,7 +1369,7 @@ input:focus-visible {
   display: grid;
   gap: 6px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -1384,7 +1401,7 @@ input:focus-visible {
   align-items: center;
   gap: 8px;
   width: fit-content;
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 500;
 }
 
@@ -1398,7 +1415,7 @@ input:focus-visible {
   align-self: center;
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   line-height: 1.45;
 }
 
@@ -1427,7 +1444,7 @@ input:focus-visible {
 .folder-customizer summary {
   width: fit-content;
   color: var(--accent);
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 650;
   cursor: pointer;
 }
@@ -1442,7 +1459,7 @@ input:focus-visible {
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--surface-subtle);
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .folder-template-grid {
@@ -1456,7 +1473,7 @@ input:focus-visible {
   display: grid;
   gap: 6px;
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -1490,13 +1507,13 @@ input:focus-visible {
 }
 
 .folder-preview > strong {
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .folder-preview > p {
   margin: 6px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .folder-tree {
@@ -1504,7 +1521,7 @@ input:focus-visible {
   gap: 4px;
   margin-top: 8px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   line-height: 1.35;
   word-break: break-word;
 }
@@ -1530,7 +1547,7 @@ input:focus-visible {
 .pacing-settings > label,
 .pacing-range label {
   color: var(--text);
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -1564,17 +1581,17 @@ input:focus-visible {
 }
 
 .update-control strong {
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .update-control p {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .publishing-field > label {
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -1619,13 +1636,13 @@ input:focus-visible {
 
 .recovery-panel h2 {
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: 1.0625rem;
 }
 
 .recovery-panel p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .recovery-panel__actions,
@@ -1645,7 +1662,7 @@ input:focus-visible {
 }
 
 .readiness-panel summary {
-  font-size: 13px;
+  font-size: 1rem;
   font-weight: 650;
   cursor: pointer;
 }
@@ -1660,10 +1677,10 @@ input:focus-visible {
 
 .readiness-panel li {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
+  grid-template-columns: 8.25rem minmax(0, 1fr);
   gap: 12px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .readiness-panel li strong { color: var(--text); }
@@ -1682,7 +1699,7 @@ input:focus-visible {
   display: grid;
   gap: 5px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -1699,7 +1716,7 @@ input:focus-visible {
 
 .requirement-summary summary {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -1717,20 +1734,20 @@ input:focus-visible {
 
 .requirement-summary dt {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 0.875rem;
   text-transform: capitalize;
 }
 
 .requirement-summary dd {
   margin: 3px 0 0;
-  font-size: 12px;
+  font-size: 0.875rem;
   overflow-wrap: anywhere;
 }
 
 .document-status {
   margin: 10px 0 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .auth-assist-panel {
@@ -1747,13 +1764,13 @@ input:focus-visible {
 
 .auth-assist-panel h2 {
   margin: 0 0 3px;
-  font-size: 15px;
+  font-size: 1.0625rem;
 }
 
 .auth-assist-panel p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
@@ -1762,7 +1779,7 @@ input:focus-visible {
   margin-top: 8px;
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 0.875rem;
 }
 
 .chip-entry input {
@@ -1790,7 +1807,7 @@ input:focus-visible {
 .field-helper {
   margin: 4px 0 10px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .chip-list {
@@ -1811,7 +1828,7 @@ input:focus-visible {
   border-radius: 999px;
   background: #f4f6ff;
   color: #263b93;
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .chip > span {
@@ -1926,7 +1943,7 @@ input:focus-visible {
   border-radius: 999px;
   background: var(--accent);
   color: #ffffff;
-  font-size: 11px;
+  font-size: 0.875rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   vertical-align: 1px;
@@ -1942,7 +1959,7 @@ input:focus-visible {
 
 .inbox__status p {
   margin: 0 0 14px;
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .inbox__confirmation {
@@ -1956,7 +1973,7 @@ input:focus-visible {
 
 .inbox__empty h2 {
   margin: 0 0 6px;
-  font-size: 16px;
+  font-size: 1.125rem;
 }
 
 .inbox__empty p {
@@ -1973,14 +1990,14 @@ input:focus-visible {
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 15px;
+  font-size: 1.0625rem;
   font-weight: 650;
 }
 
 .inbox-section__header p {
   margin: 2px 0 10px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .inbox-section__count {
@@ -1988,7 +2005,7 @@ input:focus-visible {
   border-radius: 999px;
   background: var(--state-neutral-bg);
   color: var(--state-neutral-fg);
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -2014,7 +2031,7 @@ input:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .inbox-row__id {
@@ -2044,7 +2061,7 @@ input:focus-visible {
 
 .inbox-row__title {
   margin: 6px 0 2px;
-  font-size: 15px;
+  font-size: 1.0625rem;
   font-weight: 600;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -2053,14 +2070,14 @@ input:focus-visible {
 .inbox-row__meta {
   margin: 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .inbox-row__why {
   margin: 8px 0 0;
   padding-left: 10px;
   border-left: 2px solid var(--border);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .inbox-row__why--keep {
@@ -2080,7 +2097,7 @@ input:focus-visible {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
+  font-size: 1rem;
   color: var(--text-muted);
 }
 
@@ -2095,7 +2112,7 @@ input:focus-visible {
 
 .related-tenders__dismiss {
   margin-left: 8px;
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .related-tenders__id {
@@ -2107,7 +2124,7 @@ input:focus-visible {
   display: grid;
   gap: 4px;
   margin-top: 10px;
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -2162,7 +2179,7 @@ input:focus-visible {
   margin: 0;
   padding: 0 16px 8px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .inbox-rejects__list {
@@ -2187,14 +2204,14 @@ input:focus-visible {
 }
 
 .inbox-reject__title {
-  font-size: 13px;
+  font-size: 1rem;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .inbox-reject__why {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .inbox-reject .btn {
@@ -2273,13 +2290,13 @@ input:focus-visible {
   align-items: center;
   gap: 6px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .keyboard-hint {
   margin: -6px 0 16px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .keyboard-hint kbd {
@@ -2292,7 +2309,7 @@ input:focus-visible {
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 11px;
+  font-size: 0.875rem;
   text-align: center;
 }
 
@@ -2307,13 +2324,13 @@ input:focus-visible {
 
 .bulk-confirm h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 1.0625rem;
 }
 
 .bulk-confirm p {
   margin: 4px 0 8px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .bulk-confirm ul {
@@ -2321,7 +2338,7 @@ input:focus-visible {
   margin: 0 0 12px;
   padding-left: 18px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .bulk-confirm__actions {
@@ -2403,7 +2420,7 @@ input:focus-visible {
 .tender-history__loading {
   margin: 12px 0 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .tender-history__entry {
@@ -2430,7 +2447,7 @@ input:focus-visible {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 13px;
+  font-size: 1rem;
 }
 
 .tender-history__title {
@@ -2440,13 +2457,13 @@ input:focus-visible {
 .tender-history__line time {
   flex-shrink: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 
 .tender-history__detail {
   margin: 2px 0 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 1rem;
   overflow-wrap: anywhere;
 }
 
@@ -2456,3 +2473,51 @@ input:focus-visible {
     flex-direction: column;
   }
 }
+
+/* ---------- Display settings ---------- */
+
+.text-size-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.text-size-options legend {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.text-size-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+  min-width: 10rem;
+  min-height: 2.75rem;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.text-size-option.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.text-size-option input { grid-row: span 2; margin: 0; }
+.text-size-option__label { font-weight: 600; }
+.text-size-option__hint { color: var(--text-muted); font-size: 0.875rem; }
+
+.portal-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.portal-zoom__step { min-width: 2.75rem; font-size: 1.125rem; }
+.portal-zoom__value { min-width: 4.5rem; font-variant-numeric: tabular-nums; }

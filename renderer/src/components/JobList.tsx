@@ -249,7 +249,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
             </button>
           </div>
         </aside>
-        <PortalViewport portalName={selectedPortal.name} />
+        <PortalViewport portalId={selectedPortal.id} portalName={selectedPortal.name} />
       </div>
     );
   }

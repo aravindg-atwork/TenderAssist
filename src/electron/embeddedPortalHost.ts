@@ -25,6 +25,7 @@ export class EmbeddedPortalHost {
   private view: WebContentsView | undefined;
   private visible = false;
   private bounds: Rectangle = { x: 0, y: 0, width: 1, height: 1 };
+  private zoomFactor = 1;
   private readonly dscListeners = new Set<(artifact: DscJnlpArtifact) => void>();
   private readonly portalSession: Electron.Session;
   private readonly partition: string;
@@ -62,6 +63,12 @@ export class EmbeddedPortalHost {
     view.setBounds(this.bounds);
     view.setVisible(this.visible);
     window.contentView.addChildView(view);
+    view.webContents.setZoomFactor(this.zoomFactor);
+    // Chromium can reset zoom when a navigation crosses origins; reapply so the
+    // operator's chosen size survives every portal page.
+    view.webContents.on('did-navigate', () => {
+      if (!view.webContents.isDestroyed()) view.webContents.setZoomFactor(this.zoomFactor);
+    });
 
     view.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
       if (isTrustedPortalUrl(targetUrl, this.portal)) {
@@ -105,6 +112,17 @@ export class EmbeddedPortalHost {
     const height = Math.max(1, Math.min(Math.round(bounds.height), content.height - y));
     this.bounds = { x, y, width, height };
     this.view?.setBounds(this.bounds);
+  }
+
+  get portalId(): string {
+    return this.portal.id;
+  }
+
+  /** Zoom only the portal page; the view is never reloaded or recreated. */
+  setZoomPercent(percent: number): void {
+    this.zoomFactor = percent / 100;
+    const contents = this.view?.webContents;
+    if (contents && !contents.isDestroyed()) contents.setZoomFactor(this.zoomFactor);
   }
 
   goBack(): void {

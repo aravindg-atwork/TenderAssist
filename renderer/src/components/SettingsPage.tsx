@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { TextSizeSetting } from './TextSizeSetting';
 import type { RunDefaults } from '../../../src/config/runConfiguration';
 import type { PortalCredentialSettings, RunSettingsState } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
@@ -303,6 +304,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           </details>
         </div>
       </section>
+
+      <TextSizeSetting />
 
       <section className="settings-card">
         <div className="settings-card__intro">

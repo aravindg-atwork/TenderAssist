@@ -15,6 +15,7 @@ import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow, ManualTe
 import type { UpdateStatus } from './updateService.js';
 import type { PreflightReport } from '../system/preflight.js';
 import type { AutomationPacingSettings } from '../persistence/repositories/automationSettingsRepository.js';
+import type { TextSize } from '../persistence/repositories/displaySettingsRepository.js';
 import type { InboxView } from '../review/inbox.js';
 import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 
@@ -126,6 +127,11 @@ export interface TenderAssistApi {
   setPortalVisible(visible: boolean): Promise<void>;
   portalGoBack(): Promise<void>;
   portalReload(): Promise<void>;
+  getTextSize(): Promise<TextSize>;
+  saveTextSize(textSize: TextSize): Promise<TextSize>;
+  /** Portal zoom is a whole percentage, 80-200 in 10% steps, remembered per portal. */
+  getPortalZoom(portalId: string): Promise<number>;
+  setPortalZoom(portalId: string, percent: number): Promise<number>;
   launchDscSigner(jobId: string): Promise<void>;
   cancelJob(jobId: string): Promise<void>;
   confirmDocumentSelection(jobId: string, tenderIds: string[]): Promise<void>;

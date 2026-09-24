@@ -7,6 +7,7 @@ import { Inbox } from './components/Inbox';
 import { TendersPage } from './components/TendersPage';
 import type { AuthJobUpdate, RunSettingsState } from '../../src/electron/ipcTypes';
 import { DEFAULT_PORTAL_ID } from '../../src/config/portalRegistry';
+import { applyTextSize } from './display';
 
 type AppView = 'inbox' | 'tenders' | 'jobs' | 'settings';
 
@@ -27,6 +28,7 @@ export function App() {
   };
 
   useEffect(() => {
+    window.tenderAssist.getTextSize().then(applyTextSize).catch(console.error);
     window.tenderAssist.getRunSettings().then(setSettings).catch(console.error);
     window.tenderAssist.getInbox().then((inbox) => setInboxCount(inbox.attentionCount)).catch(console.error);
   }, []);

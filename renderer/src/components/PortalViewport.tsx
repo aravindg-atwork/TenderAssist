@@ -1,11 +1,27 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  DEFAULT_PORTAL_ZOOM_PERCENT,
+  MAX_PORTAL_ZOOM_PERCENT,
+  MIN_PORTAL_ZOOM_PERCENT,
+  stepPortalZoom,
+} from '../../../src/persistence/repositories/displaySettingsRepository';
 
 export interface PortalViewportProps {
+  portalId: string;
   portalName: string;
 }
 
-export function PortalViewport({ portalName }: PortalViewportProps) {
+export function PortalViewport({ portalId, portalName }: PortalViewportProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(DEFAULT_PORTAL_ZOOM_PERCENT);
+
+  useEffect(() => {
+    window.tenderAssist.getPortalZoom(portalId).then(setZoom).catch(console.error);
+  }, [portalId]);
+
+  const applyZoom = (percent: number) => {
+    window.tenderAssist.setPortalZoom(portalId, percent).then(setZoom).catch(console.error);
+  };
 
   useEffect(() => {
     const surface = surfaceRef.current;
@@ -52,6 +68,35 @@ export function PortalViewport({ portalName }: PortalViewportProps) {
           </div>
         </div>
         <div className="portal-toolbar__actions">
+          <div className="portal-zoom" role="group" aria-label="Portal zoom">
+            <button
+              className="btn btn-secondary portal-zoom__step"
+              type="button"
+              onClick={() => applyZoom(stepPortalZoom(zoom, -1))}
+              disabled={zoom <= MIN_PORTAL_ZOOM_PERCENT}
+              aria-label="Make portal smaller"
+            >
+              −
+            </button>
+            <button
+              className="btn btn-secondary portal-zoom__value"
+              type="button"
+              onClick={() => applyZoom(DEFAULT_PORTAL_ZOOM_PERCENT)}
+              title="Reset portal zoom to 100%"
+              aria-label={`Portal zoom ${zoom}%. Reset to 100%`}
+            >
+              <span aria-live="polite">{zoom}%</span>
+            </button>
+            <button
+              className="btn btn-secondary portal-zoom__step"
+              type="button"
+              onClick={() => applyZoom(stepPortalZoom(zoom, 1))}
+              disabled={zoom >= MAX_PORTAL_ZOOM_PERCENT}
+              aria-label="Make portal larger"
+            >
+              +
+            </button>
+          </div>
           <button className="btn btn-secondary" type="button" onClick={() => window.tenderAssist.portalGoBack()}>
             Back
           </button>

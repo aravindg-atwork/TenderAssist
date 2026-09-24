@@ -16,6 +16,7 @@ import { ClassificationRepository } from '../persistence/repositories/classifica
 import { PortalCredentialRepository } from '../persistence/repositories/portalCredentialRepository.js';
 import { PublishingSettingsRepository } from '../persistence/repositories/publishingSettingsRepository.js';
 import { AutomationSettingsRepository } from '../persistence/repositories/automationSettingsRepository.js';
+import { DisplaySettingsRepository, type TextSize } from '../persistence/repositories/displaySettingsRepository.js';
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
@@ -80,6 +81,7 @@ const portalCredentials = new PortalCredentialRepository(db);
 const workflow = new TenderWorkflowRepository(db);
 const publishingSettings = new PublishingSettingsRepository(db, join(homedir(), 'Documents', 'TenderAssist'));
 const automationSettings = new AutomationSettingsRepository(db);
+const displaySettings = new DisplaySettingsRepository(db);
 const jobOutputs = new JobOutputRepository(db);
 const opportunities = new OpportunityRepository(db);
 const opportunitySync = { tenders, classifications, opportunities, workflow };
@@ -410,6 +412,15 @@ ipcMain.handle('set-portal-bounds', (_event, bounds) => portalHost?.setBounds(bo
 ipcMain.handle('set-portal-visible', (_event, visible: boolean) => portalHost?.setVisible(visible === true));
 ipcMain.handle('portal-go-back', () => portalHost?.goBack());
 ipcMain.handle('portal-reload', () => portalHost?.reload());
+ipcMain.handle('get-text-size', () => displaySettings.getTextSize());
+ipcMain.handle('save-text-size', (_event, textSize: TextSize) => displaySettings.saveTextSize(textSize));
+ipcMain.handle('get-portal-zoom', (_event, portalId: string) => displaySettings.getPortalZoom(getPortalDefinition(portalId).id));
+ipcMain.handle('set-portal-zoom', (_event, portalId: string, percent: number) => {
+  const id = getPortalDefinition(portalId).id;
+  const saved = displaySettings.savePortalZoom(id, percent);
+  if (portalHost?.portalId === id) portalHost.setZoomPercent(saved);
+  return saved;
+});
 
 ipcMain.handle('open-job-output', async (_event, jobId: string): Promise<void> => {
   const config = runConfigurations.getForJob(jobId);
@@ -629,6 +640,7 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
   try {
     portalHost?.close();
     portalHost = new EmbeddedPortalHost(() => mainWindow, dscDownloadDirectory, portal);
+    portalHost.setZoomPercent(displaySettings.getPortalZoom(portal.id));
     await portalHost.open(portal.url);
     await waitForCdpReady(EMBEDDED_CDP_PORT, 15000);
   } catch (err) {
