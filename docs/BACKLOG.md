@@ -13,6 +13,46 @@ Discover → Screen → Review → Approve → Collect documents → Evaluate el
 - **Single-operator desktop tool (working decision).** DSC tokens, CAPTCHA, and OTP are bound to one person at one machine; credentials live in the OS vault and data in local SQLite. Stakeholders see outputs through the shared Drive folder. Revisit team features only after one operator runs it reliably every day.
 - **Each portal is its own adapter.** Portals define their own authentication and navigation stages; GeM does not reuse the GePNIC flow.
 
+### Confirmed workflow and usability decisions (2026-09-24)
+
+- **No dashboard for now.** The product stays focused on Inbox, Tenders, Runs, and Settings. A dashboard or Today screen is deferred until the core daily workflow proves that it needs one.
+- **Keep the authenticated portal session alive through portal work.** Do not log out after search or classification. Keep the embedded browser session alive while the operator reviews the shortlist, selects tenders, and downloads or retries every selected portal document. Log out only after portal-dependent work is complete, the user stops the run, or an unrecoverable failure ends it. Local OCR, extraction, workbook generation, and Drive copying may continue after logout because they do not require the portal.
+- **Layout changes must never interrupt the portal.** Resizing, compressing, hiding, or focusing either panel must not reload the portal, lose authentication, stop automation, or interrupt downloads.
+- **Design for nontechnical operators.** Every active step must state what is happening, whether the user is needed, what to do next, and what is safe to do while waiting.
+- **Readable display is a product requirement.** Support larger application text, independent portal zoom, Windows display scaling, and small laptop screens without clipping actions or forcing application-level horizontal scrolling.
+
+## Where we left off (2026-09-24)
+
+### Done today (committed on master, not pushed)
+
+- Text size (Standard / Large / Extra large) and per-portal zoom (80–200%) — `a75c58c`.
+- File → Back up data / Restore from backup; Help → Export support bundle — `07f393a`.
+- Sign in again and continue downloads when the portal session expires mid-run — `ee97d88`.
+- Resizable run workspace: Instructions / Balanced / Portal layouts, divider, tabs below 1120 px — `dc5491d`.
+- Continue job: an interrupted run resumes from its shortlist or document collection on the same job — `ae05eac`.
+- Tender selection moved into the live run panel beside the signed-in portal; the Tender review page no longer selects — `ea55747`.
+- Bounded retries for search, tender details, and My Tenders; failed categories are recorded and shown — `fed8c49`.
+- "No tender matched your filters" summary with per-category counts, intent used, and Edit categories and intent — `05a6e16`.
+
+### Next up (in this order)
+
+1. **Live checks with a real portal session.** Nothing above has been exercised against a real TN Tenders sign-in yet: the live tick list after screening, re-sign-in after a real session timeout, and Continue job through sign-in into downloads.
+2. **Selector health checks.** Fail clearly when the portal's page structure changes instead of reading it as empty results (blocked on open question 1).
+3. **Invalid, locked, or expired portal credentials:** specific recovery guidance at sign-in.
+4. **DSC readiness diagnostics:** token presence guidance, Java/OpenWebStart runtime check, and Open file location / Retry download when the signer fails to launch.
+5. **In-app diagnostics panel** (the support bundle export exists; a readable in-app view does not).
+6. **First-run onboarding:** Display text size choice with a live preview, readiness check, and a sample result explaining KEEP / REJECT / NEEDS REVIEW.
+7. **Branded, signed releases:** TenderAssist app and installer icons, Windows Authenticode signing (needs a certificate), release channel shown in Settings.
+8. **Full display test matrix:** 1024×768 to 1920×1080, Windows scaling 100/125/150%, all three text sizes, portal zoom 100–200%.
+9. Then continue the recommended delivery order below (OCR English + Tamil, source-linked extraction, company profile, calendar, GeM adapter).
+
+### Open questions for the operator
+
+1. **Zero-results page.** When a TN Tenders category has no tenders for the date, does the results page still show the results table (with a "no records" line), or does the table disappear? TenderAssist currently reads "no table found" as 0 tenders, so a portal error page or a layout change looks the same as an empty category. A saved copy of that page (Ctrl+S) would settle it.
+2. **Signing certificate.** Windows Authenticode signing needs a code-signing certificate (and Apple Developer ID for macOS). Who will purchase/hold it?
+3. **App icon.** Is there an existing TenderAssist or Bow & Baan logo to use for the application and installer icons, or should a simple mark be designed?
+4. **Runs interrupted before the shortlist** currently start again from the search. Is that acceptable, or should a partially finished search skip the categories it already completed?
+
 ## Delivered in 0.3.0 (2026-09-23)
 
 - Added the 48 portals from the official Government of India participating-sites directory, grouped in one selector.
@@ -70,11 +110,14 @@ Before GeM becomes selectable for live runs, add a dedicated adapter for public 
 
 - Persist the active phase, current category, and last successfully handled tender.
 - Detect an interrupted run at launch and offer Resume, Retry phase, or End job.
-- Use bounded retries for portal timeouts and transient navigation failures.
-- Add a user-readable diagnostics panel and an exportable support bundle with secrets removed.
-- Add selector health checks so portal markup changes fail clearly instead of silently producing empty results.
-- Resume from the exact failed stage rather than the start of the job.
+- Use bounded retries for portal timeouts and transient navigation failures. *(2026-09-24: category search, tender detail review, and opening My Tenders retry up to 3 times on timeouts or dropped connections, never after sign-out or cancel. Favouriting, sign-in, DSC, and downloads are never retried automatically. A category that still fails is recorded with its reason and shown on the run's review page instead of being skipped silently.)*
+- Add a user-readable diagnostics panel and an exportable support bundle with secrets removed. *(2026-09-24: Help → Export support bundle… writes a JSON file of version, OS, preflight, table counts, recent runs and state changes, and settings; login IDs and passwords are reduced to saved/not-saved flags. The in-app diagnostics panel is still open.)*
+- ~~Backup and restore.~~ Delivered 2026-09-24: File → Back up data… writes a single consistent SQLite copy without saved portal passwords; File → Restore from backup… validates the file, refuses backups from newer versions or while a job runs, and swaps it in at restart while keeping the replaced database beside it.
+- Add selector health checks so portal markup changes fail clearly instead of silently producing empty results. *(Open question: a missing results table is still read as zero tenders, because we have no captured example of the portal's real zero-results page to tell the two apart.)*
+- Resume from the exact failed stage rather than the start of the job. *(2026-09-24: done from the shortlist onward. The confirmed tender selection is saved with the job; "Continue job" on an interrupted run reopens the shortlist or resumes document collection on the same job, signs in only if a document still has to be downloaded, and skips saved files. Runs interrupted before the shortlist still start again, since search and screening must see the portal as it is now.)*
 - Retry safe failures automatically (timeouts, transient navigation); require a manual retry for sensitive actions (login, DSC, document acquisition).
+- If the portal session expires while the job is waiting for document selection or downloading, preserve the shortlist and completed files, request sign-in again, and resume acquisition without repeating discovery or classification. *(2026-09-24: done within a running job. A document request that lands on the portal's unauthorized/sign-in page stops acquisition without saving that page or failing the document; the job asks for a fresh sign-in in the same embedded portal (up to 3 times) and continues with the same selection, skipping files already saved. Not yet covered: resuming after TenderAssist itself was closed, which needs the selection persisted per job. Not yet verified against a live portal timeout.)*
+- Record the last successfully downloaded document and keep partial-download retry decisions explicit.
 
 ### Output safety and audit history
 
@@ -88,6 +131,7 @@ Delivered on 2026-09-24: configurable `Month/Day/NN_Title` output structure, sam
 - Add a preflight check for Chrome availability, portal reachability, profile lock, and database writability.
 - Show actionable recovery text before a job starts.
 - Prevent duplicate browser sessions and safely reclaim stale automation profiles.
+- Verify that panel resize, focus-mode changes, application zoom, portal zoom, and temporarily hidden portal views preserve the same authenticated WebContents session.
 
 ### Secure assisted portal sign-in
 
@@ -113,6 +157,15 @@ Core flow delivered on 2026-09-22: trusted-download validation, protected local 
 - Detect signer launch failure and provide Open file location, Retry download, and runtime setup guidance.
 - Never store or automate the DSC PIN/password.
 - Record only safe audit events such as `CAPTCHA_HANDOFF`, `JNLP_DOWNLOADED`, `SIGNER_LAUNCHED`, and `DSC_LOGIN_CONFIRMED`.
+
+### Authenticated browser lifetime
+
+- Keep the embedded portal open through authentication, search, classification, human shortlist review, document selection, document download, and portal-download retry decisions.
+- Never allow logout to race an active request or document download.
+- When every selected portal document has either downloaded successfully or reached a user-confirmed terminal failure, attempt a best-effort server-side logout before closing the embedded browser.
+- On Stop job, fatal failure, or normal completion, attempt logout and then close the embedded view without discarding already saved work.
+- If the application crashes, preserve the run checkpoint and rely on the portal's own session timeout; on restart, explain that a fresh sign-in may be required.
+- Permit local OCR, requirement extraction, Excel generation, and Drive-folder copying to continue after portal logout.
 
 ## P1 — Shortlist quality and human review
 
@@ -169,6 +222,9 @@ Prerequisite for the Inbox, duplicate detection, corrigendum linking, and outcom
 - Create one job folder and one subfolder per tender using stable, sanitized names.
 - Download every available tender document with checksum, source URL, and retrieval timestamp.
 - Retry partial downloads and show missing-file status without losing completed files.
+- Keep the authenticated portal session alive while the user chooses documents and until all selected downloads and portal-side retries are finished.
+- Show document progress in plain language, for example `Downloading 3 selected tenders — 2 of 3 complete`.
+- Preserve the shortlist, selection, completed files, checksums, and failure reasons if the portal session expires.
 
 ### Requirement extraction
 
@@ -192,7 +248,8 @@ Prerequisite for the Inbox, duplicate detection, corrigendum linking, and outcom
 
 ### Navigation
 
-- Primary navigation: **Inbox** (tenders needing review), **Tenders** (approved and tracked), **Runs** (automation history and failures), **Calendar** (deadlines), **Settings** (portals, credentials, rules, folders, company profile).
+- Primary navigation for the current product: **Inbox** (tenders needing review), **Tenders** (approved and tracked), **Runs** (automation history and failures), and **Settings** (portals, credentials, rules, folders, and display preferences).
+- Keep Calendar as a later workflow addition, not a reason to add a dashboard now.
 - Move low-frequency commands to the native application menu: output folders and naming, import/export settings, open data or log folder, backup and restore, check for updates, keyboard shortcuts, about and diagnostics.
 - Keep frequent actions in the main UI: start discovery, approve/reject, select documents, retry failed stage, open tender folder, view source tender.
 - Use human-readable timestamps everywhere instead of raw ISO dates.
@@ -200,12 +257,13 @@ Prerequisite for the Inbox, duplicate detection, corrigendum linking, and outcom
 - Persist filters and saved views; search across title, department, reference, and extracted requirements.
 - Write empty states that name the next action.
 
-### Daily workspace
+### Daily workspace — no dashboard for now
 
-- Replace the plain job list landing screen with a compact Today view.
-- Show last successful run, active run, shortlist count, review count, and nearest deadlines.
-- Keep job history available as a secondary view rather than the primary destination.
-- Provide one dominant action: Start today's scan or Continue review.
+- Do not build a dashboard or Today screen in the current roadmap.
+- Open on Inbox when decisions need attention; otherwise keep Runs as the place to start discovery.
+- Keep Inbox, Tenders, Runs, and Settings as the complete primary information architecture.
+- Add deadline information where the tender is reviewed instead of introducing summary cards and charts.
+- Revisit a dashboard only after daily-use evidence shows that operators cannot understand priorities from Inbox and Tenders.
 
 ### Live job progress
 
@@ -213,6 +271,51 @@ Prerequisite for the Inbox, duplicate detection, corrigendum linking, and outcom
 - Distinguish waiting for login from running automatically.
 - Provide safe Cancel and Retry controls at phase boundaries.
 - Keep the window useful while Chrome is open instead of showing only a generic running state.
+- Keep the current authenticated browser alive when the portal panel is resized, compressed, temporarily hidden, or placed behind an Instructions view.
+- Explain whether the operator may safely wait, navigate elsewhere inside TenderAssist, or must act in the portal.
+
+### Adaptive run workspace
+
+Delivered on 2026-09-24: draggable, keyboard-accessible divider (320–720 px guide, portal never under 640 px); Instructions/Balanced/Portal presets remembered between runs; a wider default split when large text is on below 1440 px; optional "Automatically focus the current task"; Instructions/Tender portal tabs below 1120 px with an "action needed" hint; window minimum lowered to 900 × 620. The portal view is only moved or hidden, never reloaded (verified: same portal WebContents and URL across every layout change). Not yet run: the full resolution × scaling × text-size matrix.
+
+- Replace the fixed-width run sidebar with a resizable split workspace and a keyboard-accessible divider.
+- Provide three plain-language presets:
+  - **Instructions:** approximately 60% guidance and 40% portal for reading, review, errors, and waiting.
+  - **Balanced:** approximately 35% guidance and 65% portal for normal operation.
+  - **Portal:** approximately 20–25% guidance and 75–80% portal for CAPTCHA, forms, and detailed portal pages.
+- Remember the operator's last chosen split and respect manual changes for the rest of the run.
+- Offer an optional `Automatically focus the current task` preference. When enabled, recommend or gently switch focus for human-action, automatic-work, review, download, and completion states without destroying either panel.
+- Keep the portal mounted in the same authenticated session in every focus mode; changing visibility or bounds must not navigate, reload, or recreate it.
+- At 1440 px and wider, support the full split view with a left-panel range of roughly 320–720 px and at least 640 px for the visible portal.
+- At 1120–1439 px, retain the resizable split view with safe wrapping and a larger initial instruction width when large text is enabled.
+- At 900–1119 px, stop squeezing two unusable panels. Present full-width **Instructions** and **Tender portal** views as tabs while keeping the hidden portal session alive and automation running.
+- After the tabbed fallback is implemented, target an application minimum of approximately 900 × 620. Let the instruction area scroll independently while primary actions remain reachable.
+- Never introduce application-level horizontal scrolling. A legacy portal may scroll inside its own viewport when unavoidable.
+
+### Display size and zoom
+
+Delivered on 2026-09-24: Settings → Display text size (Standard 16 px, Large 18 px, Extra large 20 px) applied instantly through a rem-based type scale with a 14 px supporting floor and 44 px buttons; portal toolbar zoom (−, percentage/reset, +) from 80% to 200% in 10% steps, remembered per portal and applied to the embedded WebContents without reloading it. Still open: first-run Display choice and the full resolution/scaling test matrix.
+
+- Add **Settings → Display → Text size** with persistent `Standard`, `Large`, and `Extra large` options.
+- Use an ordinary body-text floor of 16 px for Standard, approximately 18 px for Large, and approximately 20 px for Extra large. Operational instructions must not be smaller than the selected body size, and supporting information must not fall below a readable 14 px equivalent.
+- Replace the current collection of fixed 9–13 px operational labels with semantic `rem`-based typography roles that reflow when text grows.
+- Keep buttons and essential interactive targets at least 44 × 44 px where practical, with clear focus indicators and comfortable spacing.
+- Preserve operating-system font rendering and Windows scaling; do not implement text enlargement with CSS transforms that merely magnify clipped layouts.
+- Add independent portal zoom controls to the portal toolbar: decrease, current percentage, increase, and reset.
+- Support portal zoom from 80% to 200% in 10% steps and remember it separately for each portal.
+- Apply portal zoom to the embedded portal WebContents rather than assuming application zoom affects it.
+- Keep application text size and portal zoom separate so an operator can enlarge instructions without making a legacy portal unusable, or enlarge the portal without overcrowding TenderAssist.
+
+### Client-friendly operational guidance
+
+- Design for clients who understand their tender work but may not understand browser automation, state machines, storage, or system terminology.
+- Every active step must answer four questions: **What is happening? Does TenderAssist need me? What should I do next? What is safe to do while I wait?**
+- Replace technical state labels in primary copy with plain actions such as `Waiting for portal sign-in`, `Checking tender relevance`, and `Downloading selected documents`.
+- Keep job IDs, raw states, timestamps, and diagnostics under a secondary `Technical details` disclosure.
+- Show one dominant action per step and distinguish `TenderAssist is working`, `Your action is required`, `Waiting safely`, and `Something needs attention` with text and icons, never color alone.
+- For failures, explain what happened, what was already saved, what the operator should do, and whether retrying repeats work.
+- Do not require keyboard shortcuts; expose them only as optional accelerators alongside visible controls.
+- Add a first-run Display choice with a live text preview and a reminder that it can be changed later.
 
 ### Tender review workspace
 
@@ -243,6 +346,10 @@ Prerequisite for the Inbox, duplicate detection, corrigendum linking, and outcom
 - Add shortcuts for Start job, Settings, search, next tender, Keep, and Reject.
 - Announce asynchronous status changes through accessible live regions.
 - Test long titles, 200% zoom, narrow windows, empty states, and large job histories.
+- Verify the complete run workflow at 1024×768, 1280×720, 1366×768, 1440×900, and 1920×1080.
+- At each representative resolution, test Windows scaling at 100%, 125%, and 150%; application text at Standard, Large, and Extra large; and portal zoom at 100%, 125%, 150%, and 200%.
+- Test every Instructions, Balanced, and Portal focus mode during CAPTCHA, DSC, search, waiting, error, document download, retry, and completion states.
+- Acceptance criteria: no clipped primary action, no application-level horizontal scroll, no portal-session loss during layout changes, downloads continue when the portal is compressed or hidden, and the operator can always tell whether action is required.
 
 ## P2 — Advanced automation
 
@@ -294,11 +401,13 @@ Prerequisite for the Inbox, duplicate detection, corrigendum linking, and outcom
 Revised 2026-09-24 around the tender-centric workflow:
 
 1. Harden recovery, retries, audit history, and same-day output behavior (plus updates, signing, readiness checks).
-2. Tender-centric data model, then the Inbox and approval workflow, duplicate/corrigendum detection, and new navigation.
-3. OCR (English + Tamil), then source-linked eligibility extraction and review.
-4. Independent GeM adapter: public discovery, login checkpoint, human CAPTCHA/OTP, session-expiry recovery that keeps the shortlist.
-5. Company profile, bid/no-bid analysis, calendar, and readiness/outcome tracking.
-6. Collaboration only if the single-operator decision changes.
+2. Add exact-stage recovery, portal-session-expiry recovery, partial-download retry, selector diagnostics, backup/restore, signed releases, and branded installers.
+3. Deliver the adaptive run workspace, readable display sizes, independent portal zoom, and client-friendly operational guidance without adding a dashboard.
+4. Complete the tender-centric Inbox-to-document workflow in one coherent tender workspace.
+5. Add OCR (English + Tamil), then source-linked eligibility extraction and review.
+6. Add company profile, bid/no-bid analysis, calendar, and readiness/outcome tracking.
+7. Build the independent GeM adapter: public discovery, login checkpoint, human CAPTCHA/OTP, and session-expiry recovery that keeps the shortlist.
+8. Add collaboration only if the single-operator decision changes.
 
 ## Explicitly avoid for now
 
@@ -307,3 +416,6 @@ Revised 2026-09-24 around the tender-centric workflow:
 - Uploading every discovered tender before relevance review.
 - Treating visual similarity as proof that a beta portal is fully compatible; every portal must pass the certification flow.
 - Complex dashboards before the review and acquisition workflows are complete.
+- A dashboard or Today screen without evidence that Inbox, Tenders, and Runs are insufficient.
+- Logging out, reloading, recreating, or closing the portal session while shortlist selection or selected-document acquisition is still active.
+- Making essential instructions smaller to preserve a dense layout.
