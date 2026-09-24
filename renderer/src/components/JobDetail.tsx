@@ -67,19 +67,7 @@ function requirementData(tender: TenderDetailItem): Record<string, string | null
   catch { return {}; }
 }
 
-function TenderCard({
-  tender,
-  onReviewed,
-  selectable,
-  selected,
-  onToggleSelected,
-}: {
-  tender: TenderDetailItem;
-  onReviewed: () => void;
-  selectable?: boolean;
-  selected?: boolean;
-  onToggleSelected?: (tenderId: string, checked: boolean) => void;
-}) {
+function TenderCard({ tender, onReviewed }: { tender: TenderDetailItem; onReviewed: () => void }) {
   const displayCategory = tender.detail_product_category || tender.product_category;
   const identifier = tender.tender_portal_id || tender.tender_ref;
   const [reason, setReason] = useState(tender.manualReview?.reason ?? '');
@@ -97,16 +85,6 @@ function TenderCard({
   return (
     <article className={`tender-card tender-card--${tender.effectiveClassification.toLowerCase()}`}>
       <div className="tender-card__topline">
-        {selectable && (
-          <label className="tender-card__select">
-            <input
-              type="checkbox"
-              checked={selected ?? false}
-              onChange={(event) => onToggleSelected?.(tender.id, event.target.checked)}
-            />
-            <span>Extract &amp; download this tender</span>
-          </label>
-        )}
         <span className="tender-card__id">{identifier}</span>
         <StatePill state={tender.effectiveClassification} />
       </div>
@@ -161,9 +139,6 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
   const [latestUpdate, setLatestUpdate] = useState<AuthJobUpdate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openingOutput, setOpeningOutput] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string> | null>(null);
-  const [confirmingSelection, setConfirmingSelection] = useState(false);
-  const [selectionError, setSelectionError] = useState<string | null>(null);
 
   const load = () => {
     window.tenderAssist
@@ -173,11 +148,6 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
   };
 
   useEffect(load, [jobId]);
-  // Job resets to a fresh review as soon as a new run reaches SHORTLISTED --
-  // re-seed the tick-box defaults (every KEEP checked, every needs-review
-  // unchecked) once per job rather than on every poll re-load.
-  useEffect(() => { setSelectedIds(null); }, [jobId]);
-
   useEffect(() => {
     const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
       if (update.jobId !== jobId) return;
@@ -187,18 +157,6 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
     return unsubscribe;
   }, [jobId]);
 
-  // Seed the tick-box defaults once the job reaches SHORTLISTED. Inbox
-  // decisions win: approved tenders start checked, rejected ones and ones
-  // whose documents are already collected start unchecked. Otherwise every
-  // automatic KEEP starts checked and needs-review tenders opt in explicitly.
-  useEffect(() => {
-    if (!detail || selectedIds !== null || detail.jobState !== 'SHORTLISTED') return;
-    setSelectedIds(new Set(detail.tenders.filter((tender) => {
-      if (tender.opportunityLifecycle === 'APPROVED') return true;
-      if (tender.opportunityLifecycle === 'REJECTED' || tender.opportunityLifecycle === 'DOCUMENTS_COLLECTED') return false;
-      return tender.effectiveClassification === 'KEEP';
-    }).map((tender) => tender.id)));
-  }, [detail, selectedIds]);
 
   if (error) {
     return (
@@ -281,35 +239,10 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
       </div>
 
       {detail.jobState === 'SHORTLISTED' && (
-        <section className="selection-panel" aria-labelledby="selection-title">
-          <div className="section-heading">
-            <div>
-              <h2 id="selection-title">Choose what to download and extract</h2>
-              <p>Tick the tenders to acquire documents for, run requirement extraction on, and build an eligibility sheet for. Nothing downloads until you confirm.</p>
-            </div>
-          </div>
-          <div className="selection-panel__actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={confirmingSelection || !selectedIds || selectedIds.size === 0}
-              onClick={async () => {
-                if (!selectedIds) return;
-                setConfirmingSelection(true);
-                setSelectionError(null);
-                try {
-                  await window.tenderAssist.confirmDocumentSelection(jobId, Array.from(selectedIds));
-                } catch (err) {
-                  setSelectionError(err instanceof Error ? err.message : String(err));
-                  setConfirmingSelection(false);
-                }
-              }}
-            >
-              {confirmingSelection ? 'Starting…' : `Download, extract & build eligibility sheet for ${selectedIds?.size ?? 0} tender${selectedIds?.size === 1 ? '' : 's'}`}
-            </button>
-            {selectionError && <p className="error-text">{selectionError}</p>}
-          </div>
-        </section>
+        <div className="notice notice-attention" role="status">
+          Tenders are chosen for download in the live run on the Runs screen, beside the signed-in portal.
+          {' '}If this run was interrupted, open Runs and select Continue job.
+        </div>
       )}
 
       {detail.runConfiguration && (
@@ -333,15 +266,6 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               tender={tender}
               onReviewed={load}
               key={tender.id}
-              selectable={detail.jobState === 'SHORTLISTED'}
-              selected={selectedIds?.has(tender.id) ?? false}
-              onToggleSelected={(tenderId, checked) => {
-                setSelectedIds((current) => {
-                  const next = new Set(current ?? []);
-                  if (checked) next.add(tenderId); else next.delete(tenderId);
-                  return next;
-                });
-              }}
             />
           ))}</div>
         ) : (
@@ -360,15 +284,6 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
               tender={tender}
               onReviewed={load}
               key={tender.id}
-              selectable={detail.jobState === 'SHORTLISTED'}
-              selected={selectedIds?.has(tender.id) ?? false}
-              onToggleSelected={(tenderId, checked) => {
-                setSelectedIds((current) => {
-                  const next = new Set(current ?? []);
-                  if (checked) next.add(tenderId); else next.delete(tenderId);
-                  return next;
-                });
-              }}
             />
           ))}</div>
         </section>

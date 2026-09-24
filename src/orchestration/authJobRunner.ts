@@ -53,6 +53,8 @@ export interface AuthJobUpdate {
   authErrorCode?: string;
   recoveryAction?: string;
   statusMessage?: string;
+  /** The run is paused on the shortlist, waiting for the operator's tender choice. */
+  awaitingSelection?: boolean;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;

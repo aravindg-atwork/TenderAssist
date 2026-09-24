@@ -5,6 +5,7 @@ import { StatePill } from './StatePill';
 import { TrashIcon } from './icons';
 import type { PreflightReport } from '../../../src/system/preflight';
 import { RunWorkspace } from './RunWorkspace';
+import { LiveShortlist } from './LiveShortlist';
 import { DEFAULT_PORTAL_ID, getPortalDefinition } from '../../../src/config/portalRegistry';
 import { PortalCompatibilityBadge, PortalSelect } from './PortalSelect';
 
@@ -106,11 +107,9 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     try {
       setSearchDate(recoveryJob.config.searchDate);
       onPortalChange(recoveryJob.config.portalId ?? DEFAULT_PORTAL_ID);
-      const { jobId, plan } = await window.tenderAssist.resumeJob(recoveryJob.jobId);
+      const { jobId } = await window.tenderAssist.resumeJob(recoveryJob.jobId);
       setRecoveryJob(null);
       onActiveJobChange(jobId);
-      // The tender choice is made on the run's review page.
-      if (plan === 'SELECT_TENDERS') onSelectJob(jobId);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -175,7 +174,9 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     }
   };
 
-  const assistCopy = activeJobUpdate?.phase === 'AUTH'
+  const assistCopy = activeJobUpdate?.awaitingSelection
+    ? { title: 'Shortlist ready', body: activeJobUpdate.statusMessage ?? 'Choose the tenders to download below.' }
+    : activeJobUpdate?.phase === 'AUTH'
     ? activeJobUpdate.authStep === 'CAPTCHA_REQUIRED'
       ? { title: 'Enter the CAPTCHA below', body: 'Your saved login ID and password are filled. Enter the visible CAPTCHA and select Proceed in the embedded portal.' }
       : activeJobUpdate.authStep === 'DSC_READY'
@@ -259,6 +260,8 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
               </button>
             )}
           </section>
+
+          {activeJobUpdate?.awaitingSelection && <LiveShortlist key={activeJobUpdate.jobId} jobId={activeJobUpdate.jobId} />}
 
           {error && <p className="error-text run-sidebar__error">{error}</p>}
           <div className="run-sidebar__footer">

@@ -1110,29 +1110,6 @@ input:focus-visible {
   color: var(--state-pending-fg);
 }
 
-.selection-panel {
-  margin-bottom: 24px;
-  padding: 16px 18px;
-  border: 1px solid var(--accent);
-  border-radius: 9px;
-  background: var(--surface);
-}
-
-.selection-panel__actions {
-  display: grid;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.tender-card__select {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-right: auto;
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
 .result-section {
   margin: 28px 0;
 }
@@ -2686,4 +2663,70 @@ input:focus-visible {
 .app-main--portal > .running-workspace {
   flex: 1;
   height: auto;
+}
+
+/* ---------- Live shortlist (run panel) ---------- */
+
+.live-shortlist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.live-shortlist h2 {
+  margin: 0;
+  font-size: 1.0625rem;
+}
+
+.live-shortlist__group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.live-shortlist__group legend {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.live-shortlist__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.live-shortlist__item input {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 3px;
+}
+
+.live-shortlist__item strong,
+.live-shortlist__item small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.live-shortlist__item small {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.live-shortlist__confirm {
+  width: 100%;
+}
+
+.live-shortlist__loading {
+  color: var(--text-muted);
 }

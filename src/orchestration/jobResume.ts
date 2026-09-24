@@ -27,7 +27,7 @@ export function describeResumePlan(plan: ResumePlan): string {
     case 'COLLECT_DOCUMENTS':
       return 'Continue collecting documents for the tenders you chose. Files already saved are kept; you may need to sign in again.';
     case 'SELECT_TENDERS':
-      return 'Continue from the shortlist: choose which tenders to download. Search and screening are not repeated.';
+      return 'Continue from the shortlist: sign in, then choose which tenders to download. Search and screening are not repeated.';
     case 'START_OVER':
       return 'Start this run again with the same date and relevance settings.';
   }

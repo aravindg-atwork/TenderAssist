@@ -860,9 +860,23 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
   }
 }
 
-/** Wait for the operator's tender choice and remember it for resuming. */
-async function awaitSelection(ctx: RunContext, jobId: string): Promise<string[] | null> {
-  const selected = await waitForDocumentSelection(jobId, ctx.abortController.signal);
+/**
+ * Pause on the shortlist until the operator ticks tenders in the live run
+ * panel, with the portal still signed in, and remember the choice so an
+ * interrupted run can resume downloads.
+ */
+async function awaitSelection(ctx: RunContext, jobId: string, authSessionId: string): Promise<string[] | null> {
+  const waiting = waitForDocumentSelection(jobId, ctx.abortController.signal);
+  emitJobUpdate({
+    jobId,
+    authSessionId,
+    jobState: jobs.getById(jobId)!.state,
+    authState: sessions.getById(authSessionId)?.state ?? 'NOT_STARTED',
+    phase: 'CLASSIFICATION',
+    awaitingSelection: true,
+    statusMessage: 'The portal stays signed in while you choose. Nothing downloads until you confirm.',
+  });
+  const selected = await waiting;
   if (selected === null) return null;
   runConfigurations.saveSelection(jobId, selected);
   syncOpportunities('selection', () => recordDownloadSelection(opportunitySync, jobId, selected));
@@ -989,7 +1003,7 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
       // Job sits in SHORTLISTED here -- the renderer shows the review panel
       // and waits for the operator to tick tenders and confirm before
       // anything downloads. cancel-job aborts this wait too.
-      const selectedTenderIds = await awaitSelection(ctx, classificationResult.jobId);
+      const selectedTenderIds = await awaitSelection(ctx, classificationResult.jobId, classificationResult.authSessionId);
       if (selectedTenderIds === null) return classificationResult;
       return collectDocuments(ctx, classificationResult.jobId, classificationResult.authSessionId, selectedTenderIds);
     });
@@ -1020,25 +1034,23 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
   activeJobId = jobId;
   const latestSession = sessions.getLatestForJob(jobId);
 
-  // No portal is open yet: selection needs none, and document collection
-  // asks for sign-in only if something still has to be downloaded.
   const run = (async () => {
-    let selection = plan.kind === 'COLLECT_DOCUMENTS' ? plan.selectedTenderIds : null;
-    if (!selection) {
-      emitJobUpdate({
-        jobId,
-        authSessionId: latestSession?.id ?? '',
-        jobState: 'SHORTLISTED',
-        authState: latestSession?.state ?? 'NOT_STARTED',
-        phase: 'CLASSIFICATION',
-        outcome: 'SUCCESS',
-        statusMessage: 'Choose which tenders to download. Search and screening are not repeated.',
-      });
-      selection = await awaitSelection(ctx, jobId);
+    if (plan.kind === 'SELECT_TENDERS') {
+      // Choosing tenders happens in the live run, so sign in first: the
+      // downloads then start straight after the choice, in that session.
+      await openPortal(portal);
+      const credentials = await loadPortalCredentials(portal.id).catch(() => undefined);
+      const signedIn = await signIn(ctx, credentials, emitJobUpdate, jobId);
+      if (signedIn.outcome !== 'SUCCESS') return;
+      const selection = await awaitSelection(ctx, jobId, signedIn.authSessionId);
       if (selection === null) return;
+      await collectDocuments(ctx, jobId, signedIn.authSessionId, selection);
+      return;
     }
+    // Documents already chosen: saved files need no portal, and collection
+    // asks for sign-in as soon as something still has to be downloaded.
     prepareForDocumentCollection(jobs, jobMachine, jobId);
-    await collectDocuments(ctx, jobId, latestSession?.id ?? '', selection);
+    await collectDocuments(ctx, jobId, latestSession?.id ?? '', plan.selectedTenderIds);
   })();
   activeJobCompletion = finishRun(ctx, run, () => {});
   return { jobId, plan: plan.kind };
