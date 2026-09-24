@@ -1,9 +1,10 @@
 import ExcelJS from 'exceljs';
 import { cpSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { FinalClassification } from '../persistence/repositories/classificationRepository.js';
 import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow } from '../persistence/repositories/tenderWorkflowRepository.js';
+import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from './outputStructure.js';
 
 export interface PublishableTender {
   tender: TenderRow;
@@ -11,10 +12,8 @@ export interface PublishableTender {
   manualReview?: TenderReviewRow;
   documents: TenderDocumentRow[];
   requirements?: TenderRequirementRow;
-}
-
-function safeSegment(value: string): string {
-  return value.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 100) || 'untitled';
+  /** Stable S.No within the day folder; defaults to the item's position. */
+  serialNumber?: number;
 }
 
 function requirementData(row?: TenderRequirementRow): Record<string, string | null> {
@@ -23,26 +22,123 @@ function requirementData(row?: TenderRequirementRow): Record<string, string | nu
   catch { return {}; }
 }
 
-export function jobOutputDirectory(outputRoot: string, searchDate: string, jobId: string): string {
-  return join(outputRoot, `${searchDate}_${jobId.slice(0, 8)}`);
+export function localDateFromTimestamp(timestamp: string | Date): string {
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) throw new Error('Job creation time is invalid.');
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
-export function tenderOutputDirectory(jobDirectory: string, tender: TenderRow): string {
-  return join(jobDirectory, safeSegment(`${tender.tender_portal_id ?? tender.tender_ref} ${tender.title}`));
+export function jobOutputDirectory(
+  outputRoot: string,
+  searchDate: string,
+  _jobId?: string,
+  structure: OutputStructureSettings = DEFAULT_OUTPUT_STRUCTURE
+): string {
+  const resolved = resolveOutputStructure(structure, searchDate);
+  return join(outputRoot, resolved.monthFolder, resolved.dayFolder);
+}
+
+function outputDateFromDefaultDirectory(jobDirectory: string): string {
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(basename(jobDirectory));
+  if (!match) throw new Error('Output date is required when using a custom day-folder template.');
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+export function tenderOutputDirectory(
+  jobDirectory: string,
+  tender: TenderRow,
+  serialNumber = 1,
+  structure: OutputStructureSettings = DEFAULT_OUTPUT_STRUCTURE,
+  outputDate = outputDateFromDefaultDirectory(jobDirectory)
+): string {
+  return join(jobDirectory, resolveOutputStructure(structure, outputDate, tender.title, serialNumber).tenderFolder);
+}
+
+export function tenderDocumentsDirectory(
+  jobDirectory: string,
+  tender: TenderRow,
+  serialNumber = 1,
+  structure: OutputStructureSettings = DEFAULT_OUTPUT_STRUCTURE,
+  outputDate = outputDateFromDefaultDirectory(jobDirectory)
+): string {
+  const resolved = resolveOutputStructure(structure, outputDate, tender.title, serialNumber);
+  return join(jobDirectory, resolved.tenderFolder, resolved.documentsFolder);
+}
+
+async function publishTenderEligibilityWorkbook(
+  tenderDirectory: string,
+  item: PublishableTender,
+  serialNumber: number,
+  structure: OutputStructureSettings,
+  outputDate: string
+): Promise<void> {
+  mkdirSync(tenderDirectory, { recursive: true });
+  const req = requirementData(item.requirements);
+  const decision = item.manualReview?.decision ?? item.automaticDecision;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'TenderAssist';
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet('Eligibility', { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = [
+    { header: 'Field', key: 'field', width: 28 },
+    { header: 'Value', key: 'value', width: 82 },
+  ];
+  const rows: Array<[string, string | number]> = [
+    ['S.No', serialNumber],
+    ['Tender ID', item.tender.tender_portal_id ?? item.tender.tender_ref],
+    ['Reference', item.tender.tender_ref],
+    ['Tender title', item.tender.title],
+    ['Approved decision', decision],
+    ['Approval source', item.manualReview ? 'Manual review' : 'Automation'],
+    ['Review reason', item.manualReview?.reason ?? ''],
+    ['Category', item.tender.detail_product_category ?? item.tender.product_category ?? ''],
+    ['Organisation', item.tender.organisation_chain ?? ''],
+    ['Department', item.tender.department ?? ''],
+    ['State', item.tender.state_name ?? ''],
+    ['Published date', item.tender.published_date ?? ''],
+    ['Closing date', item.tender.closing_date ?? ''],
+    ['Estimated value', item.tender.value_in_rupees === 'NA' ? '' : item.tender.value_in_rupees ?? ''],
+    ['Scope', req.scope ?? ''],
+    ['Eligibility', req.eligibility ?? ''],
+    ['EMD', req.emd ?? ''],
+    ['Tender fee', req.tenderFee ?? ''],
+    ['Submission deadline', req.submissionDeadline ?? ''],
+    ['Submission method', req.submissionMethod ?? ''],
+    ['Contact', req.contact ?? ''],
+    ['Extraction confidence', item.requirements?.confidence ?? ''],
+    ['Documents downloaded', item.documents.filter((document) => document.state === 'DOWNLOADED').length],
+  ];
+  for (const [field, value] of rows) sheet.addRow({ field, value });
+  sheet.getRow(1).height = 28;
+  sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF263B93' } };
+  sheet.getColumn(2).alignment = { vertical: 'top', wrapText: true };
+  const fileName = resolveOutputStructure(structure, outputDate, item.tender.title, serialNumber).eligibilityWorkbook;
+  await workbook.xlsx.writeFile(join(tenderDirectory, fileName));
+}
+
+/** Later jobs sharing a day folder get their own workbook instead of replacing the first. */
+export function approvedWorkbookName(fileName: string, runNumber: number): string {
+  return runNumber > 1 ? fileName.replace(/\.xlsx$/i, ` (run ${runNumber}).xlsx`) : fileName;
 }
 
 export async function publishJobWorkbook(
   outputRoot: string,
   searchDate: string,
   jobId: string,
-  items: PublishableTender[]
+  items: PublishableTender[],
+  structure: OutputStructureSettings = DEFAULT_OUTPUT_STRUCTURE,
+  runNumber = 1
 ): Promise<{ jobDirectory: string; workbookPath: string }> {
-  const jobDirectory = jobOutputDirectory(outputRoot, searchDate, jobId);
+  const jobDirectory = jobOutputDirectory(outputRoot, searchDate, jobId, structure);
   mkdirSync(jobDirectory, { recursive: true });
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'TenderAssist';
   workbook.created = new Date();
-  const sheet = workbook.addWorksheet('Tenders', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const sheet = workbook.addWorksheet('Approved Tenders', { views: [{ state: 'frozen', ySplit: 1 }] });
   sheet.columns = [
     { header: 'Tender ID', key: 'tenderId', width: 20 },
     { header: 'Reference', key: 'reference', width: 22 },
@@ -69,7 +165,8 @@ export async function publishJobWorkbook(
     { header: 'Tender folder', key: 'folder', width: 55 },
   ];
 
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
+    const serialNumber = item.serialNumber ?? index + 1;
     const req = requirementData(item.requirements);
     const decision = item.manualReview?.decision ?? item.automaticDecision;
     sheet.addRow({
@@ -91,8 +188,15 @@ export async function publishJobWorkbook(
       submission: req.submissionMethod ?? '', contact: req.contact ?? '',
       confidence: item.requirements?.confidence ?? '',
       documents: item.documents.filter((document) => document.state === 'DOWNLOADED').length,
-      folder: tenderOutputDirectory(jobDirectory, item.tender),
+      folder: tenderOutputDirectory(jobDirectory, item.tender, serialNumber, structure, searchDate),
     });
+    await publishTenderEligibilityWorkbook(
+      tenderOutputDirectory(jobDirectory, item.tender, serialNumber, structure, searchDate),
+      item,
+      serialNumber,
+      structure,
+      searchDate
+    );
   }
 
   sheet.autoFilter = { from: 'A1', to: 'W1' };
@@ -103,7 +207,7 @@ export async function publishJobWorkbook(
   for (const row of sheet.getRows(2, Math.max(items.length, 1)) ?? []) {
     row.alignment = { vertical: 'top', wrapText: true };
   }
-  const workbookPath = join(jobDirectory, `TenderAssist-${searchDate}.xlsx`);
+  const workbookPath = join(jobDirectory, approvedWorkbookName(resolveOutputStructure(structure, searchDate).approvedWorkbook, runNumber));
   await workbook.xlsx.writeFile(workbookPath);
   return { jobDirectory, workbookPath };
 }
@@ -112,11 +216,12 @@ export function mirrorJobOutputToDrive(
   localJobDirectory: string,
   driveOutputRoot: string,
   searchDate: string,
-  jobId: string
+  jobId: string,
+  structure: OutputStructureSettings = DEFAULT_OUTPUT_STRUCTURE
 ): string | null {
   const driveRoot = driveOutputRoot.trim();
   if (!driveRoot) return null;
-  const destination = jobOutputDirectory(driveRoot, searchDate, jobId);
+  const destination = jobOutputDirectory(driveRoot, searchDate, jobId, structure);
   if (resolve(destination).toLocaleLowerCase() === resolve(localJobDirectory).toLocaleLowerCase()) return destination;
   mkdirSync(driveRoot, { recursive: true });
   cpSync(localJobDirectory, destination, { recursive: true, force: true });

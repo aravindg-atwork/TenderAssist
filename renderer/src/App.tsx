@@ -13,6 +13,7 @@ export function App() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJobUpdate, setActiveJobUpdate] = useState<AuthJobUpdate | null>(null);
   const [view, setView] = useState<AppView>('jobs');
+  const [settingsFocus, setSettingsFocus] = useState<{ section: 'folders'; requestId: number } | null>(null);
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
   const [selectedPortalId, setSelectedPortalIdState] = useState(() => localStorage.getItem('tenderassist.portal') || DEFAULT_PORTAL_ID);
   const setSelectedPortalId = (portalId: string) => {
@@ -23,6 +24,16 @@ export function App() {
   useEffect(() => {
     window.tenderAssist.getRunSettings().then(setSettings).catch(console.error);
   }, []);
+
+  useEffect(() => window.tenderAssist.onAppNavigation((command) => {
+    setView(command.view);
+    setSelectedJobId(null);
+    if (command.view === 'settings' && command.section) {
+      setSettingsFocus({ section: command.section, requestId: Date.now() });
+    } else {
+      setSettingsFocus(null);
+    }
+  }), []);
 
   useEffect(() => {
     // Lives at the App level (never unmounts) rather than inside JobList, so
@@ -72,7 +83,7 @@ export function App() {
       </header>
       <main className={activeJobId && view === 'jobs' && !selectedJobId ? 'app-main app-main--portal' : 'app-main'}>
         {view === 'settings' ? (
-          <SettingsPage settings={settings} onSaved={setSettings} selectedPortalId={selectedPortalId} onPortalChange={setSelectedPortalId} />
+          <SettingsPage settings={settings} onSaved={setSettings} selectedPortalId={selectedPortalId} onPortalChange={setSelectedPortalId} focusRequest={settingsFocus} />
         ) : selectedJobId ? (
           <JobDetail jobId={selectedJobId} onBack={() => setSelectedJobId(null)} />
         ) : (

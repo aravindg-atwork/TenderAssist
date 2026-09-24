@@ -297,9 +297,9 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
           <div className="run-history">
             <span className="run-history__label">Last 5 run dates</span>
             {history.recentRunDates.length > 0 ? history.recentRunDates.map((date) => (
-              <button type="button" className="date-chip" onClick={() => setSearchDate(date)} key={date}>{date}</button>
+              <span className="date-chip" key={date}>{date}</span>
             )) : <span className="run-history__empty">No previous runs for this portal</span>}
-            <span className="run-history__hint">Select a date to run it again.</span>
+            <span className="run-history__hint">Run history only. Choose the publication date above for the next job.</span>
           </div>
           {history.missedDates.length > 0 && (
             <div className="missed-days">

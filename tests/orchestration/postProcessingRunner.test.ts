@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import ExcelJS from 'exceljs';
 import type { Page } from 'playwright-core';
 import { runMigrations } from '../../src/persistence/migrate.js';
 import { JobRepository } from '../../src/persistence/repositories/jobRepository.js';
@@ -11,6 +12,7 @@ import { StateTransitionRepository } from '../../src/persistence/repositories/st
 import { TenderRepository } from '../../src/persistence/repositories/tenderRepository.js';
 import { ClassificationRepository } from '../../src/persistence/repositories/classificationRepository.js';
 import { TenderWorkflowRepository } from '../../src/persistence/repositories/tenderWorkflowRepository.js';
+import { JobOutputRepository } from '../../src/persistence/repositories/jobOutputRepository.js';
 import { JobStateMachine } from '../../src/state/jobStateMachine.js';
 import { runPostProcessing } from '../../src/orchestration/postProcessingRunner.js';
 import type { RunConfiguration } from '../../src/config/runConfiguration.js';
@@ -45,6 +47,7 @@ describe('runPostProcessing tender selection', () => {
     const workflow = new TenderWorkflowRepository(db);
 
     const job = jobs.create();
+    db.prepare('UPDATE jobs SET created_at = ? WHERE id = ?').run('2026-09-23T06:00:00.000Z', job.id);
     jobMachine.transition(job.id, 'AUTH_REQUIRED');
     jobMachine.transition(job.id, 'AUTH_PENDING');
     jobMachine.transition(job.id, 'AUTHENTICATED');
@@ -105,7 +108,7 @@ describe('runPostProcessing tender selection', () => {
     };
 
     const result = await runPostProcessing(
-      { jobs, sessions, jobMachine, tenders, classifications, workflow, signal: undefined },
+      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: new JobOutputRepository(db), signal: undefined },
       fakePage(),
       job.id,
       session.id,
@@ -126,12 +129,21 @@ describe('runPostProcessing tender selection', () => {
     expect(selectedDocuments[0].state).toBe('DOWNLOADED');
     expect(skippedDocuments).toHaveLength(0);
 
-    const jobDirectory = readdirSync(outputRoot, { recursive: true }) as string[];
-    expect(jobDirectory.some((entry) => entry.includes('REF-SELECTED'))).toBe(true);
-    expect(jobDirectory.some((entry) => entry.includes('REF-SKIPPED'))).toBe(false);
+    const outputEntries = readdirSync(outputRoot, { recursive: true }) as string[];
+    expect(outputEntries.some((entry) => entry.includes('23-09-2026_1_Selected tender'))).toBe(true);
+    expect(outputEntries.some((entry) => entry.includes('Documents'))).toBe(true);
+    expect(outputEntries.some((entry) => entry.includes('Eligibility.xlsx'))).toBe(true);
+    expect(outputEntries.some((entry) => entry.includes('Skipped tender'))).toBe(false);
+
+    const workbookPath = join(outputRoot, '09-2026', '23-09-2026', 'Approved-Tenders-23-09-2026.xlsx');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(workbookPath);
+    const sheet = workbook.getWorksheet('Approved Tenders')!;
+    expect(sheet.rowCount).toBe(2);
+    expect(sheet.getCell('A2').value).toBe('2026_SELECTED');
   });
 
-  it('publishes the full audit workbook and completes even when the user selects nothing', async () => {
+  it('publishes an empty approved workbook and completes when the user selects nothing', async () => {
     const db = new DatabaseSync(':memory:');
     runMigrations(db, join(process.cwd(), 'src', 'persistence', 'migrations'));
     const jobs = new JobRepository(db);
@@ -143,6 +155,7 @@ describe('runPostProcessing tender selection', () => {
     const workflow = new TenderWorkflowRepository(db);
 
     const job = jobs.create();
+    db.prepare('UPDATE jobs SET created_at = ? WHERE id = ?').run('2026-09-23T06:00:00.000Z', job.id);
     jobMachine.transition(job.id, 'AUTH_REQUIRED');
     jobMachine.transition(job.id, 'AUTH_PENDING');
     jobMachine.transition(job.id, 'AUTHENTICATED');
@@ -160,7 +173,7 @@ describe('runPostProcessing tender selection', () => {
     };
 
     const result = await runPostProcessing(
-      { jobs, sessions, jobMachine, tenders, classifications, workflow, signal: undefined },
+      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: new JobOutputRepository(db), signal: undefined },
       fakePage(),
       job.id,
       session.id,
@@ -174,6 +187,53 @@ describe('runPostProcessing tender selection', () => {
 
     expect(result.outcome).toBe('SUCCESS');
     expect(jobs.getById(job.id)?.state).toBe('COMPLETE');
-    expect(existsSync(outputRoot)).toBe(true);
+    const workbookPath = join(outputRoot, '09-2026', '23-09-2026', 'Approved-Tenders-23-09-2026.xlsx');
+    expect(existsSync(workbookPath)).toBe(true);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(workbookPath);
+    expect(workbook.getWorksheet('Approved Tenders')?.rowCount).toBe(1);
+  });
+
+  it('keeps the output of both jobs that publish on the same day', async () => {
+    const db = new DatabaseSync(':memory:');
+    runMigrations(db, join(process.cwd(), 'src', 'persistence', 'migrations'));
+    const jobs = new JobRepository(db);
+    const sessions = new AuthSessionRepository(db);
+    const transitions = new StateTransitionRepository(db);
+    const jobMachine = new JobStateMachine(db, jobs, transitions);
+    const tenders = new TenderRepository(db);
+    const classifications = new ClassificationRepository(db);
+    const workflow = new TenderWorkflowRepository(db);
+    const outputs = new JobOutputRepository(db);
+    const outputRoot = mkdtempSync(join(tmpdir(), 'tenderassist-sameday-test-'));
+    const config: RunConfiguration = {
+      searchDate: '2026-09-23', productCategories: ['Information Technology'], keywords: [], excludedKeywords: [],
+    };
+
+    for (const title of ['Morning tender', 'Afternoon tender']) {
+      const job = jobs.create();
+      db.prepare('UPDATE jobs SET created_at = ? WHERE id = ?').run('2026-09-23T06:00:00.000Z', job.id);
+      for (const state of ['AUTH_REQUIRED', 'AUTH_PENDING', 'AUTHENTICATED', 'SEARCHING', 'CLASSIFYING', 'SHORTLISTED'] as const) {
+        jobMachine.transition(job.id, state);
+      }
+      const session = sessions.create(job.id);
+      const tender = tenders.upsert({
+        jobId: job.id, tenderRef: `REF-${title}`, tenderPortalId: `ID-${title}`, title,
+        organisationChain: 'Dept', publishedDate: '2026-09-23', closingDate: null, openingDate: null,
+        productCategory: 'Information Technology', valueInRupees: 'NA',
+      });
+      const result = await runPostProcessing(
+        { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs, signal: undefined },
+        fakePage(), job.id, session.id, config, outputRoot, () => {}, '', PORTAL_URL, [tender.id]
+      );
+      expect(result.outcome).toBe('SUCCESS');
+    }
+
+    const dayFolder = join(outputRoot, '09-2026', '23-09-2026');
+    const entries = readdirSync(dayFolder);
+    expect(entries).toContain('23-09-2026_1_Morning tender');
+    expect(entries).toContain('23-09-2026_2_Afternoon tender');
+    expect(entries).toContain('Approved-Tenders-23-09-2026.xlsx');
+    expect(entries).toContain('Approved-Tenders-23-09-2026 (run 2).xlsx');
   });
 });

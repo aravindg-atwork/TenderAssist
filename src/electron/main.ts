@@ -1,5 +1,5 @@
 // src/electron/main.ts
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -17,6 +17,7 @@ import { PortalCredentialRepository } from '../persistence/repositories/portalCr
 import { PublishingSettingsRepository } from '../persistence/repositories/publishingSettingsRepository.js';
 import { AutomationSettingsRepository } from '../persistence/repositories/automationSettingsRepository.js';
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
+import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
@@ -38,7 +39,7 @@ import type {
 import { normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
-import { jobOutputDirectory, mirrorJobOutputToDrive, publishJobWorkbook } from '../publishing/jobPublisher.js';
+import { localDateFromTimestamp, mirrorJobOutputToDrive, publishJobWorkbook } from '../publishing/jobPublisher.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
 import { runPreflight } from '../system/preflight.js';
 import { EmbeddedPortalHost, embeddedPortalTargetPrefix } from './embeddedPortalHost.js';
@@ -72,6 +73,7 @@ const portalCredentials = new PortalCredentialRepository(db);
 const workflow = new TenderWorkflowRepository(db);
 const publishingSettings = new PublishingSettingsRepository(db, join(homedir(), 'Documents', 'TenderAssist'));
 const automationSettings = new AutomationSettingsRepository(db);
+const jobOutputs = new JobOutputRepository(db);
 const jobMachine = new JobStateMachine(db, jobs, transitions);
 const authMachine = new AuthStateMachine(db, sessions, transitions);
 
@@ -160,6 +162,71 @@ function createWindow(): void {
   void mainWindow.loadFile(join(__dirname, '..', '..', 'renderer', 'dist', 'index.html'));
 }
 
+function navigateApplication(view: 'jobs' | 'settings', section?: 'folders'): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('app-navigate', { view, section });
+}
+
+function configureApplicationMenu(): void {
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [
+        { label: 'Output folders and naming…', accelerator: 'CmdOrCtrl+Shift+O', click: () => navigateApplication('settings', 'folders') },
+        { type: 'separator' },
+        { role: process.platform === 'darwin' ? 'close' : 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => navigateApplication('settings') },
+        { type: 'separator' },
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Show Jobs', accelerator: 'CmdOrCtrl+1', click: () => navigateApplication('jobs') },
+        { label: 'Show Settings', accelerator: 'CmdOrCtrl+2', click: () => navigateApplication('settings') },
+        { type: 'separator' },
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' },
+        { role: 'togglefullscreen' },
+        ...(!app.isPackaged ? [{ type: 'separator' as const }, { role: 'reload' as const }, { role: 'toggleDevTools' as const }] : []),
+      ],
+    },
+    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'close' }] },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Check for updates…', click: () => void checkForUpdates(() => mainWindow).catch(() => {}) },
+        { type: 'separator' },
+        {
+          label: 'About TenderAssist',
+          click: () => {
+            const options: Electron.MessageBoxOptions = {
+              type: 'info',
+              title: 'About TenderAssist',
+              message: 'TenderAssist',
+              detail: `Version ${app.getVersion()}\nGovernment tender discovery, review, and document organization.`,
+            };
+            void (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options));
+          },
+        },
+      ],
+    },
+  ];
+  if (process.platform === 'darwin') {
+    template.unshift({ label: app.name, submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] });
+  }
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 ipcMain.handle('list-jobs', (): JobListItem[] => {
   return jobs.listAll().map((job) => {
     const session = sessions.getLatestForJob(job.id);
@@ -208,18 +275,33 @@ ipcMain.handle('select-publishing-folder', async (_event, initialPath?: string):
 function publishStoredJob(jobId: string) {
   const config = runConfigurations.getForJob(jobId);
   if (!config) throw new Error('This job has no saved run configuration.');
-  const items = tenders.listForJob(jobId).map((tender) => ({
+  const plan = outputPlanFor(jobId, config.portalId);
+  const allItems = tenders.listForJob(jobId).map((tender) => ({
     tender,
     automaticDecision: classifications.getFinalForTender(tender.id),
     manualReview: workflow.getReview(tender.id),
     documents: workflow.listDocuments(tender.id),
     requirements: workflow.getRequirements(tender.id),
   }));
+  const explicitlyProcessed = allItems.filter((item) => item.requirements || item.documents.length > 0);
+  const items = explicitlyProcessed.length > 0
+    ? explicitlyProcessed
+    : allItems.filter((item) => (item.manualReview?.decision ?? item.automaticDecision) === 'KEEP');
   const settings = publishingSettings.get(config.portalId ?? DEFAULT_PORTAL_ID);
-  return publishJobWorkbook(settings.localOutputRoot, config.searchDate, jobId, items).then((published) => {
-    mirrorJobOutputToDrive(published.jobDirectory, settings.driveOutputRoot, config.searchDate, jobId);
+  const numbered = items.map((item) => ({ ...item, serialNumber: jobOutputs.serialNumberFor(plan, item.tender.id) }));
+  return publishJobWorkbook(plan.outputRoot, plan.outputDate, jobId, numbered, plan.structure, plan.runNumber).then((published) => {
+    mirrorJobOutputToDrive(published.jobDirectory, settings.driveOutputRoot, plan.outputDate, jobId, plan.structure);
     return published;
   });
+}
+
+// Jobs published before output plans existed get one from today's settings
+// on first use; after that the plan is frozen.
+function outputPlanFor(jobId: string, portalId?: string) {
+  const job = jobs.getById(jobId);
+  if (!job) throw new Error('Job not found.');
+  const settings = publishingSettings.get(portalId ?? DEFAULT_PORTAL_ID);
+  return jobOutputs.getOrCreatePlan(jobId, settings.localOutputRoot, localDateFromTimestamp(job.created_at), settings.structure);
 }
 
 ipcMain.handle('get-update-status', () => getUpdateStatus());
@@ -253,8 +335,7 @@ ipcMain.handle('portal-reload', () => portalHost?.reload());
 ipcMain.handle('open-job-output', async (_event, jobId: string): Promise<void> => {
   const config = runConfigurations.getForJob(jobId);
   if (!config) throw new Error('This job has no saved output configuration.');
-  const settings = publishingSettings.get(config.portalId ?? DEFAULT_PORTAL_ID);
-  const folder = jobOutputDirectory(settings.localOutputRoot, config.searchDate, jobId);
+  const folder = outputPlanFor(jobId, config.portalId).jobDirectory;
   if (!existsSync(folder)) await publishStoredJob(jobId);
   const error = await shell.openPath(folder);
   if (error) throw new Error(`Could not open the job folder: ${error}`);
@@ -265,7 +346,8 @@ ipcMain.handle('save-tender-review', async (_event, tenderId: string, decision: 
   const tender = db.prepare('SELECT job_id FROM tenders WHERE id = ?').get(tenderId) as { job_id: string } | undefined;
   if (!tender) throw new Error('Tender not found.');
   const review = workflow.saveReview(tenderId, decision, reason);
-  await publishStoredJob(tender.job_id);
+  const job = jobs.getById(tender.job_id);
+  if (job?.state === 'COMPLETE' || job?.state === 'REPORTING') await publishStoredJob(tender.job_id);
   return review;
 });
 
@@ -561,7 +643,7 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     const selectedTenderIds = await waitForDocumentSelection(classificationResult.jobId, abortController.signal);
     if (selectedTenderIds === null) return classificationResult;
     return runPostProcessing(
-      { jobs, sessions, jobMachine, tenders, classifications, workflow, signal: abortController.signal },
+      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: abortController.signal },
       capturedPage,
       classificationResult.jobId,
       classificationResult.authSessionId,
@@ -572,7 +654,8 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
       },
       outputSettings.driveOutputRoot,
       portal.url,
-      selectedTenderIds
+      selectedTenderIds,
+      outputSettings.structure
     );
   });
 
@@ -638,6 +721,7 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
 
   app.whenReady().then(() => {
     createWindow();
+    configureApplicationMenu();
     configureUpdates(() => mainWindow);
     if (app.isPackaged) {
       setTimeout(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { RunDefaults } from '../../../src/config/runConfiguration';
 import type { PortalCredentialSettings, RunSettingsState } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
@@ -7,15 +7,17 @@ import { DEFAULT_AUTOMATION_PACING, type AutomationPacingSettings, type Automati
 import { EditableChips } from './EditableChips';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { PortalCompatibilityBadge, PortalSelect } from './PortalSelect';
+import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from '../../../src/publishing/outputStructure';
 
 export interface SettingsPageProps {
   settings: RunSettingsState | null;
   onSaved: (settings: RunSettingsState) => void;
   selectedPortalId: string;
   onPortalChange: (portalId: string) => void;
+  focusRequest?: { section: 'folders'; requestId: number } | null;
 }
 
-export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChange }: SettingsPageProps) {
+export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChange, focusRequest }: SettingsPageProps) {
   const [productCategories, setProductCategories] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [excludedKeywords, setExcludedKeywords] = useState<string[]>([]);
@@ -29,6 +31,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const foldersSectionRef = useRef<HTMLElement>(null);
+  const folderCustomizerRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     if (!settings) return;
@@ -64,6 +68,26 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     window.tenderAssist.getUpdateStatus().then(setUpdateStatus).catch(() => {});
     return window.tenderAssist.onUpdateStatus(setUpdateStatus);
   }, []);
+
+  useEffect(() => {
+    if (focusRequest?.section !== 'folders') return;
+    if (folderCustomizerRef.current) folderCustomizerRef.current.open = true;
+    foldersSectionRef.current?.scrollIntoView({ block: 'start' });
+    foldersSectionRef.current?.focus({ preventScroll: true });
+  }, [focusRequest]);
+
+  const previewDate = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const structurePreview = useMemo(() => {
+    try {
+      return publishing ? resolveOutputStructure(publishing.structure, previewDate, 'Citizen services portal', 1) : null;
+    } catch {
+      return null;
+    }
+  }, [publishing, previewDate]);
 
   useEffect(() => {
     window.tenderAssist.getAutomationPacing().then(setPacing).catch((err) => setError(err instanceof Error ? err.message : String(err)));
@@ -111,6 +135,11 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     if (folder) setPublishing(kind === 'local'
       ? { ...publishing, localOutputRoot: folder }
       : { ...publishing, driveOutputRoot: folder });
+  };
+
+  const updateStructure = (key: keyof OutputStructureSettings, value: string) => {
+    if (!publishing) return;
+    setPublishing({ ...publishing, structure: { ...publishing.structure, [key]: value } });
   };
 
   const forgetSavedPassword = async () => {
@@ -221,11 +250,11 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         </div>
       </section>
 
-      <section className="settings-card">
+      <section className="settings-card settings-card--folders" ref={foldersSectionRef} tabIndex={-1}>
         <div className="settings-card__intro">
           <div>
-            <h2>Folders and spreadsheet</h2>
-            <p>Choose a local working folder and, optionally, a separate Google Drive for desktop folder for this portal.</p>
+            <h2>Folders and file names</h2>
+            <p>Choose one root folder. TenderAssist creates the month, run date, approved-tender folders, documents, and eligibility sheets inside it.</p>
           </div>
         </div>
         <div className="publishing-field">
@@ -243,7 +272,35 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
               placeholder="Choose a Google Drive desktop sync folder" />
             <button className="btn btn-secondary" type="button" onClick={() => choosePublishingFolder('drive')}>Browse</button>
           </div>
-          <p className="field-helper">TenderAssist creates the dated job locally, then copies the finished folder and .xlsx report to Drive when configured.</p>
+          <p className="field-helper">The approved-tenders workbook sits beside the tender folders; each tender folder contains its documents and eligibility workbook. Drive uses the same saved structure when configured.</p>
+          <details className="folder-customizer" ref={folderCustomizerRef}>
+            <summary>Customize folder and file names</summary>
+            <p className="field-helper">Use <code>{'{DD}'}</code>, <code>{'{MM}'}</code>, <code>{'{YYYY}'}</code>, <code>{'{SNO}'}</code>, and <code>{'{TITLE}'}</code>. The tender folder must keep <code>{'{SNO}'}</code> to prevent overwriting.</p>
+            <div className="folder-template-grid">
+              <label><span>Month folder</span><input value={publishing?.structure.monthFolderTemplate ?? ''} onChange={(event) => updateStructure('monthFolderTemplate', event.target.value)} /></label>
+              <label><span>Run-date folder</span><input value={publishing?.structure.dayFolderTemplate ?? ''} onChange={(event) => updateStructure('dayFolderTemplate', event.target.value)} /></label>
+              <label className="folder-template-grid__wide"><span>Tender folder</span><input value={publishing?.structure.tenderFolderTemplate ?? ''} onChange={(event) => updateStructure('tenderFolderTemplate', event.target.value)} /></label>
+              <label><span>Approved workbook</span><input value={publishing?.structure.approvedWorkbookTemplate ?? ''} onChange={(event) => updateStructure('approvedWorkbookTemplate', event.target.value)} /></label>
+              <label><span>Eligibility workbook</span><input value={publishing?.structure.eligibilityWorkbookTemplate ?? ''} onChange={(event) => updateStructure('eligibilityWorkbookTemplate', event.target.value)} /></label>
+              <label><span>Documents folder</span><input value={publishing?.structure.documentsFolderTemplate ?? ''} onChange={(event) => updateStructure('documentsFolderTemplate', event.target.value)} /></label>
+            </div>
+            <div className="folder-preview" aria-live="polite">
+              <strong>Preview</strong>
+              {structurePreview ? (
+                <div className="folder-tree">
+                  <span>{structurePreview.monthFolder}/</span>
+                  <span>{structurePreview.dayFolder}/</span>
+                  <span>{structurePreview.approvedWorkbook}</span>
+                  <span>{structurePreview.tenderFolder}/</span>
+                  <span>{structurePreview.documentsFolder}/</span>
+                  <span>{structurePreview.eligibilityWorkbook}</span>
+                </div>
+              ) : <p>Finish the templates to see a valid preview.</p>}
+            </div>
+            <button className="btn btn-secondary folder-reset" type="button" onClick={() => publishing && setPublishing({ ...publishing, structure: DEFAULT_OUTPUT_STRUCTURE })}>
+              Restore recommended names
+            </button>
+          </details>
         </div>
       </section>
 

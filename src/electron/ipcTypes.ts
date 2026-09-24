@@ -45,6 +45,11 @@ export interface PortalBounds {
   height: number;
 }
 
+export interface AppNavigationCommand {
+  view: 'jobs' | 'settings';
+  section?: 'folders';
+}
+
 export interface TenderDetailItem extends TenderRow {
   classification: FinalClassification;
   classificationGates: ClassificationGateRow[];
@@ -116,4 +121,5 @@ export interface TenderAssistApi {
   getJobDetail(jobId: string): Promise<JobDetail>;
   deleteJob(jobId: string): Promise<void>;
   onJobUpdate(callback: (update: AuthJobUpdate) => void): () => void;
+  onAppNavigation(callback: (command: AppNavigationCommand) => void): () => void;
 }

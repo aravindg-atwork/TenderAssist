@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { DEFAULT_OUTPUT_STRUCTURE, normalizeOutputStructure, type OutputStructureSettings } from '../../publishing/outputStructure.js';
 
 const LEGACY_KEY = 'publishing_settings';
 const keyFor = (portalId: string) => `publishing_settings:${portalId}`;
@@ -6,6 +7,7 @@ const keyFor = (portalId: string) => `publishing_settings:${portalId}`;
 export interface PublishingSettings {
   localOutputRoot: string;
   driveOutputRoot: string;
+  structure: OutputStructureSettings;
 }
 
 interface SettingsRow { value_json: string }
@@ -18,7 +20,7 @@ export class PublishingSettingsRepository {
     const legacyRow = portalId === 'tamil-nadu' && !row
       ? this.db.prepare('SELECT value_json FROM app_settings WHERE key = ?').get(LEGACY_KEY) as SettingsRow | undefined
       : undefined;
-    if (!row && !legacyRow) return { localOutputRoot: this.defaultOutputRoot, driveOutputRoot: '' };
+    if (!row && !legacyRow) return { localOutputRoot: this.defaultOutputRoot, driveOutputRoot: '', structure: DEFAULT_OUTPUT_STRUCTURE };
     try {
       const parsed = JSON.parse((row ?? legacyRow)!.value_json) as Partial<PublishingSettings> & { outputRoot?: string };
       const legacyOutput = typeof parsed.outputRoot === 'string' ? parsed.outputRoot : '';
@@ -27,16 +29,21 @@ export class PublishingSettingsRepository {
           ? parsed.localOutputRoot.trim()
           : legacyOutput.trim() || this.defaultOutputRoot,
         driveOutputRoot: typeof parsed.driveOutputRoot === 'string' ? parsed.driveOutputRoot.trim() : '',
+        structure: normalizeOutputStructure(parsed.structure),
       };
     } catch {
-      return { localOutputRoot: this.defaultOutputRoot, driveOutputRoot: '' };
+      return { localOutputRoot: this.defaultOutputRoot, driveOutputRoot: '', structure: DEFAULT_OUTPUT_STRUCTURE };
     }
   }
 
   save(input: PublishingSettings, portalId = 'tamil-nadu'): PublishingSettings {
     const localOutputRoot = input.localOutputRoot?.trim();
     if (!localOutputRoot) throw new Error('Choose a local output folder.');
-    const next = { localOutputRoot, driveOutputRoot: input.driveOutputRoot?.trim() ?? '' };
+    const next = {
+      localOutputRoot,
+      driveOutputRoot: input.driveOutputRoot?.trim() ?? '',
+      structure: normalizeOutputStructure(input.structure),
+    };
     const now = new Date().toISOString();
     this.db.prepare(
       `INSERT INTO app_settings (key, value_json, updated_at) VALUES (?, ?, ?)

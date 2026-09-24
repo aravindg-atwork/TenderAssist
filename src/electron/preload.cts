@@ -1,6 +1,6 @@
 // src/electron/preload.cts
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { TenderAssistApi, AuthJobUpdate } from './ipcTypes.js';
+import type { TenderAssistApi, AuthJobUpdate, AppNavigationCommand } from './ipcTypes.js';
 import type { UpdateStatus } from './updateService.js';
 
 const api: TenderAssistApi = {
@@ -42,6 +42,11 @@ const api: TenderAssistApi = {
     const listener = (_event: IpcRendererEvent, update: AuthJobUpdate) => callback(update);
     ipcRenderer.on('job-updated', listener);
     return () => ipcRenderer.removeListener('job-updated', listener);
+  },
+  onAppNavigation: (callback) => {
+    const listener = (_event: IpcRendererEvent, command: AppNavigationCommand) => callback(command);
+    ipcRenderer.on('app-navigate', listener);
+    return () => ipcRenderer.removeListener('app-navigate', listener);
   },
 };
 

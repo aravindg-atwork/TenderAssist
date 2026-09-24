@@ -7,9 +7,11 @@ import type { AuthSessionRepository } from '../persistence/repositories/authSess
 import type { TenderRepository, TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import type { TenderWorkflowRepository } from '../persistence/repositories/tenderWorkflowRepository.js';
+import type { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import { extractTenderRequirements } from '../extraction/requirementExtractor.js';
-import { jobOutputDirectory, mirrorJobOutputToDrive, publishJobWorkbook, tenderOutputDirectory } from '../publishing/jobPublisher.js';
+import { localDateFromTimestamp, mirrorJobOutputToDrive, publishJobWorkbook, tenderDocumentsDirectory } from '../publishing/jobPublisher.js';
+import { DEFAULT_OUTPUT_STRUCTURE, type OutputStructureSettings } from '../publishing/outputStructure.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
 import { isCancellationRequested, markJobCancelled, throwIfCancellationRequested, USER_CANCELLED_REASON } from './jobCancellation.js';
@@ -23,6 +25,7 @@ export interface PostProcessingDeps {
   tenders: TenderRepository;
   classifications: ClassificationRepository;
   workflow: TenderWorkflowRepository;
+  outputs: JobOutputRepository;
   signal?: AbortSignal;
 }
 
@@ -70,7 +73,8 @@ export async function runPostProcessing(
   onUpdate: (update: AuthJobUpdate) => void,
   driveOutputRoot = '',
   portalUrl = 'https://tntenders.gov.in/nicgep/app',
-  selectedTenderIds?: string[]
+  selectedTenderIds?: string[],
+  outputStructure: OutputStructureSettings = DEFAULT_OUTPUT_STRUCTURE
 ): Promise<AuthJobUpdate> {
   const snapshot = (phase: AuthJobUpdate['phase'], outcome?: 'SUCCESS' | 'ABORTED', abortReason?: string): AuthJobUpdate => ({
     jobId, authSessionId, jobState: deps.jobs.getById(jobId)!.state,
@@ -87,15 +91,19 @@ export async function runPostProcessing(
         const review = deps.workflow.getReview(tender.id);
         return review?.decision === 'KEEP' || (!review && deps.classifications.getFinalForTender(tender.id) === 'KEEP');
       });
+  const jobCreatedAt = deps.jobs.getById(jobId)?.created_at;
 
   try {
     throwIfCancellationRequested(deps.signal);
+    // A retried job keeps the folder and names it was first given, even if
+    // the templates changed since.
+    const plan = deps.outputs.getOrCreatePlan(jobId, outputRoot, localDateFromTimestamp(jobCreatedAt ?? new Date()), outputStructure);
+    const { outputDate, structure, jobDirectory } = plan;
     deps.jobMachine.transition(jobId, 'ACQUIRING_DOCUMENTS', 'approved tender document acquisition started');
     onUpdate(snapshot('ACQUISITION'));
-    const jobDirectory = jobOutputDirectory(outputRoot, config.searchDate, jobId);
     for (const tender of approved) {
       throwIfCancellationRequested(deps.signal);
-      const folder = tenderOutputDirectory(jobDirectory, tender);
+      const folder = tenderDocumentsDirectory(jobDirectory, tender, deps.outputs.serialNumberFor(plan, tender.id), structure, outputDate);
       mkdirSync(folder, { recursive: true });
       const links = linksFor(tender);
       for (let index = 0; index < links.length; index += 1) {
@@ -137,14 +145,15 @@ export async function runPostProcessing(
     deps.jobMachine.transition(jobId, 'UPLOADING', 'publishing workbook to configured output folder');
     throwIfCancellationRequested(deps.signal);
     onUpdate(snapshot('PUBLISHING'));
-    const published = await publishJobWorkbook(outputRoot, config.searchDate, jobId, allTenders.map((tender) => ({
+    const published = await publishJobWorkbook(plan.outputRoot, outputDate, jobId, approved.map((tender) => ({
       tender,
       automaticDecision: deps.classifications.getFinalForTender(tender.id),
       manualReview: deps.workflow.getReview(tender.id),
       documents: deps.workflow.listDocuments(tender.id),
       requirements: deps.workflow.getRequirements(tender.id),
-    })));
-    mirrorJobOutputToDrive(published.jobDirectory, driveOutputRoot, config.searchDate, jobId);
+      serialNumber: deps.outputs.serialNumberFor(plan, tender.id),
+    })), structure, plan.runNumber);
+    mirrorJobOutputToDrive(published.jobDirectory, driveOutputRoot, outputDate, jobId, structure);
     throwIfCancellationRequested(deps.signal);
     deps.jobMachine.transition(jobId, 'REPORTING', 'workbook and folders created');
     deps.jobMachine.transition(jobId, 'COMPLETE', 'job output published successfully');
