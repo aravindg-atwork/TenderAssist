@@ -32,6 +32,43 @@ function changeDetail(changes: unknown): string | null {
   return parts.length ? parts.join('; ') : null;
 }
 
+const CHANGE_LABELS: Record<string, string> = {
+  DEADLINE: 'deadline',
+  BOQ: 'BOQ',
+  FEE: 'fee',
+  TECHNICAL_DOCUMENT: 'technical document',
+  CANCELLATION: 'cancellation',
+};
+
+function changeList(changes: unknown): string[] {
+  return Array.isArray(changes)
+    ? changes.filter((item): item is string => typeof item === 'string').map((change) => CHANGE_LABELS[change] ?? change.toLowerCase().replace(/_/g, ' '))
+    : [];
+}
+
+/**
+ * One sentence on what changed after the operator last decided, for the
+ * Inbox's "Changed since your decision" group. Null when nothing is recorded.
+ */
+export function describeChangesSinceDecision(events: OpportunityEventRow[]): string | null {
+  let start = 0;
+  events.forEach((event, index) => { if (event.actor === 'operator') start = index + 1; });
+  const parts: string[] = [];
+  for (const event of events.slice(start)) {
+    const data = parse(event.data_json);
+    if (event.kind === 'CANCELLED') parts.push('cancelled by the portal');
+    else if (event.kind === 'CHANGED') {
+      const detail = changeDetail(data.changes);
+      if (detail) parts.push(detail);
+    } else if (event.kind === 'CORRIGENDUM') {
+      const number = typeof data.portalNumber === 'string' && data.portalNumber ? ` ${data.portalNumber}` : '';
+      const changes = changeList(data.changes);
+      parts.push(`Corrigendum${number}${changes.length ? ` (${changes.join(', ')})` : ''}`);
+    }
+  }
+  return parts.length ? `Changed since your decision: ${parts.join('; ')}.` : null;
+}
+
 /** One readable line, plus optional detail, per recorded event; oldest first. */
 export function describeTimeline(events: OpportunityEventRow[]): TimelineEntry[] {
   return events.map((event) => {
@@ -53,12 +90,10 @@ export function describeTimeline(events: OpportunityEventRow[]): TimelineEntry[]
         return { ...base, title: 'Portal details changed', detail: changeDetail(data.changes) };
       case 'CORRIGENDUM': {
         const number = typeof data.portalNumber === 'string' && data.portalNumber ? ` ${data.portalNumber}` : '';
-        const changes = Array.isArray(data.changes) ? data.changes.filter((item): item is string => typeof item === 'string') : [];
-        return {
-          ...base,
-          title: `Corrigendum${number} published`,
-          detail: changes.length ? `Changes: ${changes.map((change) => change.toLowerCase().replace(/_/g, ' ')).join(', ')}` : null,
-        };
+        const changes = changeList(data.changes);
+        const description = typeof data.description === 'string' && data.description ? data.description : null;
+        const detail = [changes.length ? `Changes: ${changes.join(', ')}` : null, description].filter(Boolean).join('. ');
+        return { ...base, title: `Corrigendum${number} published`, detail: detail || null };
       }
       case 'APPROVED':
         return { ...base, title: 'You approved it', detail: event.note };
@@ -74,6 +109,16 @@ export function describeTimeline(events: OpportunityEventRow[]): TimelineEntry[]
       }
       case 'EXPIRED':
         return { ...base, title: 'Closing date passed', detail: null };
+      case 'CANCELLED': {
+        const number = typeof data.corrigendum === 'string' && data.corrigendum ? ` (corrigendum ${data.corrigendum})` : '';
+        return { ...base, title: `Cancelled by the portal${number}`, detail: null };
+      }
+      case 'ACKNOWLEDGED':
+        return { ...base, title: 'You noted the change and kept your decision', detail: event.note };
+      case 'LINK_DISMISSED': {
+        const other = typeof data.otherTenderId === 'string' ? data.otherTenderId : 'another tender';
+        return { ...base, title: `You marked it not related to ${other}`, detail: event.note };
+      }
       case 'NOTE':
         return { ...base, title: 'Note', detail: event.note };
     }

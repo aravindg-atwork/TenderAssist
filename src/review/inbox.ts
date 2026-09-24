@@ -2,6 +2,7 @@ import type { InboxRow, OpportunityRepository, OpportunityRow } from '../persist
 import type { OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import { explainScreening, parseScreenedGates } from './tenderExplanation.js';
 import { RETENDER_REASON_TEXT, retenderReason } from './relatedTenders.js';
+import { describeChangesSinceDecision } from './timeline.js';
 
 export type InboxGroup = 'UNCERTAIN' | 'RECOMMENDED' | 'CHANGED' | 'AUTO_REJECTED';
 
@@ -123,22 +124,22 @@ export function summarizeTender(row: InboxRow, related: RelatedTender[] = []): T
   };
 }
 
-function toItem(row: InboxRow, group: InboxGroup, related: RelatedTender[]): InboxItem {
+function toItem(row: InboxRow, group: InboxGroup, related: RelatedTender[], changes: () => string | null): InboxItem {
   const summary = summarizeTender(row, related);
   return {
     ...summary,
     group,
-    explanation: group === 'CHANGED' ? 'Changed since your decision: dates, value, or a corrigendum.' : summary.explanation,
+    explanation: group === 'CHANGED' ? changes() ?? 'Changed since your decision: dates, value, or a corrigendum.' : summary.explanation,
   };
 }
 
-export function buildInbox(opportunities: Pick<OpportunityRepository, 'listInboxRows'> & RelatedSource): InboxView {
+export function buildInbox(opportunities: Pick<OpportunityRepository, 'listInboxRows' | 'listEvents'> & RelatedSource): InboxView {
   const view: InboxView = { uncertain: [], recommended: [], changed: [], autoRejected: [], attentionCount: 0 };
   const related = relatedTenders(opportunities);
   for (const row of opportunities.listInboxRows()) {
     const group = groupFor(row);
     if (!group) continue;
-    const item = toItem(row, group, related.get(row.id) ?? []);
+    const item = toItem(row, group, related.get(row.id) ?? [], () => describeChangesSinceDecision(opportunities.listEvents(row.id)));
     if (group === 'UNCERTAIN') view.uncertain.push(item);
     else if (group === 'RECOMMENDED') view.recommended.push(item);
     else if (group === 'CHANGED') view.changed.push(item);

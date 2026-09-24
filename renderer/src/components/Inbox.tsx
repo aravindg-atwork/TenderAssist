@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { InboxItem, InboxView, OperatorDecision } from '../../../src/electron/ipcTypes';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
-import { closingLabel } from '../format';
+import { closingLabel, LIFECYCLE_LABELS } from '../format';
 import { RelatedTenders } from './RelatedTenders';
 
 export interface InboxProps {
@@ -16,9 +16,31 @@ const DECISION_LABELS: Record<OperatorDecision, string> = {
   REOPEN: 'Moved to review',
 };
 
+const DECISION_BUTTONS: Record<OperatorDecision, string> = {
+  APPROVE: 'Approve',
+  REJECT: 'Reject',
+  DEFER: 'Defer',
+  REOPEN: 'Move to review',
+};
+
 const KEY_DECISIONS: Record<string, OperatorDecision> = { a: 'APPROVE', r: 'REJECT', d: 'DEFER' };
 
 type Decide = (ids: string[], decision: OperatorDecision, note?: string) => void;
+
+// A tender that changed after a decision can switch to the other call, or
+// keep the one it has. Mirrors the backend lifecycle rules.
+const CHANGED_ALTERNATIVES: Record<string, OperatorDecision[]> = {
+  APPROVED: ['REJECT'],
+  DOCUMENTS_COLLECTED: ['REJECT'],
+  DEFERRED: ['APPROVE', 'REJECT'],
+  REJECTED: ['APPROVE'],
+};
+
+/** Decisions offered for this row, in button order. */
+function decisionsFor(item: InboxItem): OperatorDecision[] {
+  if (item.group !== 'CHANGED') return ['APPROVE', 'REJECT', 'DEFER'];
+  return CHANGED_ALTERNATIVES[item.lifecycle] ?? [];
+}
 
 function valueText(value: string | null): string | null {
   return value ? `₹${value}` : null;
@@ -30,7 +52,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 function InboxRowCard({
   item, busy, focused, selectable, selected, noteOpen, note,
-  onFocus, onToggleSelected, onOpenNote, onNoteChange, onDecide, rowRef,
+  onFocus, onToggleSelected, onOpenNote, onNoteChange, onDecide, onKeepDecision, onDismissRelated, rowRef,
 }: {
   item: InboxItem;
   busy: boolean;
@@ -44,6 +66,8 @@ function InboxRowCard({
   onOpenNote: () => void;
   onNoteChange: (note: string) => void;
   onDecide: Decide;
+  onKeepDecision: (id: string) => void;
+  onDismissRelated: (id: string, otherId: string) => void;
   rowRef: (element: HTMLElement | null) => void;
 }) {
   const closing = closingLabel(item.closingAt, item.closingDate);
@@ -73,7 +97,7 @@ function InboxRowCard({
       <h3 className="inbox-row__title">{item.title}</h3>
       {meta.length > 0 && <p className="inbox-row__meta">{meta.join(' · ')}</p>}
       <p className={`inbox-row__why inbox-row__why--${(item.recommendation ?? 'none').toLowerCase()}`}>{item.explanation}</p>
-      <RelatedTenders related={item.related} />
+      <RelatedTenders related={item.related} onDismiss={(otherId) => onDismissRelated(item.id, otherId)} />
       {noteOpen && (
         <label className="inbox-row__note">
           <span>Decision note (optional)</span>
@@ -81,12 +105,23 @@ function InboxRowCard({
         </label>
       )}
       <div className="inbox-row__actions">
-        <button className="btn btn-primary" type="button" disabled={busy} onClick={() => decide('APPROVE')}>Approve</button>
-        <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => decide('REJECT')}>Reject</button>
-        {item.group !== 'CHANGED' && (
-          <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => decide('DEFER')}>Defer</button>
+        {item.group === 'CHANGED' && (
+          <button className="btn btn-primary" type="button" disabled={busy} onClick={() => onKeepDecision(item.id)}>
+            {item.lifecycle === 'CANCELLED' ? 'OK, noted' : `Keep: ${LIFECYCLE_LABELS[item.lifecycle] ?? item.lifecycle}`}
+          </button>
         )}
-        {!noteOpen && <button className="btn-link" type="button" onClick={onOpenNote}>Add note</button>}
+        {decisionsFor(item).map((decision, index) => (
+          <button
+            key={decision}
+            className={index === 0 && item.group !== 'CHANGED' ? 'btn btn-primary' : 'btn btn-secondary'}
+            type="button"
+            disabled={busy}
+            onClick={() => decide(decision)}
+          >
+            {DECISION_BUTTONS[decision]}
+          </button>
+        ))}
+        {!noteOpen && item.lifecycle !== 'CANCELLED' && <button className="btn-link" type="button" onClick={onOpenNote}>Add note</button>}
       </div>
     </article>
   );
@@ -167,7 +202,7 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
       }
       const item = index >= 0 ? ordered[index] : null;
       if (!item || busyIds.has(item.id)) return;
-      if (KEY_DECISIONS[key] && !(key === 'd' && item.group === 'CHANGED')) {
+      if (KEY_DECISIONS[key] && decisionsFor(item).includes(KEY_DECISIONS[key])) {
         event.preventDefault();
         void decide([item.id], KEY_DECISIONS[key], notes[item.id]?.trim() || undefined);
       } else if (key === 'n') {
@@ -185,6 +220,30 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [busyIds, confirmingBulk, decide, focusRow, focusedId, notes, ordered]);
+
+  const keepDecision = useCallback(async (id: string) => {
+    setBusyIds((current) => new Set([...current, id]));
+    setError(null);
+    try {
+      apply(await window.tenderAssist.acknowledgeTenderChanges([id]));
+      setLastAction('Decision kept. The change is recorded in the tender history.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyIds((current) => new Set([...current].filter((busyId) => busyId !== id)));
+    }
+  }, [apply]);
+
+  const dismissRelated = useCallback(async (id: string, otherId: string) => {
+    setError(null);
+    try {
+      await window.tenderAssist.dismissRelatedTender(id, otherId);
+      setLastAction('Marked as not related. It will not be suggested again.');
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [load]);
 
   const acknowledge = async () => {
     if (!view) return;
@@ -225,6 +284,8 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
       onOpenNote={() => setNoteOpenIds((current) => new Set([...current, item.id]))}
       onNoteChange={(value) => setNotes((current) => ({ ...current, [item.id]: value }))}
       onDecide={decide}
+      onKeepDecision={keepDecision}
+      onDismissRelated={dismissRelated}
       rowRef={(element) => { if (element) rowRefs.current.set(item.id, element); else rowRefs.current.delete(item.id); }}
     />
   );

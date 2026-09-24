@@ -34,7 +34,7 @@ const VALID_TRANSITIONS: Record<OpportunityLifecycle, OpportunityLifecycle[]> = 
   WON: [],
   LOST: [],
   // A corrigendum can extend the deadline of an expired tender.
-  EXPIRED: ['SCREENED'],
+  EXPIRED: ['SCREENED', 'CANCELLED'],
   CANCELLED: [],
 };
 

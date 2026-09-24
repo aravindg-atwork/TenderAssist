@@ -47,11 +47,12 @@ function Timeline({ opportunityId }: { opportunityId: string }) {
   );
 }
 
-function TenderListRow({ item, tab, busy, onDecide }: {
+function TenderListRow({ item, tab, busy, onDecide, onDismissRelated }: {
   item: TenderSummary;
   tab: Tab;
   busy: boolean;
   onDecide: (id: string, decision: OperatorDecision) => void;
+  onDismissRelated: (id: string, otherId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const closing = closingLabel(item.closingAt, item.closingDate);
@@ -69,7 +70,7 @@ function TenderListRow({ item, tab, busy, onDecide }: {
       </div>
       <h3 className="inbox-row__title">{item.title}</h3>
       {meta.length > 0 && <p className="inbox-row__meta">{meta.join(' · ')}</p>}
-      <RelatedTenders related={item.related} />
+      <RelatedTenders related={item.related} onDismiss={(otherId) => onDismissRelated(item.id, otherId)} />
       <div className="inbox-row__actions">
         {TAB_ACTIONS[tab].map((action) => (
           <button key={action.decision} className="btn btn-secondary" type="button" disabled={busy} onClick={() => onDecide(item.id, action.decision)}>
@@ -111,6 +112,17 @@ export function TendersPage({ onInboxChange }: { onInboxChange?: (count: number)
     }
   };
 
+  const dismissRelated = async (id: string, otherId: string) => {
+    setError(null);
+    try {
+      await window.tenderAssist.dismissRelatedTender(id, otherId);
+      setLastAction('Marked as not related. It will not be suggested again.');
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   if (!view) return <div className="inbox"><p className="empty-state">{error ?? 'Loading tenders…'}</p></div>;
   const current = TABS.find((entry) => entry.id === tab)!;
   const items = view[tab];
@@ -144,7 +156,7 @@ export function TendersPage({ onInboxChange }: { onInboxChange?: (count: number)
       <div role="tabpanel" aria-label={current.label} className="inbox-section__list">
         {items.length === 0
           ? <p className="empty-panel tenders-empty">{current.empty}</p>
-          : items.map((item) => <TenderListRow key={item.id} item={item} tab={tab} busy={busyId === item.id} onDecide={decide} />)}
+          : items.map((item) => <TenderListRow key={item.id} item={item} tab={tab} busy={busyId === item.id} onDecide={decide} onDismissRelated={dismissRelated} />)}
       </div>
     </div>
   );

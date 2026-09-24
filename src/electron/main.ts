@@ -258,6 +258,17 @@ ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unk
   return buildInbox(opportunities);
 });
 
+ipcMain.handle('acknowledge-tender-changes', (_event, opportunityIds: unknown): InboxView => {
+  if (!Array.isArray(opportunityIds) || !opportunityIds.every((id) => typeof id === 'string')) throw new Error('Invalid tenders.');
+  opportunities.acknowledgeChanges(opportunityIds);
+  return buildInbox(opportunities);
+});
+
+ipcMain.handle('dismiss-related-tender', (_event, opportunityId: unknown, otherId: unknown): void => {
+  if (typeof opportunityId !== 'string' || typeof otherId !== 'string') throw new Error('Invalid tenders.');
+  opportunities.dismissRetenderLink(opportunityId, otherId);
+});
+
 ipcMain.handle('acknowledge-runs', (_event, jobIds: unknown): InboxView => {
   if (!Array.isArray(jobIds) || !jobIds.every((id) => typeof id === 'string')) throw new Error('Invalid runs.');
   jobs.markReviewed(jobIds.filter((id) => id !== activeJobId));

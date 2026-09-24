@@ -137,6 +137,10 @@ export interface TenderAssistApi {
   getInbox(): Promise<InboxView>;
   /** Approve, reject, defer, or reopen one or many tenders; all or nothing. */
   decideTenders(opportunityIds: string[], decision: OperatorDecision, note?: string): Promise<InboxView>;
+  /** Keep the current decision on tenders that changed; they leave the Inbox. */
+  acknowledgeTenderChanges(opportunityIds: string[]): Promise<InboxView>;
+  /** The operator says a suggested retender is not related; it is not suggested again. */
+  dismissRelatedTender(opportunityId: string, otherId: string): Promise<void>;
   /** Acknowledge runs so their automatic rejects leave the Inbox. */
   acknowledgeRuns(jobIds: string[]): Promise<InboxView>;
   getTenders(): Promise<TendersView>;

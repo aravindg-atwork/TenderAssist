@@ -17,7 +17,7 @@ export type OpportunityActor = 'automation' | 'operator';
 export type OpportunityEventKind =
   | 'SEEN' | 'SCREENED' | 'CHANGED' | 'CORRIGENDUM'
   | 'APPROVED' | 'REJECTED' | 'DEFERRED' | 'REOPENED'
-  | 'DOCUMENTS_COLLECTED' | 'EXPIRED' | 'NOTE';
+  | 'DOCUMENTS_COLLECTED' | 'EXPIRED' | 'CANCELLED' | 'ACKNOWLEDGED' | 'LINK_DISMISSED' | 'NOTE';
 export type OpportunityLinkKind = 'POSSIBLE_RETENDER';
 
 export interface OpportunityRow {
@@ -65,6 +65,7 @@ export interface OpportunityLinkRow {
   kind: OpportunityLinkKind;
   confirmed_by_operator: 0 | 1;
   created_at: string;
+  dismissed_at: string | null;
 }
 
 export interface CorrigendumInput {
@@ -341,14 +342,20 @@ export class OpportunityRepository {
     return this.inTransaction(() => {
       const opportunity = this.require(opportunityId);
       const portalNumber = corrigendum.portalNumber?.trim() || null;
-      if (portalNumber && this.db.prepare(
-        `SELECT 1 FROM opportunity_events WHERE opportunity_id = ? AND kind = 'CORRIGENDUM'
-         AND json_extract(data_json, '$.portalNumber') = ?`
-      ).get(opportunityId, portalNumber)) {
-        return opportunity;
-      }
+      // Without a portal number, the same date and wording identify it.
+      const alreadyRecorded = portalNumber
+        ? this.db.prepare(
+          `SELECT 1 FROM opportunity_events WHERE opportunity_id = ? AND kind = 'CORRIGENDUM'
+           AND json_extract(data_json, '$.portalNumber') = ?`
+        ).get(opportunityId, portalNumber)
+        : (corrigendum.publishedAt || corrigendum.description) && this.db.prepare(
+          `SELECT 1 FROM opportunity_events WHERE opportunity_id = ? AND kind = 'CORRIGENDUM'
+           AND json_extract(data_json, '$.portalNumber') IS NULL
+           AND json_extract(data_json, '$.publishedAt') IS ? AND json_extract(data_json, '$.description') IS ?`
+        ).get(opportunityId, corrigendum.publishedAt ?? null, corrigendum.description ?? null);
+      if (alreadyRecorded) return opportunity;
       const at = context.at ?? new Date().toISOString();
-      this.insertEvent(opportunityId, 'CORRIGENDUM', 'automation', context, { ...corrigendum, portalNumber });
+      this.insertEvent(opportunityId, 'CORRIGENDUM', 'automation', context, { ...corrigendum, description: corrigendum.description ?? null, portalNumber });
       const flag = DECIDED_LIFECYCLES.includes(opportunity.lifecycle) ? 1 : opportunity.changed_since_decision;
       this.db.prepare('UPDATE opportunities SET changed_since_decision = ?, updated_at = ? WHERE id = ?').run(flag, at, opportunityId);
       return this.getById(opportunityId)!;
@@ -374,8 +381,52 @@ export class OpportunityRepository {
   listRetenderLinks(): RetenderLinkRow[] {
     return this.db.prepare(
       `SELECT from_opportunity_id, to_opportunity_id, confirmed_by_operator, created_at FROM opportunity_links
-       WHERE workspace_id = ? AND kind = 'POSSIBLE_RETENDER' ORDER BY created_at ASC`
+       WHERE workspace_id = ? AND kind = 'POSSIBLE_RETENDER' AND dismissed_at IS NULL ORDER BY created_at ASC`
     ).all(this.workspaceId) as unknown as RetenderLinkRow[];
+  }
+
+  /**
+   * The operator says two tenders are not related. The link is kept as
+   * dismissed so the same suggestion never comes back.
+   */
+  dismissRetenderLink(opportunityId: string, otherId: string, context: EventContext = {}): void {
+    this.inTransaction(() => {
+      const at = context.at ?? new Date().toISOString();
+      const result = this.db.prepare(
+        `UPDATE opportunity_links SET dismissed_at = ?
+         WHERE kind = 'POSSIBLE_RETENDER' AND dismissed_at IS NULL
+           AND ((from_opportunity_id = ? AND to_opportunity_id = ?) OR (from_opportunity_id = ? AND to_opportunity_id = ?))`
+      ).run(at, opportunityId, otherId, otherId, opportunityId);
+      if (Number(result.changes) === 0) return;
+      const other = this.require(otherId);
+      this.insertEvent(opportunityId, 'LINK_DISMISSED', 'operator', { ...context, at },
+        { otherId, otherTenderId: other.tender_portal_id ?? other.tender_ref });
+    });
+  }
+
+  /** The portal withdrew the tender. A tender the operator had decided is flagged so they see it. */
+  markCancelled(opportunityId: string, context: EventContext = {}, data: Record<string, unknown> = {}): OpportunityRow {
+    return this.inTransaction(() => {
+      const before = this.require(opportunityId);
+      const after = this.transition(opportunityId, 'CANCELLED', 'CANCELLED', 'automation', context, data);
+      if (before.lifecycle !== 'CANCELLED' && DECIDED_LIFECYCLES.includes(before.lifecycle)) {
+        this.db.prepare('UPDATE opportunities SET changed_since_decision = 1 WHERE id = ?').run(opportunityId);
+        return this.getById(opportunityId)!;
+      }
+      return after;
+    });
+  }
+
+  /** The operator has seen what changed and keeps their decision as it is. */
+  acknowledgeChanges(ids: string[], context: EventContext = {}): OpportunityRow[] {
+    return this.inTransaction(() => ids.map((id) => {
+      const opportunity = this.require(id);
+      if (!opportunity.changed_since_decision) return opportunity;
+      const at = context.at ?? new Date().toISOString();
+      this.db.prepare('UPDATE opportunities SET changed_since_decision = 0, updated_at = ? WHERE id = ?').run(at, id);
+      this.insertEvent(id, 'ACKNOWLEDGED', 'operator', { ...context, at }, { lifecycle: opportunity.lifecycle });
+      return this.getById(id)!;
+    }));
   }
 
   /** Keeps these tenders out of the Inbox until a run sees them again. */
