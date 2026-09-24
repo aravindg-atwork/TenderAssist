@@ -4,9 +4,9 @@ import { explainScreening, parseScreenedGates } from './tenderExplanation.js';
 
 export type InboxGroup = 'UNCERTAIN' | 'RECOMMENDED' | 'CHANGED' | 'AUTO_REJECTED';
 
-export interface InboxItem {
+/** What every tender list shows about a tender. */
+export interface TenderSummary {
   id: string;
-  group: InboxGroup;
   portalId: string;
   tenderId: string;
   reference: string;
@@ -24,6 +24,11 @@ export interface InboxItem {
   lastSeenAt: string;
   /** Run whose screening put it here; acknowledging that run clears its auto-rejects. */
   screeningJobId: string | null;
+  changedSinceDecision: boolean;
+}
+
+export interface InboxItem extends TenderSummary {
+  group: InboxGroup;
 }
 
 export interface InboxView {
@@ -47,11 +52,10 @@ function groupFor(row: InboxRow): InboxGroup | null {
   return 'UNCERTAIN';
 }
 
-function toItem(row: InboxRow, group: InboxGroup): InboxItem {
+export function summarizeTender(row: InboxRow): TenderSummary {
   const explanation = explainScreening(row.recommendation, parseScreenedGates(row.screening_json));
   return {
     id: row.id,
-    group,
     portalId: row.portal_id,
     tenderId: row.tender_portal_id ?? row.tender_ref,
     reference: row.tender_ref,
@@ -63,10 +67,20 @@ function toItem(row: InboxRow, group: InboxGroup): InboxItem {
     value: row.value_in_rupees,
     lifecycle: row.lifecycle,
     recommendation: row.recommendation,
-    explanation: group === 'CHANGED' ? 'Changed since your decision: dates, value, or a corrigendum.' : explanation.sentence,
+    explanation: explanation.sentence,
     matchedExclusions: explanation.matchedExclusions,
     lastSeenAt: row.last_seen_at,
     screeningJobId: row.screening_job_id,
+    changedSinceDecision: row.changed_since_decision === 1,
+  };
+}
+
+function toItem(row: InboxRow, group: InboxGroup): InboxItem {
+  const summary = summarizeTender(row);
+  return {
+    ...summary,
+    group,
+    explanation: group === 'CHANGED' ? 'Changed since your decision: dates, value, or a corrigendum.' : summary.explanation,
   };
 }
 

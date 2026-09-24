@@ -21,6 +21,8 @@ import { JobOutputRepository } from '../persistence/repositories/jobOutputReposi
 import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
 import { applyTenderDecision, recordCollectedDocuments, recordDownloadSelection, syncJobOpportunities } from '../orchestration/opportunitySync.js';
 import { buildInbox, type InboxView } from '../review/inbox.js';
+import { buildTenders, type TendersView } from '../review/tenders.js';
+import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
 import type { OperatorDecision } from '../state/opportunityLifecycle.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
@@ -175,7 +177,7 @@ function createWindow(): void {
   void mainWindow.loadFile(join(__dirname, '..', '..', 'renderer', 'dist', 'index.html'));
 }
 
-function navigateApplication(view: 'inbox' | 'jobs' | 'settings', section?: 'folders'): void {
+function navigateApplication(view: 'inbox' | 'tenders' | 'jobs' | 'settings', section?: 'folders'): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
@@ -206,8 +208,9 @@ function configureApplicationMenu(): void {
       label: 'View',
       submenu: [
         { label: 'Show Inbox', accelerator: 'CmdOrCtrl+1', click: () => navigateApplication('inbox') },
-        { label: 'Show Runs', accelerator: 'CmdOrCtrl+2', click: () => navigateApplication('jobs') },
-        { label: 'Show Settings', accelerator: 'CmdOrCtrl+3', click: () => navigateApplication('settings') },
+        { label: 'Show Tenders', accelerator: 'CmdOrCtrl+2', click: () => navigateApplication('tenders') },
+        { label: 'Show Runs', accelerator: 'CmdOrCtrl+3', click: () => navigateApplication('jobs') },
+        { label: 'Show Settings', accelerator: 'CmdOrCtrl+4', click: () => navigateApplication('settings') },
         { type: 'separator' },
         { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' },
         { role: 'togglefullscreen' },
@@ -258,6 +261,13 @@ ipcMain.handle('acknowledge-runs', (_event, jobIds: unknown): InboxView => {
   if (!Array.isArray(jobIds) || !jobIds.every((id) => typeof id === 'string')) throw new Error('Invalid runs.');
   jobs.markReviewed(jobIds.filter((id) => id !== activeJobId));
   return buildInbox(opportunities);
+});
+
+ipcMain.handle('get-tenders', (): TendersView => buildTenders(opportunities));
+
+ipcMain.handle('get-tender-timeline', (_event, opportunityId: unknown): TimelineEntry[] => {
+  if (typeof opportunityId !== 'string' || !opportunities.getById(opportunityId)) throw new Error('Tender not found.');
+  return describeTimeline(opportunities.listEvents(opportunityId));
 });
 
 ipcMain.handle('list-jobs', (): JobListItem[] => {
@@ -510,6 +520,7 @@ ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
       effectiveClassification: workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id),
       documents: workflow.listDocuments(tender.id),
       requirements: workflow.getRequirements(tender.id) ?? null,
+      opportunityLifecycle: tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle ?? null : null,
     })),
     searches: searches.listForJob(jobId),
     runConfiguration: runConfigurations.getForJob(jobId) ?? null,

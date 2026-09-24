@@ -2187,3 +2187,245 @@ input:focus-visible {
     flex-direction: column;
   }
 }
+
+/* ---------- Inbox: focus, bulk, keyboard ---------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.inbox-row:focus {
+  outline: none;
+}
+
+.inbox-row.is-focused,
+.inbox-row:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(52, 84, 209, 0.14);
+}
+
+.inbox-row__select {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 2px;
+}
+
+.inbox-row__select input,
+.bulk-toolbar__all input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.inbox-row__topline .inbox-row__id {
+  margin-right: auto;
+}
+
+.inbox-section__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.bulk-toolbar__all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.keyboard-hint {
+  margin: -6px 0 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.keyboard-hint kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+.bulk-confirm {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(52, 84, 209, 0.1);
+}
+
+.bulk-confirm h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.bulk-confirm p {
+  margin: 4px 0 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.bulk-confirm ul {
+  max-height: 180px;
+  margin: 0 0 12px;
+  padding-left: 18px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.bulk-confirm__actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- Tenders page ---------- */
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.segmented__item {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented__item:hover {
+  color: var(--text);
+}
+
+.segmented__item.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(26, 29, 35, 0.08);
+}
+
+.tender-row {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.tender-row[aria-busy='true'] {
+  opacity: 0.6;
+}
+
+.tender-row__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.tenders-empty {
+  padding: 28px 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.tender-history {
+  margin: 12px 0 0;
+  padding: 12px 0 0 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.tender-history__loading {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.tender-history__entry {
+  position: relative;
+  padding: 0 0 12px 18px;
+}
+
+.tender-history__entry::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.tender-history__entry--operator::before {
+  background: var(--accent);
+}
+
+.tender-history__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.tender-history__title {
+  font-weight: 600;
+}
+
+.tender-history__line time {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tender-history__detail {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .inbox-section__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -162,6 +162,19 @@ export class OpportunityRepository {
 
   /** Tenders awaiting a decision, and decided tenders that changed since. */
   listInboxRows(): InboxRow[] {
+    return this.listWithScreening(
+      `((o.lifecycle IN ('NEW', 'SCREENED') AND o.inbox_hidden_at IS NULL) OR o.changed_since_decision = 1)`,
+      'o.closing_at IS NULL, o.closing_at ASC, o.last_seen_at DESC'
+    );
+  }
+
+  /** Every tender in the workspace with its latest screening, newest activity first. */
+  listAllWithScreening(): InboxRow[] {
+    return this.listWithScreening('1 = 1', 'o.updated_at DESC, o.rowid DESC');
+  }
+
+  // `where` and `orderBy` are fixed SQL fragments from this class, never user input.
+  private listWithScreening(where: string, orderBy: string): InboxRow[] {
     return this.db.prepare(
       `SELECT o.*, e.data_json AS screening_json, e.job_id AS screening_job_id, j.reviewed_at AS screening_job_reviewed_at,
               e.created_at AS screening_at,
@@ -172,9 +185,8 @@ export class OpportunityRepository {
          WHERE opportunity_id = o.id AND kind = 'SCREENED'
          ORDER BY created_at DESC, rowid DESC LIMIT 1)
        LEFT JOIN jobs j ON j.id = e.job_id
-       WHERE o.workspace_id = ?
-         AND ((o.lifecycle IN ('NEW', 'SCREENED') AND o.inbox_hidden_at IS NULL) OR o.changed_since_decision = 1)
-       ORDER BY o.closing_at IS NULL, o.closing_at ASC, o.last_seen_at DESC`
+       WHERE o.workspace_id = ? AND ${where}
+       ORDER BY ${orderBy}`
     ).all(this.workspaceId) as unknown as InboxRow[];
   }
 
@@ -297,9 +309,12 @@ export class OpportunityRepository {
       } else {
         assertTransition(opportunity.lifecycle, target);
       }
+      // Moving a tender back to review must also bring it back into the Inbox.
       this.db.prepare(
-        'UPDATE opportunities SET lifecycle = ?, changed_since_decision = 0, updated_at = ? WHERE id = ?'
-      ).run(target, at, id);
+        `UPDATE opportunities SET lifecycle = ?, changed_since_decision = 0, updated_at = ?,
+           inbox_hidden_at = CASE WHEN ? THEN NULL ELSE inbox_hidden_at END
+         WHERE id = ?`
+      ).run(target, at, decision === 'REOPEN' ? 1 : 0, id);
       this.insertEvent(id, DECISION_EVENTS[decision], 'operator', context, { from: opportunity.lifecycle });
       return this.getById(id)!;
     }));

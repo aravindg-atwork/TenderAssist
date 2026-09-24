@@ -187,12 +187,17 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
     return unsubscribe;
   }, [jobId]);
 
-  // Seed the tick-box defaults once the job reaches SHORTLISTED: every
-  // automatic KEEP starts checked (certain), every needs-review tender
-  // starts unchecked (borderline -- opt in explicitly).
+  // Seed the tick-box defaults once the job reaches SHORTLISTED. Inbox
+  // decisions win: approved tenders start checked, rejected ones and ones
+  // whose documents are already collected start unchecked. Otherwise every
+  // automatic KEEP starts checked and needs-review tenders opt in explicitly.
   useEffect(() => {
     if (!detail || selectedIds !== null || detail.jobState !== 'SHORTLISTED') return;
-    setSelectedIds(new Set(detail.tenders.filter((tender) => tender.effectiveClassification === 'KEEP').map((tender) => tender.id)));
+    setSelectedIds(new Set(detail.tenders.filter((tender) => {
+      if (tender.opportunityLifecycle === 'APPROVED') return true;
+      if (tender.opportunityLifecycle === 'REJECTED' || tender.opportunityLifecycle === 'DOCUMENTS_COLLECTED') return false;
+      return tender.effectiveClassification === 'KEEP';
+    }).map((tender) => tender.id)));
   }, [detail, selectedIds]);
 
   if (error) {

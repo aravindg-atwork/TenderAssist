@@ -4,10 +4,11 @@ import { JobList } from './components/JobList';
 import { JobDetail } from './components/JobDetail';
 import { SettingsPage } from './components/SettingsPage';
 import { Inbox } from './components/Inbox';
+import { TendersPage } from './components/TendersPage';
 import type { AuthJobUpdate, RunSettingsState } from '../../src/electron/ipcTypes';
 import { DEFAULT_PORTAL_ID } from '../../src/config/portalRegistry';
 
-type AppView = 'inbox' | 'jobs' | 'settings';
+type AppView = 'inbox' | 'tenders' | 'jobs' | 'settings';
 
 export function App() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -90,6 +91,13 @@ export function App() {
             {inboxCount > 0 && <span className="nav-count" aria-label={`${inboxCount} need a decision`}>{inboxCount}</span>}
           </button>
           <button
+            className={view === 'tenders' ? 'app-nav__item is-active' : 'app-nav__item'}
+            aria-current={view === 'tenders' ? 'page' : undefined}
+            onClick={() => navigate('tenders')}
+          >
+            Tenders
+          </button>
+          <button
             className={view === 'jobs' ? 'app-nav__item is-active' : 'app-nav__item'}
             aria-current={view === 'jobs' ? 'page' : undefined}
             onClick={() => navigate('jobs')}
@@ -109,6 +117,8 @@ export function App() {
       <main className={activeJobId && view === 'jobs' && !selectedJobId ? 'app-main app-main--portal' : 'app-main'}>
         {view === 'inbox' ? (
           <Inbox onStartDiscovery={() => navigate('jobs')} onCountChange={setInboxCount} />
+        ) : view === 'tenders' ? (
+          <TendersPage onInboxChange={setInboxCount} />
         ) : view === 'settings' ? (
           <SettingsPage settings={settings} onSaved={setSettings} selectedPortalId={selectedPortalId} onPortalChange={setSelectedPortalId} focusRequest={settingsFocus} />
         ) : selectedJobId ? (

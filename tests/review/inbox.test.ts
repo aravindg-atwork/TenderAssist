@@ -113,6 +113,15 @@ describe('buildInbox', () => {
     expect(inbox.uncertain[0].explanation).toBe('Rejected: matched exclusion “hardware”.');
   });
 
+  it('brings a hidden older tender back into the Inbox when moved to review', () => {
+    const job = jobs.create();
+    const old = screened(job.id, 'OLD', 'UNCERTAIN');
+    opportunities.hideFromInbox([old.id]);
+    expect(buildInbox(opportunities).attentionCount).toBe(0);
+    opportunities.decide([old.id], 'REOPEN');
+    expect(buildInbox(opportunities).uncertain.map((item) => item.tenderId)).toEqual(['OLD']);
+  });
+
   it('moves an auto-reject straight to review from the collapsed group', () => {
     const job = jobs.create();
     const rejected = screened(job.id, 'NO', 'REJECT');

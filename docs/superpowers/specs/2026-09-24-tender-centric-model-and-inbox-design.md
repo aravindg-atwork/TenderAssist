@@ -1,7 +1,7 @@
 # Tender-centric data model and Inbox — design
 
 Date: 2026-09-24
-Status: Decisions recorded 2026-09-24. Slices 1–3 delivered: migration 010, `OpportunityRepository`, lifecycle, backfill, `opportunitySync` wired into runs, and the Inbox (`src/review/`, `renderer/src/components/Inbox.tsx`). Slice 4 (bulk decisions, keyboard review, Tenders view) next.
+Status: Decisions recorded 2026-09-24. Slices 1–4 delivered: data model, run sync, Inbox, bulk decisions, keyboard review, Tenders view with history, and run download selection that honours Inbox decisions. Next: corrigendum parsing (needs a detail-page fixture) and downloading approved tenders outside a run.
 Backlog: Recommended delivery order step 2
 
 ## Goal

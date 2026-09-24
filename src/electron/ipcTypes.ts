@@ -16,9 +16,14 @@ import type { UpdateStatus } from './updateService.js';
 import type { PreflightReport } from '../system/preflight.js';
 import type { AutomationPacingSettings } from '../persistence/repositories/automationSettingsRepository.js';
 import type { InboxView } from '../review/inbox.js';
-import type { OperatorDecision } from '../state/opportunityLifecycle.js';
+import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 
-export type { InboxItem, InboxView } from '../review/inbox.js';
+import type { TendersView } from '../review/tenders.js';
+import type { TimelineEntry } from '../review/timeline.js';
+
+export type { InboxItem, InboxView, TenderSummary } from '../review/inbox.js';
+export type { TendersView } from '../review/tenders.js';
+export type { TimelineEntry } from '../review/timeline.js';
 export type { OperatorDecision } from '../state/opportunityLifecycle.js';
 
 export interface RunSettingsState {
@@ -51,7 +56,7 @@ export interface PortalBounds {
 }
 
 export interface AppNavigationCommand {
-  view: 'inbox' | 'jobs' | 'settings';
+  view: 'inbox' | 'tenders' | 'jobs' | 'settings';
   section?: 'folders';
 }
 
@@ -62,6 +67,8 @@ export interface TenderDetailItem extends TenderRow {
   effectiveClassification: 'KEEP' | 'REJECT' | 'UNCERTAIN' | 'NOT_RUN';
   documents: TenderDocumentRow[];
   requirements: TenderRequirementRow | null;
+  /** The durable tender's state, so run screens can honour Inbox decisions. */
+  opportunityLifecycle: OpportunityLifecycle | null;
 }
 
 export interface RecoveryJob {
@@ -132,4 +139,6 @@ export interface TenderAssistApi {
   decideTenders(opportunityIds: string[], decision: OperatorDecision, note?: string): Promise<InboxView>;
   /** Acknowledge runs so their automatic rejects leave the Inbox. */
   acknowledgeRuns(jobIds: string[]): Promise<InboxView>;
+  getTenders(): Promise<TendersView>;
+  getTenderTimeline(opportunityId: string): Promise<TimelineEntry[]>;
 }

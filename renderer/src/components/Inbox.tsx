@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { InboxItem, InboxView, OperatorDecision } from '../../../src/electron/ipcTypes';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { closingLabel } from '../format';
@@ -15,29 +15,57 @@ const DECISION_LABELS: Record<OperatorDecision, string> = {
   REOPEN: 'Moved to review',
 };
 
+const KEY_DECISIONS: Record<string, OperatorDecision> = { a: 'APPROVE', r: 'REJECT', d: 'DEFER' };
+
+type Decide = (ids: string[], decision: OperatorDecision, note?: string) => void;
+
 function valueText(value: string | null): string | null {
   return value ? `₹${value}` : null;
 }
 
+function isTypingTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+}
+
 function InboxRowCard({
-  item,
-  busy,
-  onDecide,
+  item, busy, focused, selectable, selected, noteOpen, note,
+  onFocus, onToggleSelected, onOpenNote, onNoteChange, onDecide, rowRef,
 }: {
   item: InboxItem;
   busy: boolean;
-  onDecide: (ids: string[], decision: OperatorDecision, note?: string) => void;
+  focused: boolean;
+  selectable: boolean;
+  selected: boolean;
+  noteOpen: boolean;
+  note: string;
+  onFocus: () => void;
+  onToggleSelected: (checked: boolean) => void;
+  onOpenNote: () => void;
+  onNoteChange: (note: string) => void;
+  onDecide: Decide;
+  rowRef: (element: HTMLElement | null) => void;
 }) {
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [note, setNote] = useState('');
   const closing = closingLabel(item.closingAt, item.closingDate);
   const meta = [item.department, item.organisation, valueText(item.value), getPortalDefinition(item.portalId).name]
     .filter((part): part is string => Boolean(part));
   const decide = (decision: OperatorDecision) => onDecide([item.id], decision, note.trim() || undefined);
 
   return (
-    <article className="inbox-row" aria-busy={busy}>
+    <article
+      ref={rowRef}
+      className={focused ? 'inbox-row is-focused' : 'inbox-row'}
+      aria-busy={busy}
+      tabIndex={0}
+      onFocus={onFocus}
+      aria-label={item.title}
+    >
       <div className="inbox-row__topline">
+        {selectable && (
+          <label className="inbox-row__select">
+            <input type="checkbox" checked={selected} onChange={(event) => onToggleSelected(event.target.checked)} />
+            <span className="visually-hidden">Select for bulk approval</span>
+          </label>
+        )}
         <span className="inbox-row__id">{item.tenderId}</span>
         <span className={`closing-chip closing-chip--${closing.urgency}`} title={closing.title}>{closing.text}</span>
       </div>
@@ -47,7 +75,7 @@ function InboxRowCard({
       {noteOpen && (
         <label className="inbox-row__note">
           <span>Decision note (optional)</span>
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={2} maxLength={1000} autoFocus />
+          <textarea value={note} onChange={(event) => onNoteChange(event.target.value)} rows={2} maxLength={1000} autoFocus />
         </label>
       )}
       <div className="inbox-row__actions">
@@ -56,30 +84,9 @@ function InboxRowCard({
         {item.group !== 'CHANGED' && (
           <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => decide('DEFER')}>Defer</button>
         )}
-        {!noteOpen && <button className="btn-link" type="button" onClick={() => setNoteOpen(true)}>Add note</button>}
+        {!noteOpen && <button className="btn-link" type="button" onClick={onOpenNote}>Add note</button>}
       </div>
     </article>
-  );
-}
-
-function InboxSection({ title, hint, items, busyIds, onDecide }: {
-  title: string;
-  hint: string;
-  items: InboxItem[];
-  busyIds: Set<string>;
-  onDecide: (ids: string[], decision: OperatorDecision, note?: string) => void;
-}) {
-  if (items.length === 0) return null;
-  return (
-    <section className="inbox-section" aria-label={title}>
-      <header className="inbox-section__header">
-        <h2>{title} <span className="inbox-section__count">{items.length}</span></h2>
-        <p>{hint}</p>
-      </header>
-      <div className="inbox-section__list">
-        {items.map((item) => <InboxRowCard key={item.id} item={item} busy={busyIds.has(item.id)} onDecide={onDecide} />)}
-      </div>
-    </section>
   );
 }
 
@@ -88,10 +95,21 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
   const [error, setError] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [lastAction, setLastAction] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmingBulk, setConfirmingBulk] = useState(false);
+  const [noteOpenIds, setNoteOpenIds] = useState<Set<string>>(new Set());
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const rowRefs = useRef(new Map<string, HTMLElement>());
+
+  // Keyboard order follows the page: review, recommended, changed.
+  const ordered = useMemo(() => view ? [...view.uncertain, ...view.recommended, ...view.changed] : [], [view]);
 
   const apply = useCallback((next: InboxView) => {
     setView(next);
     onCountChange?.(next.attentionCount);
+    const stillRecommended = new Set(next.recommended.map((item) => item.id));
+    setSelectedIds((current) => new Set([...current].filter((id) => stillRecommended.has(id))));
   }, [onCountChange]);
 
   const load = useCallback(() => {
@@ -102,18 +120,69 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
   // A finished phase can add tenders; refresh when any run reports an outcome.
   useEffect(() => window.tenderAssist.onJobUpdate((update) => { if (update.outcome) load(); }), [load]);
 
-  const decide = async (ids: string[], decision: OperatorDecision, note?: string) => {
+  const focusRow = useCallback((id: string | null) => {
+    setFocusedId(id);
+    if (!id) return;
+    const element = rowRefs.current.get(id);
+    element?.focus({ preventScroll: true });
+    element?.scrollIntoView({ block: 'nearest' });
+  }, []);
+
+  const decide: Decide = useCallback(async (ids, decision, note) => {
+    const focusIndex = focusedId ? ordered.findIndex((item) => item.id === focusedId) : -1;
     setBusyIds((current) => new Set([...current, ...ids]));
     setError(null);
     try {
-      apply(await window.tenderAssist.decideTenders(ids, decision, note));
+      const next = await window.tenderAssist.decideTenders(ids, decision, note);
+      apply(next);
       setLastAction(`${DECISION_LABELS[decision]}: ${ids.length === 1 ? '1 tender' : `${ids.length} tenders`}.`);
+      setNotes((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !ids.includes(id))));
+      setNoteOpenIds((current) => new Set([...current].filter((id) => !ids.includes(id))));
+      // Keep the reviewer's place: move focus to whatever now sits where the decided row was.
+      if (focusIndex >= 0 && focusedId && ids.includes(focusedId)) {
+        const nextOrdered = [...next.uncertain, ...next.recommended, ...next.changed];
+        const target = nextOrdered[Math.min(focusIndex, nextOrdered.length - 1)];
+        requestAnimationFrame(() => focusRow(target?.id ?? null));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusyIds((current) => new Set([...current].filter((id) => !ids.includes(id))));
     }
-  };
+  }, [apply, focusRow, focusedId, ordered]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || isTypingTarget(event.target) || confirmingBulk) return;
+      const key = event.key.toLowerCase();
+      const index = focusedId ? ordered.findIndex((item) => item.id === focusedId) : -1;
+      if (key === 'j' || key === 'k') {
+        if (ordered.length === 0) return;
+        event.preventDefault();
+        const next = key === 'j' ? Math.min(index + 1, ordered.length - 1) : Math.max(index - 1, 0);
+        focusRow(ordered[next].id);
+        return;
+      }
+      const item = index >= 0 ? ordered[index] : null;
+      if (!item || busyIds.has(item.id)) return;
+      if (KEY_DECISIONS[key] && !(key === 'd' && item.group === 'CHANGED')) {
+        event.preventDefault();
+        void decide([item.id], KEY_DECISIONS[key], notes[item.id]?.trim() || undefined);
+      } else if (key === 'n') {
+        event.preventDefault();
+        setNoteOpenIds((current) => new Set([...current, item.id]));
+      } else if (key === 'x' && item.group === 'RECOMMENDED') {
+        event.preventDefault();
+        setSelectedIds((current) => {
+          const next = new Set(current);
+          if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+          return next;
+        });
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [busyIds, confirmingBulk, decide, focusRow, focusedId, notes, ordered]);
 
   const acknowledge = async () => {
     if (!view) return;
@@ -121,7 +190,7 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
     setError(null);
     try {
       apply(await window.tenderAssist.acknowledgeRuns(runIds));
-      setLastAction('Automatic rejects cleared from the Inbox. They remain in your tender history.');
+      setLastAction('Automatic rejects cleared from the Inbox. They remain under Tenders.');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -132,6 +201,60 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
   }
 
   const nothingToReview = view.attentionCount === 0;
+  const selectedItems = view.recommended.filter((item) => selectedIds.has(item.id));
+  const allRecommendedSelected = view.recommended.length > 0 && selectedItems.length === view.recommended.length;
+
+  const renderRow = (item: InboxItem) => (
+    <InboxRowCard
+      key={item.id}
+      item={item}
+      busy={busyIds.has(item.id)}
+      focused={focusedId === item.id}
+      selectable={item.group === 'RECOMMENDED'}
+      selected={selectedIds.has(item.id)}
+      noteOpen={noteOpenIds.has(item.id)}
+      note={notes[item.id] ?? ''}
+      onFocus={() => setFocusedId(item.id)}
+      onToggleSelected={(checked) => setSelectedIds((current) => {
+        const next = new Set(current);
+        if (checked) next.add(item.id); else next.delete(item.id);
+        return next;
+      })}
+      onOpenNote={() => setNoteOpenIds((current) => new Set([...current, item.id]))}
+      onNoteChange={(value) => setNotes((current) => ({ ...current, [item.id]: value }))}
+      onDecide={decide}
+      rowRef={(element) => { if (element) rowRefs.current.set(item.id, element); else rowRefs.current.delete(item.id); }}
+    />
+  );
+
+  const section = (title: string, hint: string, items: InboxItem[], toolbar?: ReactNode) => items.length > 0 && (
+    <section className="inbox-section" aria-label={title}>
+      <header className="inbox-section__header">
+        <div>
+          <h2>{title} <span className="inbox-section__count">{items.length}</span></h2>
+          <p>{hint}</p>
+        </div>
+        {toolbar}
+      </header>
+      <div className="inbox-section__list">{items.map(renderRow)}</div>
+    </section>
+  );
+
+  const bulkToolbar = (
+    <div className="bulk-toolbar">
+      <label className="bulk-toolbar__all">
+        <input
+          type="checkbox"
+          checked={allRecommendedSelected}
+          onChange={(event) => setSelectedIds(event.target.checked ? new Set(view.recommended.map((item) => item.id)) : new Set())}
+        />
+        <span>Select all</span>
+      </label>
+      <button className="btn btn-primary" type="button" disabled={selectedItems.length === 0} onClick={() => setConfirmingBulk(true)}>
+        Approve {selectedItems.length || ''} selected
+      </button>
+    </div>
+  );
 
   return (
     <div className="inbox">
@@ -148,6 +271,29 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
         {!error && lastAction && <p className="inbox__confirmation">{lastAction}</p>}
       </div>
 
+      {!nothingToReview && (
+        <p className="keyboard-hint">
+          Keyboard: <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> approve · <kbd>R</kbd> reject · <kbd>D</kbd> defer · <kbd>N</kbd> note · <kbd>X</kbd> select
+        </p>
+      )}
+
+      {confirmingBulk && selectedItems.length > 0 && (
+        <div className="bulk-confirm" role="dialog" aria-modal="false" aria-labelledby="bulk-confirm-title">
+          <h2 id="bulk-confirm-title">Approve {selectedItems.length} {selectedItems.length === 1 ? 'tender' : 'tenders'}?</h2>
+          <p>They will be pre-ticked for download when their run asks which documents to collect.</p>
+          <ul>{selectedItems.map((item) => <li key={item.id}>{item.title}</li>)}</ul>
+          <div className="bulk-confirm__actions">
+            <button className="btn btn-primary" type="button" autoFocus onClick={() => {
+              setConfirmingBulk(false);
+              void decide(selectedItems.map((item) => item.id), 'APPROVE');
+            }}>
+              Approve {selectedItems.length}
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirmingBulk(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {nothingToReview && (
         <div className="empty-panel inbox__empty">
           <h2>You are up to date</h2>
@@ -156,12 +302,9 @@ export function Inbox({ onStartDiscovery, onCountChange }: InboxProps) {
         </div>
       )}
 
-      <InboxSection title="Needs your review" hint="Automation could not decide, or you moved these back for review."
-        items={view.uncertain} busyIds={busyIds} onDecide={decide} />
-      <InboxSection title="Recommended" hint="Passed every check. Approve to collect documents in the next run."
-        items={view.recommended} busyIds={busyIds} onDecide={decide} />
-      <InboxSection title="Changed since your decision" hint="Dates, value, or a corrigendum changed after you decided. Confirm or change your call."
-        items={view.changed} busyIds={busyIds} onDecide={decide} />
+      {section('Needs your review', 'Automation could not decide, or you moved these back for review.', view.uncertain)}
+      {section('Recommended', 'Passed every check. Approved tenders are pre-ticked for download when their run asks which documents to collect.', view.recommended, bulkToolbar)}
+      {section('Changed since your decision', 'Dates, value, or a corrigendum changed after you decided. Confirm or change your call.', view.changed)}
 
       {view.autoRejected.length > 0 && (
         <details className="inbox-rejects">
