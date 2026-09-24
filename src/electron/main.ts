@@ -2,8 +2,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
+import { homedir, arch, release } from 'node:os';
 import { createDatabase, withTransaction } from '../persistence/db.js';
 import { runMigrations } from '../persistence/migrate.js';
 import { JobRepository } from '../persistence/repositories/jobRepository.js';
@@ -50,6 +50,8 @@ import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSec
 import { localDateFromTimestamp, mirrorJobOutputToDrive, publishJobWorkbook } from '../publishing/jobPublisher.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
 import { runPreflight } from '../system/preflight.js';
+import { applyPendingRestore, createBackup, inspectBackup, stageRestore } from '../system/backup.js';
+import { buildSupportBundle } from '../system/supportBundle.js';
 import { EmbeddedPortalHost, embeddedPortalTargetPrefix } from './embeddedPortalHost.js';
 import { markJobCancelled, USER_CANCELLED_REASON } from '../orchestration/jobCancellation.js';
 import { createActionPacer } from '../orchestration/actionPacer.js';
@@ -68,8 +70,18 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
+// A restore chosen in the previous session is swapped in before SQLite opens
+// the database; the replaced database is kept beside it.
+const migrationsDir = join(app.getAppPath(), 'src', 'persistence', 'migrations');
+let restoredPreviousDatabase: string | null = null;
+let restoreStartupError: string | null = null;
+try {
+  restoredPreviousDatabase = applyPendingRestore(getDatabasePath());
+} catch (error) {
+  restoreStartupError = error instanceof Error ? error.message : String(error);
+}
 const db = createDatabase(getDatabasePath());
-runMigrations(db, join(app.getAppPath(), 'src', 'persistence', 'migrations'));
+runMigrations(db, migrationsDir);
 const jobs = new JobRepository(db);
 const sessions = new AuthSessionRepository(db);
 const transitions = new StateTransitionRepository(db);
@@ -211,6 +223,126 @@ If the file is open in Excel, close it and try again.`);
   }
 }
 
+async function showMessage(options: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> {
+  return mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options);
+}
+
+async function backUpData(): Promise<void> {
+  const stamp = new Date().toLocaleDateString('en-CA');
+  const options: Electron.SaveDialogOptions = {
+    title: 'Back up TenderAssist data',
+    defaultPath: join(app.getPath('documents'), `TenderAssist backup ${stamp}.db`),
+    filters: [{ name: 'TenderAssist backup', extensions: ['db'] }],
+  };
+  const choice = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+  if (choice.canceled || !choice.filePath) return;
+  try {
+    createBackup(db, choice.filePath);
+    await showMessage({
+      type: 'info',
+      title: 'Backup saved',
+      message: 'Your runs, tenders, decisions, and settings were backed up.',
+      detail: `${choice.filePath}\n\nSaved portal passwords are not included. Tender documents stay in your output folder and are not part of this file.`,
+    });
+    shell.showItemInFolder(choice.filePath);
+  } catch (error) {
+    dialog.showErrorBox('Backup not saved', error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function restoreData(): Promise<void> {
+  if (activeJobId) {
+    dialog.showErrorBox('Restore not started', 'Stop the running job before restoring a backup.');
+    return;
+  }
+  const options: Electron.OpenDialogOptions = {
+    title: 'Restore TenderAssist data',
+    defaultPath: app.getPath('documents'),
+    filters: [{ name: 'TenderAssist backup', extensions: ['db'] }],
+    properties: ['openFile'],
+  };
+  const choice = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+  const backupPath = choice.filePaths[0];
+  if (choice.canceled || !backupPath) return;
+  try {
+    const summary = inspectBackup(backupPath, migrationsDir);
+    const lastChanged = summary.lastChangedAt ? new Date(summary.lastChangedAt).toLocaleString() : 'no runs yet';
+    const answer = await showMessage({
+      type: 'warning',
+      title: 'Restore backup?',
+      message: 'Replace your current TenderAssist data with this backup?',
+      detail: `The backup has ${summary.jobCount} runs and ${summary.tenderCount} tenders (last run: ${lastChanged}).\n\nTenderAssist will restart. Your current data is kept as a separate file, not deleted. You will need to enter saved portal passwords again.`,
+      buttons: ['Restore and restart', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (answer.response !== 0) return;
+    stageRestore(backupPath, getDatabasePath());
+    portalHost?.close();
+    db.close();
+    app.relaunch();
+    app.exit(0);
+  } catch (error) {
+    dialog.showErrorBox('Restore not started', error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function exportSupportBundle(): Promise<void> {
+  const stamp = new Date().toLocaleDateString('en-CA');
+  const options: Electron.SaveDialogOptions = {
+    title: 'Export support bundle',
+    defaultPath: join(app.getPath('documents'), `TenderAssist support ${stamp}.json`),
+    filters: [{ name: 'Support bundle', extensions: ['json'] }],
+  };
+  const choice = mainWindow ? await dialog.showSaveDialog(mainWindow, options) : await dialog.showSaveDialog(options);
+  if (choice.canceled || !choice.filePath) return;
+  try {
+    const portal = getPortalDefinition(DEFAULT_PORTAL_ID);
+    const output = publishingSettings.get(portal.id);
+    const preflight = await runPreflight(output.localOutputRoot, portal.url, portal.name, output.driveOutputRoot).catch((error: unknown) => ({
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    const bundle = buildSupportBundle(db, {
+      generatedAt: new Date().toISOString(),
+      appVersion: app.getVersion(),
+      environment: {
+        packaged: app.isPackaged,
+        platform: process.platform,
+        osRelease: release(),
+        arch: arch(),
+        electron: process.versions.electron,
+        chrome: process.versions.chrome,
+        node: process.versions.node,
+        activeJob: activeJobId !== null,
+      },
+      preflight,
+    });
+    writeFileSync(choice.filePath, JSON.stringify(bundle, null, 2), 'utf8');
+    await showMessage({
+      type: 'info',
+      title: 'Support bundle saved',
+      message: 'The support bundle is ready to send.',
+      detail: `${choice.filePath}\n\nIt lists recent runs, their states, and your settings. Portal login IDs, passwords, and tender documents are not included.`,
+    });
+    shell.showItemInFolder(choice.filePath);
+  } catch (error) {
+    dialog.showErrorBox('Support bundle not saved', error instanceof Error ? error.message : String(error));
+  }
+}
+
+function reportRestoreOutcome(): void {
+  if (restoreStartupError) {
+    dialog.showErrorBox('Backup not restored', `TenderAssist opened your existing data instead.\n\n${restoreStartupError}`);
+  } else if (restoredPreviousDatabase) {
+    void showMessage({
+      type: 'info',
+      title: 'Backup restored',
+      message: 'Your backup has been restored.',
+      detail: `Enter saved portal passwords again in Settings before the next run.\n\nThe data you replaced is kept at:\n${restoredPreviousDatabase}`,
+    });
+  }
+}
+
 function configureApplicationMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     {
@@ -218,6 +350,9 @@ function configureApplicationMenu(): void {
       submenu: [
         { label: 'Output folders and naming…', accelerator: 'CmdOrCtrl+Shift+O', click: () => navigateApplication('settings', 'folders') },
         { label: 'Export audit history…', click: () => void exportAuditHistory() },
+        { type: 'separator' },
+        { label: 'Back up data…', click: () => void backUpData() },
+        { label: 'Restore from backup…', click: () => void restoreData() },
         { type: 'separator' },
         { role: process.platform === 'darwin' ? 'close' : 'quit' },
       ],
@@ -249,6 +384,7 @@ function configureApplicationMenu(): void {
       label: 'Help',
       submenu: [
         { label: 'Check for updates…', click: () => void checkForUpdates(() => mainWindow).catch(() => {}) },
+        { label: 'Export support bundle…', click: () => void exportSupportBundle() },
         { type: 'separator' },
         {
           label: 'About TenderAssist',
@@ -823,6 +959,7 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
   app.whenReady().then(() => {
     createWindow();
     configureApplicationMenu();
+    mainWindow?.webContents.once('did-finish-load', reportRestoreOutcome);
     configureUpdates(() => mainWindow);
     if (app.isPackaged) {
       setTimeout(() => {

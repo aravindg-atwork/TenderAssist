@@ -69,7 +69,7 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
   return value;
 }
 
-function redact(fields: LogFields): LogFields {
+export function redact(fields: LogFields): LogFields {
   const seen = new WeakSet<object>();
   const out: LogFields = {};
   for (const [key, value] of Object.entries(fields)) {
