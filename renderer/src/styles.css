@@ -2730,3 +2730,8 @@ input:focus-visible {
 .live-shortlist__loading {
   color: var(--text-muted);
 }
+
+.failed-searches {
+  margin: 8px 0 0;
+  padding-left: 1.25rem;
+}

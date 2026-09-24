@@ -12,6 +12,7 @@ import { evaluateIntentKeywords, evaluateExcludedScope } from '../classification
 import type { AuthJobUpdate } from './authJobRunner.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
 import type { PaceAction } from './actionPacer.js';
+import { retryTransient } from './transientRetry.js';
 
 const CLASSIFIER_VERSION = 'deterministic-detail-v2';
 
@@ -23,6 +24,8 @@ export interface ClassificationPhaseDeps {
   classifications: ClassificationRepository;
   signal?: AbortSignal;
   paceAction?: PaceAction;
+  /** Pauses between retries of a timed-out My Tenders page. */
+  retryDelaysMs?: readonly number[];
 }
 
 function sameCategory(actual: string, configured: string): boolean {
@@ -68,7 +71,14 @@ export async function runClassificationPhase(
   }
 
   try {
-    await navigateToMyTenders(page, deps.paceAction);
+    await retryTransient(() => navigateToMyTenders(page, deps.paceAction), {
+      delaysMs: deps.retryDelaysMs,
+      signal: deps.signal,
+      canRetry: () => {
+        const state = sessions.getById(authSessionId)?.state;
+        return state !== 'TAB_LOST' && state !== 'SESSION_EXPIRED';
+      },
+    });
     if (isCancellationRequested(deps.signal)) return cancelled();
   } catch (error) {
     if (isCancellationRequested(deps.signal)) return cancelled();

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { describePortalError } from '../../../src/orchestration/transientRetry';
 import type {
   AuthJobUpdate,
   JobDetail as JobDetailData,
@@ -237,6 +238,23 @@ export function JobDetail({ jobId, onBack }: JobDetailProps) {
         <div className="summary-uncertain"><strong>{uncertain.length}</strong><span>Borderline (needs review)</span></div>
         <div><strong>{rejected.length}</strong><span>Rejected</span></div>
       </div>
+
+      {detail.searches.some((search) => search.state === 'FAILED') && (
+        <div className="notice notice-attention" role="status">
+          <div>
+            <strong>Some categories could not be searched.</strong>
+            {' '}Tenders in them may be missing from this run; run this date again later to fill the gap.
+            <ul className="failed-searches">
+              {detail.searches.filter((search) => search.state === 'FAILED').map((search) => (
+                <li key={search.id} title={search.last_error ?? undefined}>
+                  <strong>{search.product_category}</strong>: {search.last_error ? describePortalError(search.last_error) : 'No reason was recorded.'}
+                  {' '}Tried {search.attempts ?? 1} time{search.attempts === 1 ? '' : 's'}.
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {detail.jobState === 'SHORTLISTED' && (
         <div className="notice notice-attention" role="status">

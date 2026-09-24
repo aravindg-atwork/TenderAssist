@@ -14,6 +14,7 @@ import type { ConfiguredSearch } from '../search/searchConfig.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
 import { triageTenderDetail, triageTenderTitle, type PreFavoriteIntent } from '../classification/preFavoriteTriage.js';
 import type { PaceAction } from './actionPacer.js';
+import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from './transientRetry.js';
 
 export interface SearchPhaseDeps {
   jobs: JobRepository;
@@ -24,6 +25,8 @@ export interface SearchPhaseDeps {
   classifications: ClassificationRepository;
   signal?: AbortSignal;
   paceAction?: PaceAction;
+  /** Pauses between retries of a timed-out search or detail page. */
+  retryDelaysMs?: readonly number[];
 }
 
 const PREFAVORITE_CLASSIFIER_VERSION = 'prefavorite-title-detail-v1';
@@ -73,6 +76,12 @@ export async function runSearchPhase(
   onUpdate(snapshot());
 
   const targetDate = formatDdMmYyyy(searchDate);
+  const retryDelaysMs = deps.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+  const sessionUsable = () => {
+    const state = sessions.getById(authSessionId)?.state;
+    return state !== 'TAB_LOST' && state !== 'SESSION_EXPIRED' && !isCancellationRequested(deps.signal);
+  };
+  const failedCategories: string[] = [];
 
   for (const config of configuredSearches) {
     if (isCancellationRequested(deps.signal)) return cancelled();
@@ -85,7 +94,15 @@ export async function runSearchPhase(
     onUpdate(snapshot());
 
     try {
-      const rows = await searchCategory(page, config.productCategory, targetDate, deps.paceAction);
+      const rows = await retryTransient(() => searchCategory(page, config.productCategory, targetDate, deps.paceAction), {
+        delaysMs: retryDelaysMs,
+        canRetry: sessionUsable,
+        signal: deps.signal,
+        onRetry: (attempt) => {
+          statusMessage = `${config.productCategory}: the portal did not respond, trying again (attempt ${attempt + 1} of ${retryDelaysMs.length + 1}).`;
+          onUpdate(snapshot());
+        },
+      });
       if (isCancellationRequested(deps.signal)) return cancelled();
 
       const favoriteReferences: string[] = [];
@@ -154,7 +171,9 @@ export async function runSearchPhase(
         }
 
         try {
-          const detail = await reviewTenderFromSearchResults(page, tender, deps.paceAction);
+          const detail = await retryTransient(() => reviewTenderFromSearchResults(page, tender, deps.paceAction), {
+            delaysMs: retryDelaysMs, canRetry: sessionUsable, signal: deps.signal,
+          });
           const detailProductCategory = detail.productCategories[0] ?? null;
           tenders.updateDetail(tender.id, {
             organisationChain: detail.organisationChain,
@@ -224,16 +243,26 @@ export async function runSearchPhase(
         return final;
       }
       // This one category failed for a reason unrelated to the session
-      // being lost (e.g. a page-structure surprise) -- the master prompt's
-      // own per-category resilience: move on to the next category rather
-      // than aborting the whole phase.
+      // being lost (a page-structure surprise, or a timeout that outlasted
+      // the retries). Move on to the next category, but record why so the
+      // run says which categories may be missing tenders.
+      const message = err instanceof Error ? err.message : String(err);
+      const attempts = (err as { attempts?: number }).attempts ?? 1;
+      searches.markFailed(search.id, message, attempts);
+      failedCategories.push(config.productCategory);
+      statusMessage = `${config.productCategory} could not be searched after ${attempts} attempt${attempts === 1 ? '' : 's'}: ${message}`;
     }
 
     onUpdate(snapshot());
   }
 
   if (isCancellationRequested(deps.signal)) return cancelled();
-  jobMachine.transition(jobId, 'CLASSIFYING', 'all category searches complete');
+  jobMachine.transition(jobId, 'CLASSIFYING', failedCategories.length > 0
+    ? `category searches finished; not searched: ${failedCategories.join(', ')}`
+    : 'all category searches complete');
+  if (failedCategories.length > 0) {
+    statusMessage = `Search finished, but ${failedCategories.length} of ${configuredSearches.length} categories could not be searched (${failedCategories.join(', ')}). Tenders in them may be missing; run this date again later to fill the gap.`;
+  }
   const final = snapshot('SUCCESS');
   onUpdate(final);
   return final;

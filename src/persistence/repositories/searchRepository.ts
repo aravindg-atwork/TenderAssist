@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 
-export type SearchState = 'PENDING' | 'RUNNING' | 'PAGINATING' | 'COMPLETE' | 'INTERRUPTED';
+export type SearchState = 'PENDING' | 'RUNNING' | 'PAGINATING' | 'COMPLETE' | 'INTERRUPTED' | 'FAILED';
 
 export interface SearchRow {
   id: string;
@@ -11,6 +11,8 @@ export interface SearchRow {
   state: SearchState;
   current_page: number;
   result_count: number | null;
+  last_error?: string | null;
+  attempts?: number;
   created_at: string;
   updated_at: string;
 }
@@ -71,6 +73,13 @@ export class SearchRepository {
     this.db
       .prepare('UPDATE searches SET state = ?, updated_at = ? WHERE id = ?')
       .run(state, new Date().toISOString(), id);
+  }
+
+  /** The category could not be searched even after retries; the run continues with the others. */
+  markFailed(id: string, error: string, attempts: number): void {
+    this.db
+      .prepare("UPDATE searches SET state = 'FAILED', last_error = ?, attempts = ?, updated_at = ? WHERE id = ?")
+      .run(error, attempts, new Date().toISOString(), id);
   }
 
   updateProgress(id: string, currentPage: number, resultCount: number | null): void {
