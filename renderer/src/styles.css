@@ -2076,6 +2076,28 @@ input:focus-visible {
   border-left-color: var(--state-error-fg);
 }
 
+.related-tenders {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.related-tenders li {
+  overflow-wrap: anywhere;
+}
+
+.related-tenders__label {
+  font-weight: 600;
+  color: var(--state-pending-fg);
+}
+
+.related-tenders__id {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--text);
+}
+
 .inbox-row__note {
   display: grid;
   gap: 4px;

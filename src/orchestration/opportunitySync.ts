@@ -4,6 +4,7 @@ import type { TenderWorkflowRepository } from '../persistence/repositories/tende
 import type { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
 import { canTransition, DECISION_TARGETS, type OperatorDecision } from '../state/opportunityLifecycle.js';
 import { screeningEvidence } from '../review/tenderExplanation.js';
+import { retenderReason } from '../review/relatedTenders.js';
 
 // Bridges run-level rows (`tenders`, gates, reviews) to durable tender
 // records. Every function is idempotent, so a phase can call it again after
@@ -21,12 +22,43 @@ export interface OpportunitySyncDeps {
  * half-classified tender would be logged as UNCERTAIN.
  */
 export function syncJobOpportunities(deps: OpportunitySyncDeps, jobId: string, portalId: string, options: { screening: boolean }): void {
+  const seen = new Set<string>();
   for (const tender of deps.tenders.listForJob(jobId)) {
     const opportunity = deps.opportunities.recordSighting(tender, portalId, { jobId });
+    seen.add(opportunity.id);
     if (!options.screening) continue;
     const final = deps.classifications.getFinalForTender(tender.id);
     if (final === 'NOT_RUN') continue;
     deps.opportunities.recordScreening(opportunity.id, final, { jobId }, { ...screeningEvidence(deps.classifications.listForTender(tender.id)) });
+  }
+  linkPossibleRetenders(deps, portalId, seen);
+}
+
+/** Links possible retenders across every tender already recorded, for example at app start. */
+export function linkAllPossibleRetenders(deps: Pick<OpportunitySyncDeps, 'opportunities'>): void {
+  const byPortal = new Map<string, string[]>();
+  for (const row of deps.opportunities.list()) byPortal.set(row.portal_id, [...(byPortal.get(row.portal_id) ?? []), row.id]);
+  for (const [portalId, ids] of byPortal) linkPossibleRetenders(deps, portalId, ids);
+}
+
+/**
+ * Links each tender this run saw to other tenders on the portal that look
+ * like the same work under a new Tender ID, newer pointing at older. Only a
+ * suggestion: the two records stay separate.
+ */
+export function linkPossibleRetenders(deps: Pick<OpportunitySyncDeps, 'opportunities'>, portalId: string, opportunityIds: Iterable<string>): void {
+  const all = deps.opportunities.list({ portalId });
+  const byId = new Map(all.map((row) => [row.id, row]));
+  for (const id of opportunityIds) {
+    const current = byId.get(id);
+    if (!current) continue;
+    for (const other of all) {
+      if (other.id === current.id || !retenderReason(current, other)) continue;
+      const currentIsNewer = current.first_seen_at > other.first_seen_at
+        || (current.first_seen_at === other.first_seen_at && current.identity_key > other.identity_key);
+      if (currentIsNewer) deps.opportunities.linkPossibleRetender(current.id, other.id);
+      else deps.opportunities.linkPossibleRetender(other.id, current.id);
+    }
   }
 }
 

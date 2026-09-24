@@ -19,7 +19,7 @@ import { AutomationSettingsRepository } from '../persistence/repositories/automa
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
-import { applyTenderDecision, recordCollectedDocuments, recordDownloadSelection, syncJobOpportunities } from '../orchestration/opportunitySync.js';
+import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, recordDownloadSelection, syncJobOpportunities } from '../orchestration/opportunitySync.js';
 import { buildInbox, type InboxView } from '../review/inbox.js';
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
@@ -89,6 +89,7 @@ function syncOpportunities(label: string, fn: () => void): void {
   try { fn(); } catch (error) { console.error(`[TenderAssist] tender record sync failed (${label}):`, error); }
 }
 syncOpportunities('expiry sweep', () => opportunities.expireOverdue());
+syncOpportunities('retender links', () => linkAllPossibleRetenders(opportunitySync));
 const jobMachine = new JobStateMachine(db, jobs, transitions);
 const authMachine = new AuthStateMachine(db, sessions, transitions);
 

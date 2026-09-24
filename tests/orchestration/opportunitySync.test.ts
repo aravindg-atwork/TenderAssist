@@ -9,10 +9,12 @@ import { TenderWorkflowRepository } from '../../src/persistence/repositories/ten
 import { OpportunityRepository } from '../../src/persistence/repositories/opportunityRepository.js';
 import {
   applyTenderDecision,
+  linkAllPossibleRetenders,
   recordCollectedDocuments,
   recordDownloadSelection,
   syncJobOpportunities,
 } from '../../src/orchestration/opportunitySync.js';
+import { buildInbox } from '../../src/review/inbox.js';
 
 describe('opportunity sync', () => {
   let db: DatabaseSync;
@@ -137,5 +139,49 @@ describe('opportunity sync', () => {
       expect(opportunities.listEvents(untouchedId)).toEqual([]);
       expect(opportunities.getById(sharedId)?.latest_sighting_id).toBe(sharedAgain.id);
     });
+  });
+  it('links a new Tender ID to an older tender with the same reference, newer pointing at older', () => {
+    const first = jobs.create();
+    const original = tenders.upsert({
+      jobId: first.id, tenderRef: 'TNPWD/IT/42/2026', tenderPortalId: '2026_TNPWD_100_1', title: 'Web portal development',
+      organisationChain: null, publishedDate: null, closingDate: null, openingDate: null, productCategory: 'Information Technology', valueInRupees: 'NA',
+    });
+    syncJobOpportunities(deps, first.id, 'tamil-nadu', { screening: false });
+    opportunities.decide([opportunityOf(original.id).id], 'REJECT');
+
+    const second = jobs.create();
+    const retender = tenders.upsert({
+      jobId: second.id, tenderRef: 'TNPWD/IT/42/2026', tenderPortalId: '2026_TNPWD_200_1', title: 'Re-tender: Web portal development',
+      organisationChain: null, publishedDate: null, closingDate: null, openingDate: null, productCategory: 'Information Technology', valueInRupees: 'NA',
+    });
+    seen(second.id, 'UNRELATED');
+    syncJobOpportunities(deps, second.id, 'tamil-nadu', { screening: false });
+    syncJobOpportunities(deps, second.id, 'tamil-nadu', { screening: false });
+
+    const older = opportunityOf(original.id);
+    const newer = opportunityOf(retender.id);
+    expect(newer.id).not.toBe(older.id);
+    expect(opportunities.listRetenderLinks()).toEqual([
+      expect.objectContaining({ from_opportunity_id: newer.id, to_opportunity_id: older.id }),
+    ]);
+    const inbox = buildInbox(opportunities);
+    const item = [...inbox.uncertain, ...inbox.recommended].find((entry) => entry.id === newer.id)!;
+    expect(item.related).toEqual([expect.objectContaining({
+      id: older.id, tenderId: '2026_TNPWD_100_1', lifecycle: 'REJECTED', direction: 'RETENDER_OF', reason: 'same reference number',
+    })]);
+  });
+  it('links tenders recorded before retender detection existed', () => {
+    for (const id of ['OLD_1', 'OLD_2']) {
+      const job = jobs.create();
+      const tender = tenders.upsert({
+        jobId: job.id, tenderRef: 'SHARED/REF/1', tenderPortalId: id, title: `Tender ${id}`,
+        organisationChain: null, publishedDate: null, closingDate: null, openingDate: null, productCategory: 'Information Technology', valueInRupees: 'NA',
+      });
+      opportunities.recordSighting(tender, 'tamil-nadu');
+    }
+    expect(opportunities.listRetenderLinks()).toHaveLength(0);
+    linkAllPossibleRetenders(deps);
+    linkAllPossibleRetenders(deps);
+    expect(opportunities.listRetenderLinks()).toHaveLength(1);
   });
 });

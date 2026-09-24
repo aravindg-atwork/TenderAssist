@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { OperatorDecision, TenderSummary, TendersView, TimelineEntry } from '../../../src/electron/ipcTypes';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
-import { absoluteDateTime, closingLabel, relativeTime } from '../format';
+import { absoluteDateTime, closingLabel, LIFECYCLE_LABELS, relativeTime } from '../format';
+import { RelatedTenders } from './RelatedTenders';
 
 type Tab = keyof TendersView;
 
@@ -12,23 +13,6 @@ const TABS: Array<{ id: Tab; label: string; empty: string }> = [
   { id: 'earlier', label: 'Earlier, undecided', empty: 'No undecided tenders outside the Inbox.' },
   { id: 'closed', label: 'Closed', empty: 'Tenders move here when their closing date passes or they are cancelled.' },
 ];
-
-const LIFECYCLE_LABELS: Record<string, string> = {
-  APPROVED: 'Approved',
-  DOCUMENTS_COLLECTED: 'Documents collected',
-  ELIGIBILITY_REVIEWED: 'Eligibility reviewed',
-  PREPARING: 'Preparing',
-  DEFERRED: 'Deferred',
-  REJECTED: 'Rejected',
-  NEW: 'Not screened',
-  SCREENED: 'Screened',
-  EXPIRED: 'Closing date passed',
-  CANCELLED: 'Cancelled',
-  SUBMITTED: 'Submitted',
-  NOT_SUBMITTED: 'Not submitted',
-  WON: 'Won',
-  LOST: 'Lost',
-};
 
 // Which operator actions make sense from each tab; the backend enforces the real rules.
 const TAB_ACTIONS: Record<Tab, Array<{ decision: OperatorDecision; label: string }>> = {
@@ -85,6 +69,7 @@ function TenderListRow({ item, tab, busy, onDecide }: {
       </div>
       <h3 className="inbox-row__title">{item.title}</h3>
       {meta.length > 0 && <p className="inbox-row__meta">{meta.join(' · ')}</p>}
+      <RelatedTenders related={item.related} />
       <div className="inbox-row__actions">
         {TAB_ACTIONS[tab].map((action) => (
           <button key={action.decision} className="btn btn-secondary" type="button" disabled={busy} onClick={() => onDecide(item.id, action.decision)}>

@@ -1,8 +1,21 @@
-import type { InboxRow, OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
+import type { InboxRow, OpportunityRepository, OpportunityRow } from '../persistence/repositories/opportunityRepository.js';
 import type { OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import { explainScreening, parseScreenedGates } from './tenderExplanation.js';
+import { RETENDER_REASON_TEXT, retenderReason } from './relatedTenders.js';
 
 export type InboxGroup = 'UNCERTAIN' | 'RECOMMENDED' | 'CHANGED' | 'AUTO_REJECTED';
+
+/** Another tender that may be the same work under a different Tender ID. */
+export interface RelatedTender {
+  id: string;
+  tenderId: string;
+  title: string;
+  lifecycle: OpportunityLifecycle;
+  /** RETENDER_OF: this tender is newer; RETENDERED_AS: the other one is. */
+  direction: 'RETENDER_OF' | 'RETENDERED_AS';
+  /** Plain words for why they look related. */
+  reason: string;
+}
 
 /** What every tender list shows about a tender. */
 export interface TenderSummary {
@@ -25,6 +38,7 @@ export interface TenderSummary {
   /** Run whose screening put it here; acknowledging that run clears its auto-rejects. */
   screeningJobId: string | null;
   changedSinceDecision: boolean;
+  related: RelatedTender[];
 }
 
 export interface InboxItem extends TenderSummary {
@@ -52,7 +66,40 @@ function groupFor(row: InboxRow): InboxGroup | null {
   return 'UNCERTAIN';
 }
 
-export function summarizeTender(row: InboxRow): TenderSummary {
+type RelatedSource = Pick<OpportunityRepository, 'listRetenderLinks' | 'getById'>;
+
+/** Possible retenders for every linked tender, keyed by tender. */
+export function relatedTenders(opportunities: RelatedSource): Map<string, RelatedTender[]> {
+  const index = new Map<string, RelatedTender[]>();
+  const cache = new Map<string, OpportunityRow | undefined>();
+  const load = (id: string) => {
+    if (!cache.has(id)) cache.set(id, opportunities.getById(id));
+    return cache.get(id);
+  };
+  const add = (owner: OpportunityRow, other: OpportunityRow, direction: RelatedTender['direction']) => {
+    const reason = retenderReason(owner, other);
+    const list = index.get(owner.id) ?? [];
+    list.push({
+      id: other.id,
+      tenderId: other.tender_portal_id ?? other.tender_ref,
+      title: other.title,
+      lifecycle: other.lifecycle,
+      direction,
+      reason: reason ? RETENDER_REASON_TEXT[reason] : 'looked similar when it was found',
+    });
+    index.set(owner.id, list);
+  };
+  for (const link of opportunities.listRetenderLinks()) {
+    const newer = load(link.from_opportunity_id);
+    const older = load(link.to_opportunity_id);
+    if (!newer || !older) continue;
+    add(newer, older, 'RETENDER_OF');
+    add(older, newer, 'RETENDERED_AS');
+  }
+  return index;
+}
+
+export function summarizeTender(row: InboxRow, related: RelatedTender[] = []): TenderSummary {
   const explanation = explainScreening(row.recommendation, parseScreenedGates(row.screening_json));
   return {
     id: row.id,
@@ -72,11 +119,12 @@ export function summarizeTender(row: InboxRow): TenderSummary {
     lastSeenAt: row.last_seen_at,
     screeningJobId: row.screening_job_id,
     changedSinceDecision: row.changed_since_decision === 1,
+    related,
   };
 }
 
-function toItem(row: InboxRow, group: InboxGroup): InboxItem {
-  const summary = summarizeTender(row);
+function toItem(row: InboxRow, group: InboxGroup, related: RelatedTender[]): InboxItem {
+  const summary = summarizeTender(row, related);
   return {
     ...summary,
     group,
@@ -84,12 +132,13 @@ function toItem(row: InboxRow, group: InboxGroup): InboxItem {
   };
 }
 
-export function buildInbox(opportunities: Pick<OpportunityRepository, 'listInboxRows'>): InboxView {
+export function buildInbox(opportunities: Pick<OpportunityRepository, 'listInboxRows'> & RelatedSource): InboxView {
   const view: InboxView = { uncertain: [], recommended: [], changed: [], autoRejected: [], attentionCount: 0 };
+  const related = relatedTenders(opportunities);
   for (const row of opportunities.listInboxRows()) {
     const group = groupFor(row);
     if (!group) continue;
-    const item = toItem(row, group);
+    const item = toItem(row, group, related.get(row.id) ?? []);
     if (group === 'UNCERTAIN') view.uncertain.push(item);
     else if (group === 'RECOMMENDED') view.recommended.push(item);
     else if (group === 'CHANGED') view.changed.push(item);

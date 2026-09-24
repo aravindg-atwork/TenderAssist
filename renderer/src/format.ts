@@ -39,3 +39,21 @@ export function closingLabel(closingAt: string | null, rawClosingDate: string | 
   const text = remaining < 0 ? `Closed ${relativeTime(closingAt, now)}` : `Closes ${relativeTime(closingAt, now)}`;
   return { text, title: absoluteDateTime(closingAt), urgency };
 }
+
+/** How each tender lifecycle reads to the operator. */
+export const LIFECYCLE_LABELS: Record<string, string> = {
+  APPROVED: 'Approved',
+  DOCUMENTS_COLLECTED: 'Documents collected',
+  ELIGIBILITY_REVIEWED: 'Eligibility reviewed',
+  PREPARING: 'Preparing',
+  DEFERRED: 'Deferred',
+  REJECTED: 'Rejected',
+  NEW: 'Not screened',
+  SCREENED: 'Screened',
+  EXPIRED: 'Closing date passed',
+  CANCELLED: 'Cancelled',
+  SUBMITTED: 'Submitted',
+  NOT_SUBMITTED: 'Not submitted',
+  WON: 'Won',
+  LOST: 'Lost',
+};

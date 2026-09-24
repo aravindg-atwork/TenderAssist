@@ -76,6 +76,14 @@ export interface CorrigendumInput {
   description?: string | null;
 }
 
+/** A retender link with both tenders, for showing it on either one. */
+export interface RetenderLinkRow {
+  from_opportunity_id: string;
+  to_opportunity_id: string;
+  confirmed_by_operator: 0 | 1;
+  created_at: string;
+}
+
 /** An opportunity plus its latest automatic screening, for the Inbox. */
 export interface InboxRow extends OpportunityRow {
   screening_json: string | null;
@@ -324,12 +332,23 @@ export class OpportunityRepository {
     return this.transition(opportunityId, 'DOCUMENTS_COLLECTED', 'DOCUMENTS_COLLECTED', 'automation', context, data);
   }
 
-  /** Logs a portal corrigendum on the same Tender ID; it never creates a new tender. */
+  /**
+   * Logs a portal corrigendum on the same Tender ID; it never creates a new
+   * tender. A corrigendum already recorded under the same portal number is
+   * skipped, so re-reading the portal's list on every run is safe.
+   */
   recordCorrigendum(opportunityId: string, corrigendum: CorrigendumInput, context: EventContext = {}): OpportunityRow {
     return this.inTransaction(() => {
       const opportunity = this.require(opportunityId);
+      const portalNumber = corrigendum.portalNumber?.trim() || null;
+      if (portalNumber && this.db.prepare(
+        `SELECT 1 FROM opportunity_events WHERE opportunity_id = ? AND kind = 'CORRIGENDUM'
+         AND json_extract(data_json, '$.portalNumber') = ?`
+      ).get(opportunityId, portalNumber)) {
+        return opportunity;
+      }
       const at = context.at ?? new Date().toISOString();
-      this.insertEvent(opportunityId, 'CORRIGENDUM', 'automation', context, { ...corrigendum });
+      this.insertEvent(opportunityId, 'CORRIGENDUM', 'automation', context, { ...corrigendum, portalNumber });
       const flag = DECIDED_LIFECYCLES.includes(opportunity.lifecycle) ? 1 : opportunity.changed_since_decision;
       this.db.prepare('UPDATE opportunities SET changed_since_decision = ?, updated_at = ? WHERE id = ?').run(flag, at, opportunityId);
       return this.getById(opportunityId)!;
@@ -349,6 +368,14 @@ export class OpportunityRepository {
     return this.db.prepare(
       `SELECT * FROM opportunity_links WHERE from_opportunity_id = ? AND to_opportunity_id = ? AND kind = 'POSSIBLE_RETENDER'`
     ).get(fromId, toId) as unknown as OpportunityLinkRow;
+  }
+
+  /** Every retender suggestion in the workspace. */
+  listRetenderLinks(): RetenderLinkRow[] {
+    return this.db.prepare(
+      `SELECT from_opportunity_id, to_opportunity_id, confirmed_by_operator, created_at FROM opportunity_links
+       WHERE workspace_id = ? AND kind = 'POSSIBLE_RETENDER' ORDER BY created_at ASC`
+    ).all(this.workspaceId) as unknown as RetenderLinkRow[];
   }
 
   /** Keeps these tenders out of the Inbox until a run sees them again. */

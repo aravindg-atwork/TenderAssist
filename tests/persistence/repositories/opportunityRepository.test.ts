@@ -124,6 +124,18 @@ describe('OpportunityRepository', () => {
     expect(JSON.parse(event.data_json)).toMatchObject({ portalNumber: '3', changes: ['DEADLINE', 'BOQ'] });
   });
 
+  it('records each portal corrigendum number once, however often the list is read', () => {
+    const opportunity = repo.recordSighting(sighting(), 'tamil-nadu');
+    repo.decide([opportunity.id], 'APPROVE');
+    repo.recordCorrigendum(opportunity.id, { portalNumber: '1', publishedAt: '2026-09-20', changes: ['DEADLINE'] });
+    repo.decide([opportunity.id], 'APPROVE');
+    const again = repo.recordCorrigendum(opportunity.id, { portalNumber: ' 1 ', publishedAt: '2026-09-20', changes: ['DEADLINE'] });
+    expect(again.changed_since_decision).toBe(0);
+    repo.recordCorrigendum(opportunity.id, { portalNumber: '2', publishedAt: '2026-09-22', changes: ['BOQ'] });
+    const numbers = repo.listEvents(opportunity.id).filter((e) => e.kind === 'CORRIGENDUM').map((e) => JSON.parse(e.data_json).portalNumber);
+    expect(numbers).toEqual(['1', '2']);
+  });
+
   it('links a possible retender without merging and only once', () => {
     const original = repo.recordSighting(sighting({ tenderPortalId: '2026_ELCO_1_1' }), 'tamil-nadu');
     const retender = repo.recordSighting(sighting({ tenderPortalId: '2026_ELCO_2_1' }), 'tamil-nadu');

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { InboxItem, InboxView, OperatorDecision } from '../../../src/electron/ipcTypes';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { closingLabel } from '../format';
+import { RelatedTenders } from './RelatedTenders';
 
 export interface InboxProps {
   onStartDiscovery: () => void;
@@ -72,6 +73,7 @@ function InboxRowCard({
       <h3 className="inbox-row__title">{item.title}</h3>
       {meta.length > 0 && <p className="inbox-row__meta">{meta.join(' · ')}</p>}
       <p className={`inbox-row__why inbox-row__why--${(item.recommendation ?? 'none').toLowerCase()}`}>{item.explanation}</p>
+      <RelatedTenders related={item.related} />
       {noteOpen && (
         <label className="inbox-row__note">
           <span>Decision note (optional)</span>
