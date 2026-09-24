@@ -15,8 +15,21 @@ import { DEFAULT_OUTPUT_STRUCTURE, type OutputStructureSettings } from '../publi
 import type { RunConfiguration } from '../config/runConfiguration.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
 import { isCancellationRequested, markJobCancelled, throwIfCancellationRequested, USER_CANCELLED_REASON } from './jobCancellation.js';
+import { isSessionExpiredPage } from '../browser/sessionExpiredDetector.js';
 
 const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
+
+export const PORTAL_SESSION_EXPIRED_REASON = 'The portal signed you out before every selected document was downloaded.';
+
+class PortalSessionExpiredError extends Error {}
+
+/** A document request that lands on the portal's sign-in or "unauthorized" page instead of a file. */
+function isExpiredSessionResponse(finalUrl: string, contentType: string | undefined, body: Buffer): boolean {
+  if (isSessionExpiredPage(finalUrl, '')) return true;
+  if (!/text\/html/i.test(contentType ?? '')) return false;
+  const text = body.subarray(0, 200_000).toString('utf8');
+  return isSessionExpiredPage(finalUrl, text) || /page=(?:Login|NoAuthorizationPage|CommonErrorPage)/i.test(text);
+}
 
 export interface PostProcessingDeps {
   jobs: JobRepository;
@@ -99,6 +112,8 @@ export async function runPostProcessing(
     // the templates changed since.
     const plan = deps.outputs.getOrCreatePlan(jobId, outputRoot, localDateFromTimestamp(jobCreatedAt ?? new Date()), outputStructure);
     const { outputDate, structure, jobDirectory } = plan;
+    const authState = deps.sessions.getById(authSessionId)?.state;
+    if (authState === 'SESSION_EXPIRED' || authState === 'TAB_LOST') throw new PortalSessionExpiredError(PORTAL_SESSION_EXPIRED_REASON);
     deps.jobMachine.transition(jobId, 'ACQUIRING_DOCUMENTS', 'approved tender document acquisition started');
     onUpdate(snapshot('ACQUISITION'));
     for (const tender of approved) {
@@ -118,13 +133,16 @@ export async function runPostProcessing(
           throwIfCancellationRequested(deps.signal);
           if (!response.ok()) throw new Error(`Portal returned HTTP ${response.status()}.`);
           const body = await response.body();
+          if (isExpiredSessionResponse(response.url(), response.headers()['content-type'], body)) {
+            throw new PortalSessionExpiredError(PORTAL_SESSION_EXPIRED_REASON);
+          }
           if (body.length === 0 || body.length > MAX_DOCUMENT_BYTES) throw new Error('Document is empty or exceeds the 100 MB safety limit.');
           const fileName = fileNameForResponse(proposedFileName, response.headers()['content-type']);
           const path = join(folder, fileName);
           writeFileSync(path, body);
           deps.workflow.completeDocument(document.id, fileName, path, createHash('sha256').update(body).digest('hex'));
         } catch (error) {
-          if (isCancellationRequested(deps.signal)) throw error;
+          if (isCancellationRequested(deps.signal) || error instanceof PortalSessionExpiredError) throw error;
           deps.workflow.failDocument(document.id, error instanceof Error ? error.message : String(error));
         }
       }
@@ -166,6 +184,21 @@ export async function runPostProcessing(
       const final = snapshot('PUBLISHING', 'ABORTED', USER_CANCELLED_REASON);
       onUpdate(final);
       return final;
+    }
+    if (error instanceof PortalSessionExpiredError) {
+      // Not a failure: finished files and the selection are kept, and the
+      // caller asks for a fresh sign-in and runs acquisition again.
+      // The session-loss watcher may already have moved the job to AUTH_REQUIRED.
+      if (deps.jobs.getById(jobId)?.state !== 'AUTH_REQUIRED') {
+        deps.jobMachine.transition(jobId, 'SESSION_EXPIRED', 'portal session expired during document acquisition');
+      }
+      const saved = approved.flatMap((tender) => deps.workflow.listDocuments(tender.id)).filter((document) => document.state === 'DOWNLOADED').length;
+      const paused: AuthJobUpdate = {
+        ...snapshot('ACQUISITION', undefined, PORTAL_SESSION_EXPIRED_REASON),
+        statusMessage: `The portal signed you out. ${saved} ${saved === 1 ? 'document is' : 'documents are'} already saved and will not be downloaded again. Sign in to continue.`,
+      };
+      onUpdate(paused);
+      return paused;
     }
     const current = deps.jobs.getById(jobId)?.state;
     if (current && current !== 'FAILED_RETRYABLE' && current !== 'CANCELLED' && current !== 'FAILED_MANUAL') {

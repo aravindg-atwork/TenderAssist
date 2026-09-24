@@ -25,6 +25,8 @@ export interface AuthJobRunnerDeps {
   onDscJnlpReady?: (jobId: string, artifact: DscJnlpArtifact) => void;
   signal?: AbortSignal;
   paceAction?: PaceAction;
+  /** Sign an existing job in again (after its portal session expired) instead of creating a new one. */
+  existingJobId?: string;
 }
 
 export type AuthAssistStep =
@@ -176,8 +178,12 @@ export async function runAuthJob(
   const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const job = jobs.create();
-  jobMachine.transition(job.id, 'AUTH_REQUIRED', 'UI-initiated auth job');
+  const existing = deps.existingJobId ? jobs.getById(deps.existingJobId) : undefined;
+  if (deps.existingJobId && !existing) throw new Error(`Job not found: ${deps.existingJobId}`);
+  const job = existing ?? jobs.create();
+  if (existing?.state !== 'AUTH_REQUIRED') {
+    jobMachine.transition(job.id, 'AUTH_REQUIRED', existing ? 'portal session expired; signing in again to continue' : 'UI-initiated auth job');
+  }
 
   let emitDscReady: ((artifact: DscJnlpArtifact) => void) | undefined;
   let dscFlowStarted = false;

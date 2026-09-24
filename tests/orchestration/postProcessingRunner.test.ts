@@ -26,6 +26,7 @@ function fakePage(): Page {
         get: async () => ({
           ok: () => true,
           status: () => 200,
+          url: () => 'https://tntenders.gov.in/nicgep/app/download/document.pdf',
           body: async () => Buffer.from('%PDF-1.4 fake tender document'),
           headers: () => ({ 'content-type': 'application/pdf' }),
         }),

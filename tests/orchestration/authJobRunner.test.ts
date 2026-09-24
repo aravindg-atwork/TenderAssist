@@ -251,6 +251,28 @@ describe.skipIf(!CHROME_PATH)('runAuthJob', { timeout: 60_000 }, () => {
     expect(updates.at(-1)?.outcome).toBe('SUCCESS');
   });
 
+  it('signs an existing job in again after its portal session expired, keeping the same job', async () => {
+    const job = jobs.create();
+    for (const state of ['AUTH_REQUIRED', 'AUTH_PENDING', 'AUTHENTICATED', 'SEARCHING', 'CLASSIFYING', 'SHORTLISTED', 'SESSION_EXPIRED'] as const) {
+      jobMachine.transition(job.id, state);
+    }
+    const resultPromise = runAuthJob(
+      { jobs, sessions, jobMachine, authMachine, pollIntervalMs: 50, existingJobId: job.id },
+      cdpEndpoint,
+      `http://127.0.0.1:${serverPort}/`,
+      () => {}
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const page2 = await connectToRetainedPage(cdpEndpoint, 3, 8000);
+    await withTimeout(page2.goto(`http://127.0.0.1:${serverPort}/dashboard`), 8000, 'page2.goto(dashboard)');
+
+    const result = await resultPromise;
+    expect(result.outcome).toBe('SUCCESS');
+    expect(result.jobId).toBe(job.id);
+    expect(jobs.getById(job.id)?.state).toBe('AUTHENTICATED');
+    expect(jobs.listAll()).toHaveLength(1);
+  });
+
   it('resolves TIMEOUT when authentication is never detected, leaving job/auth state at AUTH_PENDING', async () => {
     const result = await runAuthJob(
       { jobs, sessions, jobMachine, authMachine, pollIntervalMs: 30, timeoutMs: 150 },

@@ -171,12 +171,14 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
       : activeJobUpdate.authStep === 'LOGIN_REQUIRED'
           ? { title: 'Complete login below', body: 'Saved credentials were not available or the login form needs attention. Sign in in the embedded portal; TenderAssist will continue when the dashboard appears.' }
           : activeJobUpdate.authStep === 'AUTHENTICATED'
-            ? { title: 'Login confirmed', body: 'TenderAssist is moving to portal search.' }
+            ? { title: 'Login confirmed', body: 'TenderAssist is continuing the run.' }
             : { title: `Opening ${selectedPortal.name}`, body: 'TenderAssist is preparing the secure embedded login page.' }
     : activeJobUpdate?.phase === 'SEARCH'
       ? { title: 'Screening before favourite', body: activeJobUpdate.statusMessage ?? 'TenderAssist is reading titles first and opening details only when the title is not decisive.' }
       : activeJobUpdate?.phase === 'CLASSIFICATION'
         ? { title: 'Verifying shortlisted tenders', body: 'The selected My Tenders entries are being checked against the complete saved intent.' }
+        : activeJobUpdate?.phase === 'ACQUISITION' && (activeJobUpdate.jobState === 'SESSION_EXPIRED' || activeJobUpdate.jobState === 'AUTH_REQUIRED')
+          ? { title: 'Sign in again to continue', body: activeJobUpdate.statusMessage ?? 'The portal signed you out. Files already saved are kept; sign in below and downloads will continue.' }
         : activeJobUpdate?.phase === 'ACQUISITION'
           ? { title: 'Downloading approved documents', body: 'Only tenders that passed review are being saved to the configured output folder.' }
           : activeJobUpdate?.phase === 'EXTRACTION'

@@ -33,7 +33,7 @@ import { waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
 import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
-import { runPostProcessing } from '../orchestration/postProcessingRunner.js';
+import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing } from '../orchestration/postProcessingRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
 import type { Page } from 'playwright-core';
 import type {
@@ -125,6 +125,9 @@ const pendingDocumentSelections = new Map<string, (tenderIds: string[]) => void>
 // publish an eligibility sheet for -- rather than acquiring documents for
 // every automatic KEEP the instant classification finishes. Resolves with
 // null if the job is cancelled while still waiting on that human choice.
+// Fresh sign-ins allowed while collecting documents before the run stops.
+const MAX_ACQUISITION_SIGN_INS = 3;
+
 function waitForDocumentSelection(jobId: string, signal: AbortSignal): Promise<string[] | null> {
   return new Promise((resolve) => {
     const onAbort = () => {
@@ -877,22 +880,67 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     const selectedTenderIds = await waitForDocumentSelection(classificationResult.jobId, abortController.signal);
     if (selectedTenderIds === null) return classificationResult;
     syncOpportunities('selection', () => recordDownloadSelection(opportunitySync, classificationResult.jobId, selectedTenderIds));
-    const postProcessingResult = await runPostProcessing(
-      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: abortController.signal },
-      capturedPage,
-      classificationResult.jobId,
-      classificationResult.authSessionId,
-      config,
-      outputSettings.localOutputRoot,
-      (update) => {
-        emitJobUpdate(update);
-      },
-      outputSettings.driveOutputRoot,
-      portal.url,
-      selectedTenderIds,
-      outputSettings.structure
-    );
-    syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, classificationResult.jobId));
+    const jobId = classificationResult.jobId;
+    let authSessionId = classificationResult.authSessionId;
+    let postProcessingResult: AuthJobUpdate;
+    // If the portal signs the operator out while they choose tenders or while
+    // documents download, keep the selection and saved files, ask for a fresh
+    // sign-in in the same embedded portal, and continue acquisition without
+    // repeating search or classification.
+    for (let signIns = 0; ; signIns += 1) {
+      postProcessingResult = await runPostProcessing(
+        { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: abortController.signal },
+        capturedPage!,
+        jobId,
+        authSessionId,
+        config,
+        outputSettings.localOutputRoot,
+        (update) => {
+          emitJobUpdate(update);
+        },
+        outputSettings.driveOutputRoot,
+        portal.url,
+        selectedTenderIds,
+        outputSettings.structure
+      );
+      syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, jobId));
+      if (postProcessingResult.abortReason !== PORTAL_SESSION_EXPIRED_REASON || postProcessingResult.outcome || abortController.signal.aborted) break;
+      if (signIns >= MAX_ACQUISITION_SIGN_INS) {
+        jobMachine.transition(jobId, 'FAILED_MANUAL', 'portal session kept expiring during document acquisition');
+        postProcessingResult = {
+          ...postProcessingResult,
+          jobState: 'FAILED_MANUAL',
+          outcome: 'ABORTED',
+          abortReason: 'The portal kept signing you out while documents downloaded. Files already saved are kept; start a new run to collect the rest.',
+        };
+        emitJobUpdate(postProcessingResult);
+        break;
+      }
+      stopWatchingSessionLoss?.();
+      const credentials = await loadPortalCredentials(portal.id).catch(() => undefined);
+      const signIn = await runAuthJob(
+        {
+          jobs, sessions, jobMachine, authMachine,
+          portalCredentials: credentials,
+          targetUrlPrefix: embeddedPortalTargetPrefix(portal),
+          registerDscReady: (listener) => portalHost!.onDscReady(listener),
+          onDscJnlpReady: (id, artifact) => dscArtifacts.set(id, artifact),
+          signal: abortController.signal,
+          paceAction,
+          existingJobId: jobId,
+        },
+        `http://127.0.0.1:${EMBEDDED_CDP_PORT}`,
+        portal.url,
+        emitJobUpdate,
+        (page, stop) => {
+          capturedPage = page;
+          stopWatchingSessionLoss = stop;
+          activeStopWatchingSessionLoss = stop;
+        }
+      );
+      if (signIn.outcome !== 'SUCCESS') return signIn;
+      authSessionId = signIn.authSessionId;
+    }
     return postProcessingResult;
   });
 
