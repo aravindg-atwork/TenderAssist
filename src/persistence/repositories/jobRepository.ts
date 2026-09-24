@@ -26,6 +26,8 @@ export interface JobRow {
   state: JobState;
   created_at: string;
   updated_at: string;
+  /** When the operator acknowledged the run; its auto-rejects then leave the Inbox. */
+  reviewed_at: string | null;
 }
 
 const TERMINAL_STATES: JobState[] = ['COMPLETE', 'CANCELLED', 'FAILED_MANUAL'];
@@ -35,7 +37,7 @@ export class JobRepository {
 
   create(): JobRow {
     const now = new Date().toISOString();
-    const row: JobRow = { id: randomUUID(), state: 'SCHEDULED', created_at: now, updated_at: now };
+    const row: JobRow = { id: randomUUID(), state: 'SCHEDULED', created_at: now, updated_at: now, reviewed_at: null };
     this.db
       .prepare('INSERT INTO jobs (id, state, created_at, updated_at) VALUES (?, ?, ?, ?)')
       .run(row.id, row.state, row.created_at, row.updated_at);

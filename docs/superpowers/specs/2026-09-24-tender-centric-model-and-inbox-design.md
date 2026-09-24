@@ -1,7 +1,7 @@
 # Tender-centric data model and Inbox — design
 
 Date: 2026-09-24
-Status: Draft for review
+Status: Decisions recorded 2026-09-24. Slice 1 delivered (migration 010, `OpportunityRepository`, `src/state/opportunityLifecycle.ts`, backfill). Slice 2 next.
 Backlog: Recommended delivery order step 2
 
 ## Goal
@@ -11,8 +11,26 @@ Make a tender a durable record that outlives the job that found it, and build th
 ## Non-goals
 
 - GeM adapter, OCR, eligibility review, company profile, calendar (later steps).
-- Team features (single-operator decision in the backlog).
+- Accounts, roles, assignments, shared comments, cloud database, live sync, team dashboards.
 - Changing how search, classification gates, or document download work inside a run.
+
+## Product constraints (decided 2026-09-24)
+
+**Today:** a single-operator, local-first desktop tool. Local SQLite and folders, Drive mirroring, backup/export, personal reminders, full audit trail.
+
+**Later:** a cloud product sold to other tender bidders. Today's workflow must not carry team architecture, but everything new must be cheap to lift into a multi-tenant service:
+
+| Rule | Why |
+|---|---|
+| Stable UUID primary keys, no rowid or path-based identity | Rows can move between databases |
+| `workspace_id` on every new domain table (default `'local'`) | Becomes the tenant key; no schema rewrite later |
+| Events record `actor` (`automation` / `operator`) plus nullable `actor_id` | Becomes the user ID once accounts exist |
+| UTC ISO-8601 timestamps; format only in the UI | Server and clients in different time zones |
+| Append-only event logs; current state is a cache of the log | Syncable, auditable, conflict-friendly |
+| New file paths stored relative to the output root | Storage can move to object storage |
+| Domain logic in plain TypeScript services under `src/`, not in `electron/main.ts` | A server can reuse it unchanged |
+
+Portal login stays human-only (CAPTCHA, OTP, and the DSC USB token), so a cloud version will still need a local companion for authentication. This design does not decide that architecture.
 
 ## Current state
 
@@ -30,6 +48,7 @@ Keep `tenders` as it is, reinterpreted as a **sighting**: "job X saw this tender
 ```sql
 CREATE TABLE opportunities (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'local',
   portal_id TEXT NOT NULL,
   identity_key TEXT NOT NULL,          -- see Identity below
   tender_portal_id TEXT,
@@ -39,13 +58,16 @@ CREATE TABLE opportunities (
   department TEXT,
   state_name TEXT,
   published_date TEXT,
-  closing_date TEXT,
+  closing_date TEXT,                   -- portal text, as shown
+  closing_at TEXT,                     -- UTC ISO, parsed from closing_date; drives expiry
   value_in_rupees TEXT,
   lifecycle TEXT NOT NULL,             -- see Lifecycle below
+  recommendation TEXT,                 -- latest automatic KEEP / REJECT / UNCERTAIN
+  changed_since_decision INTEGER NOT NULL DEFAULT 0,  -- set by CHANGED/CORRIGENDUM after a decision
   first_seen_at TEXT NOT NULL,
   last_seen_at TEXT NOT NULL,
   latest_sighting_id TEXT,             -- tenders.id with the freshest values
-  UNIQUE (portal_id, identity_key)
+  UNIQUE (workspace_id, portal_id, identity_key)
 );
 ALTER TABLE tenders ADD COLUMN opportunity_id TEXT REFERENCES opportunities (id);
 ```
@@ -60,9 +82,27 @@ Why not merge into `tenders`: every run-level repository, the classification gat
 
 - Scope is per portal. The same ID on two portals is two opportunities; cross-portal similarity is a later "related opportunities" link, not identity.
 - When a new sighting's identity matches, attach it and update `last_seen_at`, `latest_sighting_id`, and the copied columns.
-- If closing date, value, or title differ from the previous sighting, record a `CHANGED` event with the before and after values. This is the first half of corrigendum detection.
+- If closing date, value, or title differ from the previous sighting, record a `CHANGED` event with the before and after values.
 
-**Open question (needs real data):** whether a GePNIC corrigendum keeps the same Tender ID, changes the trailing `_N`, or issues a new ID with the same reference number. Until confirmed, a same-`tender_ref` / different-ID pair is linked as `POSSIBLE_CORRIGENDUM_OF`, never merged.
+**Corrigenda (confirmed from TN Tenders):** corrigenda keep the same Tender ID. `2026_ELCO_674849_1` carries Corrigendum 1–10 on one record, and the trailing `_1` never changes, so it is not a corrigendum number.
+
+- Same Tender ID → same opportunity. Each corrigendum is stored as a dated `CORRIGENDUM` event (`data_json`: portal-listed number, date, and what changed: deadline, BOQ, fee, technical document, cancellation). It never creates a new Inbox item. It sets a "changed since you decided" flag on the opportunity.
+- Corrigendum numbers come only from the portal's own corrigendum listing, never from `_1`, titles, or file names.
+- A new Tender ID with a similar reference or title is linked as `POSSIBLE_RETENDER` in `opportunity_links` and shown as "Possible retender / related tender". It is never merged automatically.
+- Parsing the portal's corrigendum listing needs a captured detail-page fixture and is its own slice (slice 2b). Slice 1 provides the event kind and the storage.
+
+```sql
+CREATE TABLE opportunity_links (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'local',
+  from_opportunity_id TEXT NOT NULL REFERENCES opportunities (id),
+  to_opportunity_id TEXT NOT NULL REFERENCES opportunities (id),
+  kind TEXT NOT NULL,              -- POSSIBLE_RETENDER (more kinds later)
+  confirmed_by_operator INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE (from_opportunity_id, to_opportunity_id, kind)
+);
+```
 
 ### 3. Lifecycle
 
@@ -86,10 +126,12 @@ Any open state ─► EXPIRED (closing date passed) / CANCELLED (portal withdrew
 ```sql
 CREATE TABLE opportunity_events (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'local',
   opportunity_id TEXT NOT NULL REFERENCES opportunities (id),
-  kind TEXT NOT NULL,        -- SEEN, SCREENED, CHANGED, APPROVED, REJECTED, DEFERRED, REOPENED,
-                             -- DOCUMENTS_COLLECTED, EXPIRED, NOTE
-  actor TEXT NOT NULL,       -- 'automation' | 'user'
+  kind TEXT NOT NULL,        -- SEEN, SCREENED, CHANGED, CORRIGENDUM, APPROVED, REJECTED, DEFERRED,
+                             -- REOPENED, DOCUMENTS_COLLECTED, EXPIRED, NOTE
+  actor TEXT NOT NULL,       -- 'automation' | 'operator'
+  actor_id TEXT,             -- null until accounts exist
   job_id TEXT,               -- run that caused it, if any
   note TEXT,
   data_json TEXT NOT NULL DEFAULT '{}',
@@ -112,7 +154,7 @@ Deleting a job deletes its run history (sightings, gates, searches, transitions)
 
 ### 7. Migration (010)
 
-1. Create `opportunities` and `opportunity_events`, and add `tenders.opportunity_id`.
+1. Create `opportunities`, `opportunity_events`, and `opportunity_links`; add `tenders.opportunity_id` and `jobs.reviewed_at`. Mark existing jobs reviewed so that old auto-rejects do not flood the new Inbox.
 2. For every existing `tenders` row, in `created_at` order: compute `(portal_id from job_run_configs, identity_key)`, then find or create the opportunity and set `opportunity_id`.
 3. Lifecycle from the existing data: manual KEEP with downloaded documents → DOCUMENTS_COLLECTED; manual KEEP → APPROVED; manual REJECT → REJECTED; gates present → SCREENED; otherwise NEW. Closing date in the past on an open state → EXPIRED.
 4. Write one synthetic event per backfilled decision (`actor` from the source, `note` = old review reason).
@@ -136,7 +178,9 @@ Navigation: **Inbox · Tenders · Runs · Settings** (Calendar arrives with step
 
 **Inbox** (default view when it has items):
 
-- Three groups, in this order: *Uncertain*, *Recommended*, *Rejected automatically* (collapsed).
+- Main section: tenders needing attention, grouped *Uncertain*, then *Recommended*, then *Changed since decision* (corrigenda on tenders already decided).
+- Bottom section: **Automatically rejected (N)**, collapsed by default. When expanded, each row shows title, rejection reason, and the matched exclusion, with a **Move to review** action (a `REOPENED` operator event).
+- The auto-rejected group covers only runs not yet acknowledged. **Done with this run** (or closing the run) sets `jobs.reviewed_at`, and those rejects leave the Inbox. They always remain under Tenders → Rejected.
 - Row: full title (wraps, no truncation), department, closing date shown as relative time with the absolute date in a tooltip, value, explanation sentence, and a CHANGED badge when a newer sighting changed dates or value.
 - Actions per row: Approve, Reject, Defer, with an optional note. Keyboard: `J`/`K` move, `A` approve, `R` reject, `D` defer, `N` note.
 - Bulk: select within *Recommended* → "Approve N tenders" with a confirmation listing the titles.
@@ -163,8 +207,9 @@ Human-readable timestamps across all three views, with a single shared formatter
 
 Each slice is shippable and keeps today's review panel working until slice 3 replaces it.
 
-## Open questions
+## Resolved questions
 
-1. How GePNIC represents corrigenda (see Identity). Needs one real corrigendum from TN Tenders.
-2. Should an automatic REJECT still appear in the Inbox (collapsed), or only under Tenders → Rejected? This draft shows it collapsed so mistakes stay visible.
-3. EXPIRED is time-based. Should it be computed on read or by a daily sweep at app start? This draft uses a sweep at app start, which writes events.
+1. Corrigenda keep the same Tender ID (see Identity).
+2. Automatic rejects stay visible as a collapsed Inbox group until the run is acknowledged.
+3. Single operator and local-first now; cloud-ready constraints above.
+4. EXPIRED is applied by a sweep at app start, which writes events. This is the working choice and can be revisited.

@@ -22,6 +22,8 @@ export interface TenderRow {
   detail_text: string | null;
   detail_reviewed_at: string | null;
   document_links_json: string;
+  /** Set once the sighting is linked to its durable tender (migration 010). */
+  opportunity_id?: string | null;
   created_at: string;
   updated_at: string;
 }

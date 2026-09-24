@@ -2,8 +2,21 @@ import type { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withTransaction } from './db.js';
+import { backfillOpportunities } from './backfillOpportunities.js';
 
-export function runMigrations(db: DatabaseSync, migrationsDir: string): void {
+export type PostMigrationHook = (db: DatabaseSync) => void;
+
+// Data conversions that SQL alone cannot express. Each runs once, in the
+// same transaction as the migration it belongs to.
+export const POST_MIGRATION_HOOKS: Record<string, PostMigrationHook> = {
+  '010_opportunities.sql': (db) => backfillOpportunities(db),
+};
+
+export function runMigrations(
+  db: DatabaseSync,
+  migrationsDir: string,
+  hooks: Record<string, PostMigrationHook> = POST_MIGRATION_HOOKS
+): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id TEXT PRIMARY KEY,
@@ -30,6 +43,7 @@ export function runMigrations(db: DatabaseSync, migrationsDir: string): void {
     const sql = readFileSync(join(migrationsDir, file), 'utf-8');
     withTransaction(db, () => {
       db.exec(sql);
+      hooks[file]?.(db);
       insertMigration.run(file, new Date().toISOString());
     });
   }
