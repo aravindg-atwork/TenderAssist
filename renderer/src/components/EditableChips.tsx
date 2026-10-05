@@ -55,7 +55,7 @@ export function EditableChips({ id, label, helper, values, onChange, placeholder
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
         />
-        <button type="button" className="btn btn-secondary" onClick={addDraft} disabled={!draft.trim()}>
+        <button type="button" className="btn btn--quiet" onClick={addDraft} disabled={!draft.trim()}>
           Add
         </button>
       </div>

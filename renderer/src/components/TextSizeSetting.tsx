@@ -30,30 +30,19 @@ export function TextSizeSetting() {
   };
 
   return (
-    <section className="settings-card">
-      <div className="settings-card__intro">
-        <div>
-          <h2>Display</h2>
-          <p>Choose how large TenderAssist text appears. This changes immediately and does not affect the portal; use the portal toolbar's − and + buttons to zoom the portal separately.</p>
-        </div>
-      </div>
-      <fieldset className="text-size-options">
-        <legend>Text size</legend>
+    <>
+      <h2>Display</h2>
+      <p className="block__lede">How large TenderAssist's text is. The portal has its own size: use − and + above the portal.</p>
+      <div className="choices" role="radiogroup" aria-label="Text size">
         {OPTIONS.map((option) => (
-          <label key={option.value} className={textSize === option.value ? 'text-size-option is-selected' : 'text-size-option'}>
-            <input
-              type="radio"
-              name="text-size"
-              value={option.value}
-              checked={textSize === option.value}
-              onChange={() => void choose(option.value)}
-            />
-            <span className="text-size-option__label">{option.label}</span>
-            <span className="text-size-option__hint">{option.hint}</span>
+          <label key={option.value} className={textSize === option.value ? 'choice is-chosen' : 'choice'}>
+            <input type="radio" name="text-size" value={option.value} checked={textSize === option.value} onChange={() => void choose(option.value)} />
+            <span className="choice__label">{option.label}</span>
+            <span className="choice__hint">{option.hint}</span>
           </label>
         ))}
-      </fieldset>
-      {error && <p className="error-text">{error}</p>}
-    </section>
+      </div>
+      {error && <p className="notice notice--stop" role="alert">{error}</p>}
+    </>
   );
 }

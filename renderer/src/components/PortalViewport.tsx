@@ -5,6 +5,7 @@ import {
   MIN_PORTAL_ZOOM_PERCENT,
   stepPortalZoom,
 } from '../../../src/persistence/repositories/displaySettingsRepository';
+import { BackIcon, RefreshIcon } from './icons';
 
 export interface PortalViewportProps {
   portalId: string;
@@ -63,55 +64,26 @@ export function PortalViewport({ portalId, portalName, active = true }: PortalVi
   }, [active]);
 
   return (
-    <section className="portal-workspace" aria-label={`${portalName} workspace`}>
-      <div className="portal-toolbar">
-        <div className="portal-toolbar__identity">
-          <span className="portal-live-dot" aria-hidden="true" />
-          <div>
-            <strong>{portalName}</strong>
-            <span>Secure embedded session</span>
-          </div>
-        </div>
-        <div className="portal-toolbar__actions">
-          <div className="portal-zoom" role="group" aria-label="Portal zoom">
-            <button
-              className="btn btn-secondary portal-zoom__step"
-              type="button"
-              onClick={() => applyZoom(stepPortalZoom(zoom, -1))}
-              disabled={zoom <= MIN_PORTAL_ZOOM_PERCENT}
-              aria-label="Make portal smaller"
-            >
-              −
-            </button>
-            <button
-              className="btn btn-secondary portal-zoom__value"
-              type="button"
-              onClick={() => applyZoom(DEFAULT_PORTAL_ZOOM_PERCENT)}
-              title="Reset portal zoom to 100%"
-              aria-label={`Portal zoom ${zoom}%. Reset to 100%`}
-            >
+    <section className="portal" aria-label={`${portalName} portal`}>
+      <div className="portal__bar">
+        <span className="portal__name"><span className="portal__live" aria-hidden="true" />{portalName}</span>
+        <div className="portal__tools">
+          <div className="zoom" role="group" aria-label="Portal zoom">
+            <button className="btn btn--tool" type="button" onClick={() => applyZoom(stepPortalZoom(zoom, -1))}
+              disabled={zoom <= MIN_PORTAL_ZOOM_PERCENT} aria-label="Make the portal smaller">−</button>
+            <button className="btn btn--tool zoom__value" type="button" onClick={() => applyZoom(DEFAULT_PORTAL_ZOOM_PERCENT)}
+              title="Reset the portal to 100%" aria-label={`Portal zoom ${zoom}%. Reset to 100%`}>
               <span aria-live="polite">{zoom}%</span>
             </button>
-            <button
-              className="btn btn-secondary portal-zoom__step"
-              type="button"
-              onClick={() => applyZoom(stepPortalZoom(zoom, 1))}
-              disabled={zoom >= MAX_PORTAL_ZOOM_PERCENT}
-              aria-label="Make portal larger"
-            >
-              +
-            </button>
+            <button className="btn btn--tool" type="button" onClick={() => applyZoom(stepPortalZoom(zoom, 1))}
+              disabled={zoom >= MAX_PORTAL_ZOOM_PERCENT} aria-label="Make the portal larger">+</button>
           </div>
-          <button className="btn btn-secondary" type="button" onClick={() => window.tenderAssist.portalGoBack()}>
-            Back
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => window.tenderAssist.portalReload()}>
-            Reload
-          </button>
+          <button className="btn btn--tool" type="button" onClick={() => window.tenderAssist.portalGoBack()}><BackIcon /> Back</button>
+          <button className="btn btn--tool" type="button" onClick={() => window.tenderAssist.portalReload()}><RefreshIcon /> Reload</button>
         </div>
       </div>
-      <div ref={surfaceRef} className="portal-viewport__surface">
-        {!active && <p className="portal-viewport__paused">The portal is still signed in. It will reappear when you release the divider or return to this tab.</p>}
+      <div ref={surfaceRef} className="portal__surface">
+        {!active && <p className="portal__paused">The portal is still signed in. It comes back when you let go of the divider or return to this tab.</p>}
       </div>
     </section>
   );

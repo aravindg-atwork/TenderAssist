@@ -21,10 +21,12 @@ import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunit
 
 import type { TendersView } from '../review/tenders.js';
 import type { TimelineEntry } from '../review/timeline.js';
+import type { TenderFileView } from '../review/tenderFile.js';
 
 export type { InboxItem, InboxView, TenderSummary } from '../review/inbox.js';
 export type { TendersView } from '../review/tenders.js';
 export type { TimelineEntry } from '../review/timeline.js';
+export type { TenderField, TenderFileView } from '../review/tenderFile.js';
 export type { OperatorDecision } from '../state/opportunityLifecycle.js';
 
 export interface RunSettingsState {
@@ -91,6 +93,9 @@ export interface JobListItem {
   updatedAt: string;
   portalId: string;
   searchDate: string | null;
+  /** Tenders the run saw, and how many of them it kept. */
+  tendersFound: number;
+  kept: number;
 }
 
 export interface JobDetail {
@@ -170,4 +175,8 @@ export interface TenderAssistApi {
   acknowledgeRuns(jobIds: string[]): Promise<InboxView>;
   getTenders(): Promise<TendersView>;
   getTenderTimeline(opportunityId: string): Promise<TimelineEntry[]>;
+  /** A tender's portal fields, key facts, and documents. */
+  getTenderFile(opportunityId: string): Promise<TenderFileView>;
+  /** Opens the tender's saved folder (documents, zip, eligibility sheet). */
+  openTenderFolder(opportunityId: string): Promise<void>;
 }

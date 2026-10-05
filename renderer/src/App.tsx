@@ -1,148 +1,128 @@
 // renderer/src/App.tsx
-import { useEffect, useState } from 'react';
-import { JobList } from './components/JobList';
-import { JobDetail } from './components/JobDetail';
-import { SettingsPage } from './components/SettingsPage';
-import { Inbox } from './components/Inbox';
-import { TendersPage } from './components/TendersPage';
+import { useCallback, useEffect, useState } from 'react';
 import type { AuthJobUpdate, RunSettingsState, SettingsSection } from '../../src/electron/ipcTypes';
-import { DEFAULT_PORTAL_ID } from '../../src/config/portalRegistry';
+import { DEFAULT_PORTAL_ID, getPortalDefinition } from '../../src/config/portalRegistry';
 import { applyTextSize } from './display';
+import { TodayPage, type FinishedRun } from './components/TodayPage';
+import { TendersPage } from './components/TendersPage';
+import { RunsPage } from './components/RunsPage';
+import { RunDetail } from './components/RunDetail';
+import { SettingsPage } from './components/SettingsPage';
+import { RunWorkspace } from './components/RunWorkspace';
+import { RunPanel } from './components/RunPanel';
+import { BrandMark } from './components/icons';
 
-type AppView = 'inbox' | 'tenders' | 'jobs' | 'settings';
+type View = 'today' | 'tenders' | 'runs' | 'settings';
+
+const NAV: Array<{ id: View; label: string }> = [
+  { id: 'today', label: 'Today' },
+  { id: 'tenders', label: 'Tenders' },
+  { id: 'runs', label: 'Runs' },
+  { id: 'settings', label: 'Settings' },
+];
+
+// The menu bar still names the old pages.
+const MENU_VIEWS: Record<string, View> = { inbox: 'today', tenders: 'tenders', jobs: 'runs', settings: 'settings' };
 
 export function App() {
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [view, setView] = useState<View>('today');
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [activeJobUpdate, setActiveJobUpdate] = useState<AuthJobUpdate | null>(null);
-  const [view, setView] = useState<AppView>('jobs');
-  const [settingsFocus, setSettingsFocus] = useState<{ section: SettingsSection; requestId: number } | null>(null);
-  const openSettings = (section?: SettingsSection) => {
-    setNavigated(true);
-    setSelectedJobId(null);
-    setView('settings');
-    setSettingsFocus(section ? { section, requestId: Date.now() } : null);
-  };
+  const [activeUpdate, setActiveUpdate] = useState<AuthJobUpdate | null>(null);
+  const [finishedRun, setFinishedRun] = useState<FinishedRun | null>(null);
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
-  const [inboxCount, setInboxCount] = useState(0);
-  const [navigated, setNavigated] = useState(false);
-  const navigate = (next: AppView) => { setNavigated(true); setView(next); setSelectedJobId(null); };
-  const [selectedPortalId, setSelectedPortalIdState] = useState(() => localStorage.getItem('tenderassist.portal') || DEFAULT_PORTAL_ID);
-  const setSelectedPortalId = (portalId: string) => {
-    localStorage.setItem('tenderassist.portal', portalId);
-    setSelectedPortalIdState(portalId);
+  const [waiting, setWaiting] = useState(0);
+  const [settingsFocus, setSettingsFocus] = useState<{ section: SettingsSection; requestId: number } | null>(null);
+  const [portalId, setPortalIdState] = useState(() => {
+    try { return localStorage.getItem('tenderassist.portal') || DEFAULT_PORTAL_ID; } catch { return DEFAULT_PORTAL_ID; }
+  });
+  const setPortalId = (next: string) => {
+    try { localStorage.setItem('tenderassist.portal', next); } catch { /* remembered for this session */ }
+    setPortalIdState(next);
   };
+
+  const go = useCallback((next: View) => { setView(next); setOpenRunId(null); }, []);
+  const openSettings = useCallback((section?: SettingsSection) => {
+    go('settings');
+    setSettingsFocus(section ? { section, requestId: Date.now() } : null);
+  }, [go]);
 
   useEffect(() => {
     window.tenderAssist.getTextSize().then(applyTextSize).catch(console.error);
     window.tenderAssist.getRunSettings().then(setSettings).catch(console.error);
-    window.tenderAssist.getInbox().then((inbox) => setInboxCount(inbox.attentionCount)).catch(console.error);
+    window.tenderAssist.getInbox().then((inbox) => setWaiting(inbox.attentionCount)).catch(console.error);
   }, []);
-
-  // Open on the Inbox when something needs a decision, unless the operator
-  // has already moved elsewhere.
-  useEffect(() => {
-    if (!navigated && inboxCount > 0 && view === 'jobs' && !activeJobId) setView('inbox');
-  }, [navigated, inboxCount, view, activeJobId]);
 
   useEffect(() => window.tenderAssist.onAppNavigation((command) => {
-    setNavigated(true);
-    setView(command.view);
-    setSelectedJobId(null);
-    if (command.view === 'settings' && command.section) {
-      setSettingsFocus({ section: command.section, requestId: Date.now() });
-    } else {
-      setSettingsFocus(null);
+    go(MENU_VIEWS[command.view] ?? 'today');
+    if (command.view === 'settings' && command.section) setSettingsFocus({ section: command.section, requestId: Date.now() });
+  }), [go]);
+
+  // App-level so "a search is running" survives moving between pages.
+  useEffect(() => window.tenderAssist.onJobUpdate((update) => {
+    const over = update.outcome === 'TIMEOUT' || update.outcome === 'ABORTED' || (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING');
+    setActiveJobId(over ? null : update.jobId);
+    setActiveUpdate(over ? null : update);
+    if (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING' && update.statusMessage) {
+      setFinishedRun({ jobId: update.jobId, message: update.statusMessage });
+    } else if (update.outcome === 'ABORTED' && update.abortReason) {
+      setFinishedRun({ jobId: update.jobId, message: update.abortReason });
     }
+    if (update.outcome) window.tenderAssist.getInbox().then((inbox) => setWaiting(inbox.attentionCount)).catch(console.error);
   }), []);
 
-  useEffect(() => {
-    // Lives at the App level (never unmounts) rather than inside JobList, so
-    // "is a job currently running" survives navigating to Job Detail and
-    // back -- JobList itself unmounts/remounts on that navigation, which
-    // previously reset this state and let the button re-enable mid-run.
-    const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
-      // The auth phase's own SUCCESS is no longer the end of the run -- the
-      // search phase continues automatically on the same job. Only treat
-      // the run as over on a genuine failure (any phase), or the
-      // classification phase's own terminal SUCCESS.
-      const runOver =
-        update.outcome === 'TIMEOUT' ||
-        update.outcome === 'ABORTED' ||
-        (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING');
-      setActiveJobId(runOver ? null : update.jobId);
-      setActiveJobUpdate(runOver ? null : update);
-      if (update.outcome) {
-        window.tenderAssist.getInbox().then((inbox) => setInboxCount(inbox.attentionCount)).catch(console.error);
-      }
-    });
-    return unsubscribe;
-  }, []);
+  const running = activeJobId !== null;
+  const portal = getPortalDefinition(portalId);
+  const showWorkspace = running && view === 'today' && !openRunId;
 
   return (
-    <div className="app-shell">
-      <header className="app-topbar">
-        <button
-          className="app-topbar__brand"
-          onClick={() => navigate('inbox')}
-        >
-          <span className="brand-mark" aria-hidden="true">T</span>
-          <span className="app-topbar__title">TenderAssist</span>
-        </button>
-        <nav className="app-nav" aria-label="Main navigation">
-          <button
-            className={view === 'inbox' ? 'app-nav__item is-active' : 'app-nav__item'}
-            aria-current={view === 'inbox' ? 'page' : undefined}
-            onClick={() => navigate('inbox')}
-          >
-            Inbox
-            {inboxCount > 0 && <span className="nav-count" aria-label={`${inboxCount} need a decision`}>{inboxCount}</span>}
-          </button>
-          <button
-            className={view === 'tenders' ? 'app-nav__item is-active' : 'app-nav__item'}
-            aria-current={view === 'tenders' ? 'page' : undefined}
-            onClick={() => navigate('tenders')}
-          >
-            Tenders
-          </button>
-          <button
-            className={view === 'jobs' ? 'app-nav__item is-active' : 'app-nav__item'}
-            aria-current={view === 'jobs' ? 'page' : undefined}
-            onClick={() => navigate('jobs')}
-          >
-            Runs
-          </button>
-          <button
-            className={view === 'settings' ? 'app-nav__item is-active' : 'app-nav__item'}
-            aria-current={view === 'settings' ? 'page' : undefined}
-            onClick={() => navigate('settings')}
-          >
-            Settings
-            {settings && !settings.configured && <span className="nav-dot" aria-label="Setup required" />}
-          </button>
+    <div className={showWorkspace ? 'app app--running' : 'app'}>
+      <header className="bar">
+        <span className="bar__brand"><BrandMark /> TenderAssist</span>
+        <nav className="bar__nav" aria-label="Main">
+          {NAV.map((item) => (
+            <button key={item.id} type="button" className="bar__tab" aria-current={view === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
+              {item.label}
+              {item.id === 'today' && waiting > 0 && <span className="count count--bar" aria-label={`${waiting} waiting for a decision`}>{waiting}</span>}
+              {item.id === 'settings' && settings && !settings.configured && <span className="bar__dot" aria-label="Needs setting up" />}
+            </button>
+          ))}
         </nav>
+        {running && !showWorkspace && (
+          <button type="button" className="bar__running" onClick={() => go('today')}>
+            <span className="bar__pulse" aria-hidden="true" /> Search running · show
+          </button>
+        )}
       </header>
-      <main className={activeJobId && view === 'jobs' && !selectedJobId ? 'app-main app-main--portal' : 'app-main'}>
-        {view === 'inbox' ? (
-          <Inbox onStartDiscovery={() => navigate('jobs')} onCountChange={setInboxCount} />
-        ) : view === 'tenders' ? (
-          <TendersPage onInboxChange={setInboxCount} />
-        ) : view === 'settings' ? (
-          <SettingsPage settings={settings} onSaved={setSettings} selectedPortalId={selectedPortalId} onPortalChange={setSelectedPortalId} focusRequest={settingsFocus} />
-        ) : selectedJobId ? (
-          <JobDetail jobId={selectedJobId} onBack={() => setSelectedJobId(null)} onOpenSettings={openSettings} />
-        ) : (
-          <JobList
-            onSelectJob={setSelectedJobId}
-            activeJobId={activeJobId}
-            activeJobUpdate={activeJobUpdate}
-            onActiveJobChange={setActiveJobId}
-            settings={settings}
-            onOpenSettings={openSettings}
-            selectedPortalId={selectedPortalId}
-            onPortalChange={setSelectedPortalId}
-            onOpenInbox={() => navigate('inbox')}
+
+      <main className="main">
+        {showWorkspace && activeJobId ? (
+          <RunWorkspace
+            portalId={portal.id}
+            portalName={portal.name}
+            update={activeUpdate}
+            guide={<RunPanel jobId={activeJobId} portalName={portal.name} update={activeUpdate} />}
           />
+        ) : openRunId ? (
+          <RunDetail jobId={openRunId} isActive={openRunId === activeJobId} onBack={() => setOpenRunId(null)} onOpenSettings={openSettings} />
+        ) : view === 'today' ? (
+          <TodayPage
+            settings={settings}
+            selectedPortalId={portalId}
+            onPortalChange={setPortalId}
+            onOpenSettings={openSettings}
+            onRunStarted={(jobId) => { setActiveJobId(jobId); setFinishedRun(null); }}
+            onOpenRun={(jobId) => setOpenRunId(jobId)}
+            onInboxCount={setWaiting}
+            finishedRun={finishedRun}
+            onDismissFinished={() => setFinishedRun(null)}
+          />
+        ) : view === 'tenders' ? (
+          <TendersPage onInboxCount={setWaiting} />
+        ) : view === 'runs' ? (
+          <RunsPage activeJobId={activeJobId} onOpenRun={setOpenRunId} />
+        ) : (
+          <SettingsPage settings={settings} onSaved={setSettings} selectedPortalId={portalId} onPortalChange={setPortalId} focusRequest={settingsFocus} />
         )}
       </main>
     </div>

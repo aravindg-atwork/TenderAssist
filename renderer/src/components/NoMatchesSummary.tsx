@@ -3,6 +3,8 @@ import type { JobDetail } from '../../../src/electron/ipcTypes';
 export interface NoMatchesSummaryProps {
   detail: JobDetail;
   onEditSettings: () => void;
+  /** Off where the page already lists the categories searched. */
+  showCategories?: boolean;
 }
 
 /**
@@ -10,7 +12,7 @@ export interface NoMatchesSummaryProps {
  * the portal returned, and the intent it was judged against, with a direct
  * way to adjust those settings for the next run.
  */
-export function NoMatchesSummary({ detail, onEditSettings }: NoMatchesSummaryProps) {
+export function NoMatchesSummary({ detail, onEditSettings, showCategories = true }: NoMatchesSummaryProps) {
   const config = detail.runConfiguration;
   const found = detail.tenders.length;
   const date = config?.searchDate ? new Date(`${config.searchDate}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : 'this date';
@@ -26,7 +28,7 @@ export function NoMatchesSummary({ detail, onEditSettings }: NoMatchesSummaryPro
         {failed > 0 && ` ${failed} categor${failed === 1 ? 'y' : 'ies'} could not be searched, so some tenders may be missing.`}
       </p>
 
-      {detail.searches.length > 0 && (
+      {showCategories && detail.searches.length > 0 && (
         <div className="no-matches__block">
           <h3>Categories searched</h3>
           <ul className="no-matches__categories">
@@ -62,7 +64,7 @@ export function NoMatchesSummary({ detail, onEditSettings }: NoMatchesSummaryPro
       <p className="no-matches__hint">
         Expected results? Add intent keywords, remove an exclusion, or add a category. Changes apply to your next run.
       </p>
-      <button className="btn btn-secondary" type="button" onClick={onEditSettings}>Edit categories and intent</button>
+      <button className="btn btn--quiet" type="button" onClick={onEditSettings}>Edit categories and intent</button>
     </section>
   );
 }

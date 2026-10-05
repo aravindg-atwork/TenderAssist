@@ -25,6 +25,7 @@ import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments
 import { automaticDownloadSelection } from '../orchestration/automaticSelection.js';
 import { describeSkipped, planDateBatch, type DateBatchPlan } from '../orchestration/dateBatch.js';
 import { buildInbox, type InboxView } from '../review/inbox.js';
+import { keyFactsFrom, parseDetailFields, type TenderFileView } from '../review/tenderFile.js';
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
 import { collectAuditHistory, writeAuditWorkbook } from '../review/auditHistory.js';
@@ -435,6 +436,50 @@ ipcMain.handle('acknowledge-runs', (_event, jobIds: unknown): InboxView => {
 
 ipcMain.handle('get-tenders', (): TendersView => buildTenders(opportunities));
 
+/** The saved folder of a tender on this computer, newest run first, if one exists. */
+function tenderFolderFor(opportunityId: string): string | null {
+  for (const tender of [...tenders.listForOpportunity(opportunityId)].reverse()) {
+    const plan = jobOutputs.getPlan(tender.job_id);
+    const serialNumber = jobOutputs.findSerialNumber(tender.id);
+    if (!plan || serialNumber === undefined) continue;
+    const folder = tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate);
+    if (existsSync(folder)) return folder;
+  }
+  return null;
+}
+
+ipcMain.handle('get-tender-file', (_event, opportunityId: unknown): TenderFileView => {
+  if (typeof opportunityId !== 'string' || !opportunities.getById(opportunityId)) throw new Error('Tender not found.');
+  const rows = [...tenders.listForOpportunity(opportunityId)].reverse();
+  const read = rows.find((tender) => tender.detail_text);
+  const allFields = parseDetailFields(read?.detail_text);
+  const withDocuments = rows.find((tender) => workflow.listDocuments(tender.id).length > 0);
+  return {
+    opportunityId,
+    keyFacts: keyFactsFrom(allFields),
+    allFields,
+    // Older reads also recorded portal menu links (such as "My Documents"); only files and the zip are documents.
+    documents: (withDocuments ? workflow.listDocuments(withDocuments.id) : [])
+      .filter((document) => /\.(?:pdf|xlsx?|docx?|zip|rar|7z|dwg|jpe?g|png|txt|csv)$/i.test(document.file_name) || /zip/i.test(document.file_name))
+      .map((document) => ({
+      id: document.id,
+      name: document.file_name,
+      state: document.state,
+      error: document.error,
+    })),
+    hasFolder: tenderFolderFor(opportunityId) !== null,
+    detailsRead: Boolean(read?.detail_reviewed_at),
+  };
+});
+
+ipcMain.handle('open-tender-folder', async (_event, opportunityId: unknown): Promise<void> => {
+  if (typeof opportunityId !== 'string') throw new Error('Tender not found.');
+  const folder = tenderFolderFor(opportunityId);
+  if (!folder) throw new Error('This tender has no saved folder on this computer yet.');
+  const error = await shell.openPath(folder);
+  if (error) throw new Error(`Could not open the folder: ${error}`);
+});
+
 ipcMain.handle('get-tender-timeline', (_event, opportunityId: unknown): TimelineEntry[] => {
   if (typeof opportunityId !== 'string' || !opportunities.getById(opportunityId)) throw new Error('Tender not found.');
   return describeTimeline(opportunities.listEvents(opportunityId));
@@ -444,6 +489,7 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
   return jobs.listAll().map((job) => {
     const session = sessions.getLatestForJob(job.id);
     const config = runConfigurations.getForJob(job.id);
+    const found = tenders.listForJob(job.id);
     return {
       jobId: job.id,
       jobState: job.state,
@@ -452,6 +498,8 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
       updatedAt: job.updated_at,
       portalId: config?.portalId ?? DEFAULT_PORTAL_ID,
       searchDate: config?.searchDate ?? null,
+      tendersFound: found.length,
+      kept: found.filter((tender) => (workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id)) === 'KEEP').length,
     };
   });
 });

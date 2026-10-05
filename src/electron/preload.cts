@@ -58,6 +58,8 @@ const api: TenderAssistApi = {
   dismissRelatedTender: (opportunityId, otherId) => ipcRenderer.invoke('dismiss-related-tender', opportunityId, otherId),
   getTenders: () => ipcRenderer.invoke('get-tenders'),
   getTenderTimeline: (opportunityId) => ipcRenderer.invoke('get-tender-timeline', opportunityId),
+  getTenderFile: (opportunityId) => ipcRenderer.invoke('get-tender-file', opportunityId),
+  openTenderFolder: (opportunityId) => ipcRenderer.invoke('open-tender-folder', opportunityId),
   onAppNavigation: (callback) => {
     const listener = (_event: IpcRendererEvent, command: AppNavigationCommand) => callback(command);
     ipcRenderer.on('app-navigate', listener);

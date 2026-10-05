@@ -8,7 +8,7 @@ import type { UpdateStatus } from '../../../src/electron/updateService';
 import { DEFAULT_AUTOMATION_PACING, type AutomationPacingSettings, type AutomationPacingMode } from '../../../src/persistence/repositories/automationSettingsRepository';
 import { EditableChips } from './EditableChips';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
-import { PortalCompatibilityBadge, PortalSelect } from './PortalSelect';
+import { PortalSelect } from './PortalSelect';
 import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from '../../../src/publishing/outputStructure';
 
 export interface SettingsPageProps {
@@ -167,258 +167,179 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     }
   };
 
-  if (!settings) return <p>Loading settings…</p>;
+  if (!settings) return <div className="page"><p className="page__empty">Loading settings…</p></div>;
+
+  const canSave = !saving && Boolean(credentialSettings && publishing && pacing);
+  const SECTIONS = [
+    ['look', 'What to look for'], ['login', 'Portal login'], ['folders', 'Folders'],
+    ['display', 'Display'], ['speed', 'Speed'], ['updates', 'Updates'],
+  ] as const;
 
   return (
-    <form className="settings-page" onSubmit={handleSubmit}>
-      <div className="page-heading">
-        <div>
-          <h1>Settings</h1>
-          <p>Set up portal access and define what a relevant tender means for every new job.</p>
-        </div>
-        <button className="btn btn-primary" type="submit" disabled={saving || !credentialSettings || !publishing || !pacing}>
-          {saving ? 'Saving…' : 'Save settings'}
-        </button>
-      </div>
+    <form className="settings" onSubmit={handleSubmit}>
+      <nav className="settings__nav" aria-label="Settings sections">
+        <h1>Settings</h1>
+        <ul>
+          {SECTIONS.map(([id, label]) => (
+            <li key={id}><a href={`#settings-${id}`}>{label}</a></li>
+          ))}
+        </ul>
+      </nav>
 
-      {!settings.configured && (
-        <div className="notice notice-attention" role="status">
-          Review the starter values below and save once before running your first job.
-        </div>
-      )}
-      {saved && <div className="notice notice-success" role="status">Settings saved. New jobs will use them.</div>}
-      {error && <p className="error-text" role="alert">{error}</p>}
-
-      <section className="settings-card settings-card--portal">
-        <div className="settings-card__intro">
-          <div>
-            <h2>Portal profile</h2>
-            <p>Credentials and output folders below belong only to the selected tender website.</p>
-          </div>
-          <PortalCompatibilityBadge portal={selectedPortal} />
-        </div>
-        <label className="portal-field" htmlFor="settings-portal">
-          <span>Tender website</span>
-          <PortalSelect id="settings-portal" value={selectedPortalId} onChange={onPortalChange} disabled={saving} />
-        </label>
-        {selectedPortal.compatibility === 'BETA' && (
-          <p className="field-helper">This site is in the official NIC directory and uses the shared GePNIC family, but its full login, DSC, search, and download flow still needs a live verification.</p>
+      <div className="settings__body">
+        {!settings.configured && (
+          <div className="notice notice--attention">Check the starting values below, then save once before your first search.</div>
         )}
-      </section>
 
-      <section className="settings-card settings-card--credentials">
-        <div className="settings-card__intro">
-          <div>
-            <h2>{selectedPortal.name} login</h2>
-            <p>Prefill this portal securely, then complete CAPTCHA and DSC actions yourself in the embedded browser.</p>
+        <section id="settings-look" className="block" ref={relevanceSectionRef} tabIndex={-1}>
+          <h2>What to look for</h2>
+          <p className="block__lede">TenderAssist searches each category for the published date, then keeps a tender only when its full details mention one of your intent words and its title has none of the excluded words.</p>
+          <EditableChips id="product-category-entry" label="Categories to search"
+            helper={`Use the exact names in the ${selectedPortal.name} product category list.`}
+            values={productCategories} onChange={setProductCategories} placeholder="Add a category" />
+          <EditableChips id="intent-keyword-entry" label="Intent words"
+            helper="Be specific, like “web application development”, not broad words like “service”."
+            values={keywords} onChange={setKeywords} placeholder="Add an intent word or phrase" />
+          <EditableChips id="excluded-keyword-entry" label="Excluded words"
+            helper="A tender whose title or category has one of these is rejected without opening it."
+            values={excludedKeywords} onChange={setExcludedKeywords} placeholder="Add an excluded word" />
+        </section>
+
+        <section id="settings-login" className="block">
+          <h2>Portal login</h2>
+          <p className="block__lede">Your login ID and password are filled in for you. You still type the CAPTCHA and your DSC PIN yourself.</p>
+          <label className="field field--wide" htmlFor="settings-portal">
+            <span>Website</span>
+            <PortalSelect id="settings-portal" value={selectedPortalId} onChange={onPortalChange} disabled={saving} />
+          </label>
+          {selectedPortal.compatibility === 'BETA' && (
+            <p className="hint">This website uses the same system as Tamil Nadu, but TenderAssist has not been checked on it yet.</p>
+          )}
+          <div className="field-row">
+            <label className="field" htmlFor="portal-login-id">
+              <span>Login ID</span>
+              <input id="portal-login-id" type="text" value={loginId} onChange={(event) => setLoginId(event.target.value)} autoComplete="username" />
+            </label>
+            <label className="field" htmlFor="portal-password">
+              <span>Password</span>
+              <input id="portal-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password"
+                placeholder={credentialSettings?.hasSavedPassword ? 'Saved. Type only to change it.' : 'Portal password'}
+                disabled={!credentialSettings?.encryptionAvailable} />
+            </label>
           </div>
-        </div>
-        <div className="credential-fields">
-          <label htmlFor="portal-login-id">
-            <span>Login ID</span>
-            <input
-              id="portal-login-id"
-              type="text"
-              value={loginId}
-              onChange={(event) => setLoginId(event.target.value)}
-              autoComplete="username"
-              placeholder={`${selectedPortal.name} login ID`}
-            />
+          <label className="check">
+            <input type="checkbox" checked={rememberPassword} onChange={(event) => setRememberPassword(event.target.checked)} disabled={!credentialSettings?.encryptionAvailable} />
+            Remember the password on this computer
           </label>
-          <label htmlFor="portal-password">
-            <span>Password</span>
-            <input
-              id="portal-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="new-password"
-              placeholder={credentialSettings?.hasSavedPassword ? 'Saved securely — enter only to replace' : 'Enter portal password'}
-              disabled={!credentialSettings?.encryptionAvailable}
-            />
-          </label>
-          <label className="credential-checkbox">
-            <input
-              type="checkbox"
-              checked={rememberPassword}
-              onChange={(event) => setRememberPassword(event.target.checked)}
-              disabled={!credentialSettings?.encryptionAvailable}
-            />
-            <span>Remember password on this computer</span>
-          </label>
-          <p className="credential-security-note">
+          <p className="hint">
             {credentialSettings?.encryptionAvailable
-              ? 'Password is encrypted for this operating-system account and is never shown back in the app.'
-              : 'Secure password storage is unavailable. You can still complete login manually in the embedded browser.'}
+              ? 'The password is locked to your Windows account and is never shown again.'
+              : 'Saving passwords is not available on this computer; you can still sign in by hand in the portal.'}
           </p>
           {credentialSettings?.hasSavedPassword && (
-            <button className="btn btn-secondary credential-forget" type="button" onClick={forgetSavedPassword} disabled={saving}>
-              Forget saved password
-            </button>
+            <button className="btn btn--quiet btn--small" type="button" onClick={forgetSavedPassword} disabled={saving}>Forget the saved password</button>
           )}
-        </div>
-      </section>
+        </section>
 
-      <section className="settings-card settings-card--folders" ref={foldersSectionRef} tabIndex={-1}>
-        <div className="settings-card__intro">
-          <div>
-            <h2>Folders and file names</h2>
-            <p>Choose one root folder. TenderAssist creates the month, run date, approved-tender folders, documents, and eligibility sheets inside it.</p>
-          </div>
-        </div>
-        <div className="publishing-field">
-          <label htmlFor="local-output-root"><span>Local output folder</span></label>
-          <div className="path-picker">
+        <section id="settings-folders" className="block" ref={foldersSectionRef} tabIndex={-1}>
+          <h2>Folders</h2>
+          <p className="block__lede">Each published date gets a folder, and each kept tender a folder inside it with its documents, zip and eligibility sheet. Approved tenders are copied to the Drive folder.</p>
+          <label className="field field--wide" htmlFor="local-output-root"><span>Save tenders in</span></label>
+          <div className="picker">
             <input id="local-output-root" type="text" value={publishing?.localOutputRoot ?? ''}
-              onChange={(event) => publishing && setPublishing({ ...publishing, localOutputRoot: event.target.value })}
-              placeholder="Choose a local working folder" />
-            <button className="btn btn-secondary" type="button" onClick={() => choosePublishingFolder('local')}>Browse</button>
+              onChange={(event) => publishing && setPublishing({ ...publishing, localOutputRoot: event.target.value })} />
+            <button className="btn btn--quiet" type="button" onClick={() => choosePublishingFolder('local')}>Choose…</button>
           </div>
-          <label htmlFor="drive-output-root"><span>Drive copy folder <small>Optional</small></span></label>
-          <div className="path-picker">
+          <label className="field field--wide" htmlFor="drive-output-root"><span>Copy approved tenders to Drive folder <small>optional</small></span></label>
+          <div className="picker">
             <input id="drive-output-root" type="text" value={publishing?.driveOutputRoot ?? ''}
               onChange={(event) => publishing && setPublishing({ ...publishing, driveOutputRoot: event.target.value })}
-              placeholder="Choose a Google Drive desktop sync folder" />
-            <button className="btn btn-secondary" type="button" onClick={() => choosePublishingFolder('drive')}>Browse</button>
+              placeholder="Your Google Drive for desktop folder" />
+            <button className="btn btn--quiet" type="button" onClick={() => choosePublishingFolder('drive')}>Choose…</button>
           </div>
-          <p className="field-helper">The approved-tenders workbook sits beside the tender folders; each tender folder contains its documents and eligibility workbook. Drive uses the same saved structure when configured.</p>
-          <details className="folder-customizer" ref={folderCustomizerRef}>
-            <summary>Customize folder and file names</summary>
-            <p className="field-helper">Use <code>{'{DD}'}</code>, <code>{'{MM}'}</code>, <code>{'{YYYY}'}</code>, <code>{'{SNO}'}</code>, and <code>{'{TITLE}'}</code>. The tender folder must keep <code>{'{SNO}'}</code> to prevent overwriting.</p>
-            <div className="folder-template-grid">
-              <label><span>Month folder</span><input value={publishing?.structure.monthFolderTemplate ?? ''} onChange={(event) => updateStructure('monthFolderTemplate', event.target.value)} /></label>
-              <label><span>Run-date folder</span><input value={publishing?.structure.dayFolderTemplate ?? ''} onChange={(event) => updateStructure('dayFolderTemplate', event.target.value)} /></label>
-              <label className="folder-template-grid__wide"><span>Tender folder</span><input value={publishing?.structure.tenderFolderTemplate ?? ''} onChange={(event) => updateStructure('tenderFolderTemplate', event.target.value)} /></label>
-              <label><span>Approved workbook</span><input value={publishing?.structure.approvedWorkbookTemplate ?? ''} onChange={(event) => updateStructure('approvedWorkbookTemplate', event.target.value)} /></label>
-              <label><span>Eligibility workbook</span><input value={publishing?.structure.eligibilityWorkbookTemplate ?? ''} onChange={(event) => updateStructure('eligibilityWorkbookTemplate', event.target.value)} /></label>
-              <label><span>Documents folder</span><input value={publishing?.structure.documentsFolderTemplate ?? ''} onChange={(event) => updateStructure('documentsFolderTemplate', event.target.value)} /></label>
+          <details className="disclosure" ref={folderCustomizerRef}>
+            <summary>Change folder and file names</summary>
+            <p className="hint">Use {'{DD}'}, {'{MM}'}, {'{YYYY}'}, {'{SNO}'} and {'{TITLE}'}. The tender folder must keep {'{SNO}'} so tenders never overwrite each other.</p>
+            <div className="field-grid">
+              <label className="field"><span>Month folder</span><input value={publishing?.structure.monthFolderTemplate ?? ''} onChange={(event) => updateStructure('monthFolderTemplate', event.target.value)} /></label>
+              <label className="field"><span>Date folder</span><input value={publishing?.structure.dayFolderTemplate ?? ''} onChange={(event) => updateStructure('dayFolderTemplate', event.target.value)} /></label>
+              <label className="field field--wide"><span>Tender folder</span><input value={publishing?.structure.tenderFolderTemplate ?? ''} onChange={(event) => updateStructure('tenderFolderTemplate', event.target.value)} /></label>
+              <label className="field"><span>Day workbook</span><input value={publishing?.structure.approvedWorkbookTemplate ?? ''} onChange={(event) => updateStructure('approvedWorkbookTemplate', event.target.value)} /></label>
+              <label className="field"><span>Eligibility sheet</span><input value={publishing?.structure.eligibilityWorkbookTemplate ?? ''} onChange={(event) => updateStructure('eligibilityWorkbookTemplate', event.target.value)} /></label>
+              <label className="field"><span>Documents folder</span><input value={publishing?.structure.documentsFolderTemplate ?? ''} onChange={(event) => updateStructure('documentsFolderTemplate', event.target.value)} /></label>
             </div>
-            <div className="folder-preview" aria-live="polite">
-              <strong>Preview</strong>
+            <div className="tree" aria-live="polite">
               {structurePreview ? (
-                <div className="folder-tree">
+                <>
                   <span>{structurePreview.monthFolder}/</span>
-                  <span>{structurePreview.dayFolder}/</span>
-                  <span>{structurePreview.approvedWorkbook}</span>
-                  <span>{structurePreview.tenderFolder}/</span>
-                  <span>{structurePreview.documentsFolder}/</span>
-                  <span>{structurePreview.eligibilityWorkbook}</span>
-                </div>
-              ) : <p>Finish the templates to see a valid preview.</p>}
+                  <span className="tree__in1">{structurePreview.dayFolder}/</span>
+                  <span className="tree__in2">{structurePreview.approvedWorkbook}</span>
+                  <span className="tree__in2">{structurePreview.tenderFolder}/</span>
+                  <span className="tree__in3">{structurePreview.documentsFolder}/</span>
+                  <span className="tree__in3">{structurePreview.eligibilityWorkbook}</span>
+                </>
+              ) : <span>Finish the names to see an example.</span>}
             </div>
-            <button className="btn btn-secondary folder-reset" type="button" onClick={() => publishing && setPublishing({ ...publishing, structure: DEFAULT_OUTPUT_STRUCTURE })}>
-              Restore recommended names
+            <button className="btn btn--quiet btn--small" type="button" onClick={() => publishing && setPublishing({ ...publishing, structure: DEFAULT_OUTPUT_STRUCTURE })}>
+              Use the recommended names
             </button>
           </details>
-        </div>
-      </section>
+        </section>
 
-      <TextSizeSetting />
+        <section id="settings-display" className="block"><TextSizeSetting /></section>
 
-      <section className="settings-card">
-        <div className="settings-card__intro">
-          <div>
-            <h2>Portal action pacing</h2>
-            <p>Add a randomized pause before automated clicks and form actions. Human-paced is the recommended default; Fast preserves the earlier behavior.</p>
+        <section id="settings-speed" className="block">
+          <h2>Speed</h2>
+          <p className="block__lede">How quickly TenderAssist clicks on the portal. A short random pause between clicks looks like a person and is gentler on a slow portal.</p>
+          <div className="choices" role="radiogroup" aria-label="Click speed">
+            {([
+              ['HUMAN', 'Like a person', '2 to 5 seconds between clicks. Recommended.'],
+              ['FAST', 'Fast', 'No pause. Quicker, but harder on a slow portal.'],
+              ['CUSTOM', 'Custom', 'Choose the pause yourself.'],
+            ] as const).map(([mode, label, hint]) => (
+              <label key={mode} className={pacing?.mode === mode ? 'choice is-chosen' : 'choice'}>
+                <input type="radio" name="pacing" checked={pacing?.mode === mode} onChange={() => setPacing(mode === 'FAST'
+                  ? { mode, minDelayMs: 0, maxDelayMs: 0 }
+                  : mode === 'HUMAN' ? DEFAULT_AUTOMATION_PACING
+                    : { mode, minDelayMs: pacing?.minDelayMs || 2_000, maxDelayMs: pacing?.maxDelayMs || 5_000 })} />
+                <span className="choice__label">{label}</span>
+                <span className="choice__hint">{hint}</span>
+              </label>
+            ))}
           </div>
-        </div>
-        <div className="pacing-settings">
-          <label htmlFor="pacing-mode"><span>Action speed</span>
-            <select id="pacing-mode" value={pacing?.mode ?? 'HUMAN'} onChange={(event) => {
-              const mode = event.target.value as AutomationPacingMode;
-              setPacing(mode === 'FAST'
-                ? { mode, minDelayMs: 0, maxDelayMs: 0 }
-                : mode === 'HUMAN'
-                  ? DEFAULT_AUTOMATION_PACING
-                  : { mode, minDelayMs: pacing?.minDelayMs || 2_000, maxDelayMs: pacing?.maxDelayMs || 5_000 });
-            }}>
-              <option value="HUMAN">Human-paced · random 2–5 seconds</option>
-              <option value="FAST">Fast · no added delay</option>
-              <option value="CUSTOM">Custom interval</option>
-            </select>
-          </label>
-          <div className="pacing-range" aria-label="Custom action delay range">
-            <label htmlFor="pacing-min"><span>Minimum seconds</span><input id="pacing-min" type="number" min="0" max="60" step="0.5" disabled={pacing?.mode !== 'CUSTOM'} value={(pacing?.minDelayMs ?? 2_000) / 1_000} onChange={(event) => pacing && setPacing({ ...pacing, minDelayMs: Number(event.target.value) * 1_000 })} /></label>
-            <label htmlFor="pacing-max"><span>Maximum seconds</span><input id="pacing-max" type="number" min="0" max="60" step="0.5" disabled={pacing?.mode !== 'CUSTOM'} value={(pacing?.maxDelayMs ?? 5_000) / 1_000} onChange={(event) => pacing && setPacing({ ...pacing, maxDelayMs: Number(event.target.value) * 1_000 })} /></label>
-          </div>
-          <p className="field-helper">The delay is randomized for each supported portal action. CAPTCHA, DSC certificate choice, and DSC password remain human actions.</p>
-        </div>
-      </section>
-
-      <section className="settings-card">
-        <div className="settings-card__intro">
-          <div>
-            <h2>Application updates</h2>
-            <p>Installed releases check GitHub for signed update packages and download newer versions in the background.</p>
-          </div>
-        </div>
-        <div className="update-control">
-          <div><strong>Version {updateStatus?.currentVersion ?? '…'}</strong><p>{updateStatus?.message ?? (updateStatus?.state === 'DOWNLOADING' ? `Downloading ${updateStatus.progressPercent ?? 0}%` : 'Check for a newer release at any time.')}</p></div>
-          {updateStatus?.state === 'READY' ? (
-            <button className="btn btn-primary" type="button" onClick={() => window.tenderAssist.restartToInstallUpdate()}>Restart and install</button>
-          ) : (
-            <button className="btn btn-secondary" type="button" disabled={updateStatus?.state === 'CHECKING' || updateStatus?.state === 'DOWNLOADING'} onClick={() => window.tenderAssist.checkForUpdates().then(setUpdateStatus)}>
-              {updateStatus?.state === 'CHECKING' ? 'Checking…' : 'Check for updates'}
-            </button>
+          {pacing?.mode === 'CUSTOM' && (
+            <div className="field-row">
+              <label className="field" htmlFor="pacing-min"><span>Shortest pause (seconds)</span>
+                <input id="pacing-min" type="number" min="0" max="60" step="0.5" value={pacing.minDelayMs / 1_000} onChange={(event) => setPacing({ ...pacing, minDelayMs: Number(event.target.value) * 1_000 })} /></label>
+              <label className="field" htmlFor="pacing-max"><span>Longest pause (seconds)</span>
+                <input id="pacing-max" type="number" min="0" max="60" step="0.5" value={pacing.maxDelayMs / 1_000} onChange={(event) => setPacing({ ...pacing, maxDelayMs: Number(event.target.value) * 1_000 })} /></label>
+            </div>
           )}
-        </div>
-      </section>
+        </section>
 
-      <section className="settings-card" ref={relevanceSectionRef} tabIndex={-1}>
-        <div className="settings-card__intro">
-          <div>
-            <h2>Search categories</h2>
-            <p>The app runs one portal search for each category.</p>
+        <section id="settings-updates" className="block">
+          <h2>Updates</h2>
+          <div className="update">
+            <div>
+              <strong>Version {updateStatus?.currentVersion ?? '…'}</strong>
+              <p className="hint">{updateStatus?.message ?? (updateStatus?.state === 'DOWNLOADING' ? `Downloading ${updateStatus.progressPercent ?? 0}%` : 'TenderAssist checks for new versions by itself.')}</p>
+            </div>
+            {updateStatus?.state === 'READY' ? (
+              <button className="btn btn--primary" type="button" onClick={() => window.tenderAssist.restartToInstallUpdate()}>Restart and update</button>
+            ) : (
+              <button className="btn btn--quiet" type="button" disabled={updateStatus?.state === 'CHECKING' || updateStatus?.state === 'DOWNLOADING'}
+                onClick={() => window.tenderAssist.checkForUpdates().then(setUpdateStatus)}>
+                {updateStatus?.state === 'CHECKING' ? 'Checking…' : 'Check now'}
+              </button>
+            )}
           </div>
-        </div>
-        <EditableChips
-          id="product-category-entry"
-          label="Product categories"
-          helper={`Use the exact names shown in the ${selectedPortal.name} product category filter.`}
-          values={productCategories}
-          onChange={setProductCategories}
-          placeholder="Add a product category"
-        />
-      </section>
+        </section>
+      </div>
 
-      <section className="settings-card">
-        <div className="settings-card__intro">
-          <div>
-            <h2>Positive intent</h2>
-            <p>A tender is shortlisted when its detail page contains at least one of these intents.</p>
-          </div>
-        </div>
-        <EditableChips
-          id="intent-keyword-entry"
-          label="Intent keywords and phrases"
-          helper="Prefer specific deliverables such as “web application development” over broad words like “service”."
-          values={keywords}
-          onChange={setKeywords}
-          placeholder="Add an intent phrase"
-        />
-      </section>
-
-      <section className="settings-card">
-        <div className="settings-card__intro">
-          <div>
-            <h2>Excluded primary scope</h2>
-            <p>Reject obvious hardware, maintenance, or other out-of-scope work before it reaches the shortlist.</p>
-          </div>
-        </div>
-        <EditableChips
-          id="excluded-keyword-entry"
-          label="Exclusion keywords and phrases"
-          helper="These are checked against the tender title and primary category, not incidental contract clauses."
-          values={excludedKeywords}
-          onChange={setExcludedKeywords}
-          placeholder="Add an exclusion phrase"
-        />
-      </section>
-
-      <div className="settings-actions">
-        <button className="btn btn-primary" type="submit" disabled={saving || !credentialSettings || !publishing || !pacing}>
-          {saving ? 'Saving…' : 'Save settings'}
-        </button>
+      <div className="savebar" aria-live="polite">
+        {error && <span className="savebar__error" role="alert">{error}</span>}
+        {!error && saved && <span className="savebar__ok">Saved. New searches use these settings.</span>}
+        <button className="btn btn--primary" type="submit" disabled={!canSave}>{saving ? 'Saving…' : 'Save changes'}</button>
       </div>
     </form>
   );
