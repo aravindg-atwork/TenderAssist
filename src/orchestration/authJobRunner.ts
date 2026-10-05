@@ -22,6 +22,12 @@ export interface AuthJobRunnerDeps {
   dscDownloadDirectory?: string;
   targetUrlPrefix?: string;
   registerDscReady?: (listener: (artifact: DscJnlpArtifact) => void) => () => void;
+  /**
+   * Lets the operator ask for a fresh DSC signer. The portal issues a new
+   * signData.jnlp on every DSC Login and rejects older ones ("Please run
+   * latest downloaded DataSigner utility"), so a stale file is never re-run.
+   */
+  registerFreshSigner?: (request: () => void) => () => void;
   onDscJnlpReady?: (jobId: string, artifact: DscJnlpArtifact) => void;
   signal?: AbortSignal;
   paceAction?: PaceAction;
@@ -265,6 +271,8 @@ export async function runAuthJob(
     onUpdate(snapshot());
   };
   const stopWatchingExternalDsc = deps.registerDscReady?.((artifact) => emitDscReady?.(artifact));
+  let freshSignerRequested = false;
+  const stopWatchingFreshSigner = deps.registerFreshSigner?.(() => { freshSignerRequested = true; });
 
   let lastAuthState: AuthState = sessions.getById(authSessionId)!.state;
   onUpdate(snapshot());
@@ -390,7 +398,14 @@ export async function runAuthJob(
         onUpdate(snapshot());
       }
 
+      if (freshSignerRequested) {
+        // Click DSC Login again; the new signer file then becomes the one to launch.
+        freshSignerRequested = false;
+        dscFileName = undefined;
+        flow.allowDscLoginAgain();
+      }
       if (!dscFileName) {
+        // A click still pausing past this bound carries on; the flow refuses a second one meanwhile.
         const dscStart = await bounded(flow.startDscLoginIfAvailable(), CDP_CALL_TIMEOUT_MS);
         if (dscStart.kind === 'ok' && dscStart.value && !dscFileName) {
           dscFlowStarted = true;
@@ -435,6 +450,7 @@ export async function runAuthJob(
 
   activeCredentials = undefined;
   stopWatchingExternalDsc?.();
+  stopWatchingFreshSigner?.();
 
   const final: AuthJobUpdate = { ...snapshot(), outcome, abortReason };
   onUpdate(final);

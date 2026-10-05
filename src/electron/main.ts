@@ -125,6 +125,8 @@ let activeJobAbortController: AbortController | undefined;
 let activeStopWatchingSessionLoss: (() => void) | undefined;
 let activeJobCompletion: Promise<unknown> | undefined;
 let lastActiveJobUpdate: AuthJobUpdate | undefined;
+// Asks the sign-in in progress for a fresh DSC signer file.
+let activeFreshSignerRequest: (() => void) | undefined;
 // The active run's place in its range of published dates.
 let activeSearchDate: string | undefined;
 let activeBatch: AuthJobUpdate['batch'];
@@ -667,6 +669,15 @@ ipcMain.handle('launch-dsc-signer', async (_event, jobId: string): Promise<void>
   }
 });
 
+ipcMain.handle('refresh-dsc-signer', (_event, jobId: string): void => {
+  if (!jobId || activeJobId !== jobId) throw new Error('This job is no longer running.');
+  if (!activeFreshSignerRequest) throw new Error('The run is not signing in right now.');
+  activeFreshSignerRequest();
+  if (lastActiveJobUpdate?.jobId === jobId) {
+    emitJobUpdate({ ...lastActiveJobUpdate, authStep: 'DSC_LOGIN_STARTING', dscFileName: undefined, authErrorCode: undefined, recoveryAction: undefined });
+  }
+});
+
 ipcMain.handle('cancel-job', async (_event, jobId: string): Promise<void> => {
   if (!jobId || activeJobId !== jobId) throw new Error('This job is no longer running.');
 
@@ -832,6 +843,10 @@ function signIn(
       portalCredentials: credentials,
       targetUrlPrefix: embeddedPortalTargetPrefix(ctx.portal),
       registerDscReady: (listener) => portalHost!.onDscReady(listener),
+      registerFreshSigner: (request) => {
+        activeFreshSignerRequest = request;
+        return () => { if (activeFreshSignerRequest === request) activeFreshSignerRequest = undefined; };
+      },
       onDscJnlpReady: (jobId, artifact) => dscArtifacts.set(jobId, artifact),
       signal: ctx.abortController.signal,
       paceAction: ctx.paceAction,

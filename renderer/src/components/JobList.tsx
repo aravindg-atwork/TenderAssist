@@ -215,6 +215,19 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     }
   };
 
+  const handleFreshSigner = async () => {
+    if (!activeJobId) return;
+    setLaunchingDsc(true);
+    setError(null);
+    try {
+      await window.tenderAssist.refreshDscSigner(activeJobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLaunchingDsc(false);
+    }
+  };
+
   const handleLaunchDsc = async () => {
     if (!activeJobId) return;
     setLaunchingDsc(true);
@@ -251,8 +264,8 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
         ? { title: 'DSC signer is ready', body: 'Launch the verified signer file, then select your certificate and enter the DSC password in the signer window.' }
         : activeJobUpdate.authStep === 'DSC_LAUNCHED'
           ? signerSlow
-            ? { title: 'The DSC signer has not finished', body: 'If no Java or OpenWebStart window opened, OpenWebStart may be missing or blocked: install it, then select Launch DSC signer again. If a signer window is open, check that your DSC token is plugged in, choose the certificate, and enter the DSC password.' }
-            : { title: 'DSC signer opened', body: 'Select Run in the Java prompt, then choose your certificate and enter the DSC password. TenderAssist will continue after the portal confirms the signature.' }
+            ? { title: 'The DSC signer has not finished', body: 'If the signer said "Please run latest downloaded DataSigner utility", select OK, then Get a new DSC signer. If no Java window opened at all, OpenWebStart may be missing: install it, then get a new signer. If a signer window is open, check the DSC token is plugged in, choose the certificate, and enter the DSC password.' }
+            : { title: 'DSC signer opened', body: 'Select Run in the Java prompt, then choose your certificate and enter the DSC password. TenderAssist continues after the portal confirms the signature. If the signer asks you to run the latest DataSigner utility, select OK and Get a new DSC signer.' }
         : activeJobUpdate.authStep === 'DSC_LOGIN_STARTING'
           ? { title: 'Preparing the DSC signer', body: 'TenderAssist selected DSC Login and is validating the trusted signData.jnlp download. The launch button will appear when it is ready.' }
       : activeJobUpdate.authStep === 'AUTH_ERROR'
@@ -334,10 +347,10 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
               <button
                 className={signerLaunched ? 'btn btn-secondary run-action-card__button' : 'btn btn-primary run-action-card__button'}
                 type="button"
-                onClick={handleLaunchDsc}
+                onClick={signerLaunched ? handleFreshSigner : handleLaunchDsc}
                 disabled={launchingDsc}
               >
-                {launchingDsc ? 'Launching…' : signerLaunched ? 'Launch DSC signer again' : 'Launch DSC signer'}
+                {launchingDsc ? 'Working…' : signerLaunched ? 'Get a new DSC signer' : 'Launch DSC signer'}
               </button>
             )}
             {signerLaunched && signerSlow && (

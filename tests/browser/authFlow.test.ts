@@ -34,8 +34,10 @@ describe.skipIf(!CHROME_PATH)('AuthFlow', { timeout: 30_000 }, () => {
   let userDataDir: string;
   let chromeProc: ReturnType<typeof launchChrome>;
   let cdpPort: number;
+  let dscClicks = 0;
 
   beforeEach(async () => {
+    dscClicks = 0;
     db = new DatabaseSync(':memory:');
     runMigrations(db, join(process.cwd(), 'src', 'persistence', 'migrations'));
     jobs = new JobRepository(db);
@@ -49,6 +51,11 @@ describe.skipIf(!CHROME_PATH)('AuthFlow', { timeout: 30_000 }, () => {
         res.end(
           '<html><body>Welcome : test@example.com<br>Bid Management<br>Logout<br>Your session in the client area has expired.</body></html>'
         );
+      } else if (req.url?.includes('/dsc-page')) {
+        res.end('<html><body>Digital Certificate Authentication <a href="/dsc-click">DSC Login</a></body></html>');
+      } else if (req.url?.includes('/dsc-click')) {
+        dscClicks += 1;
+        res.end('<html><body>Authenticating... Please wait</body></html>');
       } else if (req.url?.includes('/dashboard')) {
         res.end('<html><body>Welcome : test@example.com<br>Bid Management<br>Logout</body></html>');
       } else {
@@ -183,5 +190,25 @@ describe.skipIf(!CHROME_PATH)('AuthFlow', { timeout: 30_000 }, () => {
 
     expect(sessions.getById(authSessionId)?.state).toBe('AUTHENTICATED');
     expect(calls).toEqual([]);
+  });
+
+  it('never clicks DSC Login a second time while a slow first click is still pausing', async () => {
+    // A pause longer than the caller waits, like automation pacing at 2-5 s.
+    const flow = new AuthFlow({ sessions, machine, paceAction: () => new Promise((resolve) => setTimeout(resolve, 1_500)) });
+    await flow.start(jobId, `http://127.0.0.1:${cdpPort}`);
+    await flow.getPage().goto(`http://127.0.0.1:${serverPort}/dsc-page`);
+
+    const first = flow.startDscLoginIfAvailable();
+    const second = await flow.startDscLoginIfAvailable();
+    expect(second).toBe(false);
+    expect(await first).toBe(true);
+    expect(await flow.startDscLoginIfAvailable()).toBe(false);
+    expect(dscClicks).toBe(1);
+
+    // Asking for a fresh signer allows exactly one more click.
+    await flow.getPage().goto(`http://127.0.0.1:${serverPort}/dsc-page`);
+    flow.allowDscLoginAgain();
+    expect(await flow.startDscLoginIfAvailable()).toBe(true);
+    expect(dscClicks).toBe(2);
   });
 });

@@ -140,6 +140,8 @@ export interface TenderAssistApi {
   getPortalZoom(portalId: string): Promise<number>;
   setPortalZoom(portalId: string, percent: number): Promise<number>;
   launchDscSigner(jobId: string): Promise<void>;
+  /** Asks the portal for a fresh DSC signer file (clicks DSC Login again); launch it when ready. */
+  refreshDscSigner(jobId: string): Promise<void>;
   cancelJob(jobId: string): Promise<void>;
   /** Opens an allowed help page, such as the OpenWebStart download, in the default browser. */
   openHelpLink(url: string): Promise<void>;

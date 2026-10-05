@@ -38,6 +38,7 @@ const api: TenderAssistApi = {
   getPortalZoom: (portalId) => ipcRenderer.invoke('get-portal-zoom', portalId),
   setPortalZoom: (portalId, percent) => ipcRenderer.invoke('set-portal-zoom', portalId, percent),
   launchDscSigner: (jobId) => ipcRenderer.invoke('launch-dsc-signer', jobId),
+  refreshDscSigner: (jobId) => ipcRenderer.invoke('refresh-dsc-signer', jobId),
   cancelJob: (jobId) => ipcRenderer.invoke('cancel-job', jobId),
   openHelpLink: (url) => ipcRenderer.invoke('open-help-link', url),
   startJob: (config, untilDate, options) => ipcRenderer.invoke('start-job', config, untilDate, options),

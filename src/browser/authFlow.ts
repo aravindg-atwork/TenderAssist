@@ -24,6 +24,9 @@ export class AuthFlow {
   private controller: BrowserController | undefined;
   private authSessionId: string | undefined;
   private dscLoginStarted = false;
+  // A click still in progress (it pauses first): a second click would make
+  // the portal issue a newer signer file and reject the first one.
+  private dscLoginInProgress = false;
 
   constructor(private deps: AuthFlowDeps) {}
 
@@ -85,10 +88,20 @@ export class AuthFlow {
 
   async startDscLoginIfAvailable(): Promise<boolean> {
     if (!this.controller) throw new Error('AuthFlow.start() must be called before startDscLoginIfAvailable()');
-    if (this.dscLoginStarted) return false;
-    const started = await clickDscLoginIfAvailable(this.controller.getPage(), this.deps.paceAction);
-    if (started) this.dscLoginStarted = true;
-    return started;
+    if (this.dscLoginStarted || this.dscLoginInProgress) return false;
+    this.dscLoginInProgress = true;
+    try {
+      const started = await clickDscLoginIfAvailable(this.controller.getPage(), this.deps.paceAction);
+      if (started) this.dscLoginStarted = true;
+      return started;
+    } finally {
+      this.dscLoginInProgress = false;
+    }
+  }
+
+  /** Lets DSC Login be clicked again, to get a fresh signer file. */
+  allowDscLoginAgain(): void {
+    this.dscLoginStarted = false;
   }
 
   getPage(): Page {
