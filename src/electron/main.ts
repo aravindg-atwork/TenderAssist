@@ -2,7 +2,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { homedir, arch, release } from 'node:os';
 import { createDatabase, withTransaction } from '../persistence/db.js';
 import { runMigrations } from '../persistence/migrate.js';
@@ -51,7 +52,8 @@ import type {
 import { normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
-import { mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../publishing/jobPublisher.js';
+import { mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
+import { downloadDetailDocuments } from '../browser/myTendersController.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
 import { runPreflight } from '../system/preflight.js';
 import { detectJnlpLauncher, MISSING_SIGNER_MESSAGE, OPENWEBSTART_DOWNLOAD_URL } from '../system/jnlpLauncher.js';
@@ -909,13 +911,18 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
  * resume downloads. This is not approval: the tenders stay in the Inbox.
  */
 function selectAutomatically(jobId: string): string[] {
-  const selected = automaticDownloadSelection(tenders.listForJob(jobId).map((tender) => ({
+  const selected = selectionFor(jobId);
+  runConfigurations.saveSelection(jobId, selected);
+  return selected;
+}
+
+/** The tenders a run collects: kept from their details page, or approved by the operator. */
+function selectionFor(jobId: string): string[] {
+  return automaticDownloadSelection(tenders.listForJob(jobId).map((tender) => ({
     id: tender.id,
     effectiveClassification: workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id),
     opportunityLifecycle: tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle ?? null : null,
   })));
-  runConfigurations.saveSelection(jobId, selected);
-  return selected;
 }
 
 // Lifecycles in which the operator has approved a tender.
@@ -967,10 +974,25 @@ function afterApproval(tenderRows: TenderRow[]): void {
   reportDriveProblems(copyApprovedTendersToDrive(tenderRows));
 }
 
-function runFinishedMessage(selectedCount: number, dateCount = 1): string {
+interface CollectedCounts { shortlisted: number; needsReview: number }
+
+/** How many of the collected tenders were shortlisted, and how many need a look. */
+function countCollected(tenderIds: string[]): CollectedCounts {
+  let shortlisted = 0;
+  for (const id of tenderIds) {
+    if ((workflow.getReview(id)?.decision ?? classifications.getFinalForTender(id)) === 'KEEP') shortlisted += 1;
+  }
+  return { shortlisted, needsReview: tenderIds.length - shortlisted };
+}
+
+function runFinishedMessage(counts: CollectedCounts, dateCount = 1): string {
   const dates = dateCount > 1 ? ` across ${dateCount} published dates` : '';
-  if (selectedCount === 0) return `No tender matched your filters${dates}. Open a run to see what was checked.`;
-  return `${selectedCount} tender${selectedCount === 1 ? '' : 's'} shortlisted${dates} and documents saved locally. Review them in the Inbox; approved tenders are copied to Drive.`;
+  if (counts.shortlisted + counts.needsReview === 0) return `No tender matched your filters${dates}. Open a run to see what was checked.`;
+  const parts = [
+    counts.shortlisted > 0 && `${counts.shortlisted} shortlisted`,
+    counts.needsReview > 0 && `${counts.needsReview} need${counts.needsReview === 1 ? 's' : ''} your review`,
+  ].filter(Boolean).join(' and ');
+  return `${parts}${dates}. Their documents are saved locally. Decide in the Inbox; approved tenders are copied to Drive.`;
 }
 
 /** A new job for the next published date, signed in through the session already open. */
@@ -985,8 +1007,36 @@ function startDateJob(ctx: RunContext, searchDate: string): string {
   return job.id;
 }
 
+/** SHA-256 of a saved file, read in pieces so a large zip is not loaded at once. */
+function fileChecksum(filePath: string): Promise<string> {
+  return new Promise((resolveHash, rejectHash) => {
+    const hash = createHash('sha256');
+    createReadStream(filePath).on('data', (chunk) => hash.update(chunk)).on('error', rejectHash).on('end', () => resolveHash(hash.digest('hex')));
+  });
+}
+
+/**
+ * Clicks every document and the zip on a kept tender's open details page,
+ * saving them in the tender's Documents folder, and records each result.
+ */
+async function saveTenderDocuments(ctx: RunContext, jobId: string, config: RunConfiguration, tender: TenderRow, detailPage: Page): Promise<void> {
+  const host = portalHost;
+  if (!host) return;
+  const plan = jobOutputs.getOrCreatePlan(jobId, ctx.outputSettings.localOutputRoot, config.searchDate, ctx.outputSettings.structure);
+  const directory = tenderDocumentsDirectory(plan.jobDirectory, tender, jobOutputs.serialNumberFor(plan, tender.id), plan.structure, plan.outputDate);
+  const results = await downloadDetailDocuments(detailPage, (click) => host.captureDocument(directory, click), ctx.paceAction);
+  for (const result of results) {
+    const document = workflow.upsertDocument(tender.id, result.url, result.fileName);
+    if (result.filePath) {
+      workflow.completeDocument(document.id, result.fileName, result.filePath, await fileChecksum(result.filePath));
+    } else {
+      workflow.failDocument(document.id, result.error ?? 'The file did not download.');
+    }
+  }
+}
+
 /** Search, screen, and collect documents for one published date. */
-async function runDate(ctx: RunContext, jobId: string, authSessionId: string): Promise<{ result: AuthJobUpdate; selected: number }> {
+async function runDate(ctx: RunContext, jobId: string, authSessionId: string): Promise<{ result: AuthJobUpdate; selected: CollectedCounts }> {
   const config = runConfigurations.getForJob(jobId)!;
   // Shared, not copied: a sign-in again during downloads updates ctx.page for later dates.
   ctx.config = config;
@@ -1006,17 +1056,25 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
   );
   // Record what the run saw even if the search stopped part-way.
   syncOpportunities('search', () => syncJobOpportunities(opportunitySync, jobId, portal.id, { screening: false }));
-  if (searchResult.outcome !== 'SUCCESS') return { result: searchResult, selected: 0 };
+  if (searchResult.outcome !== 'SUCCESS') return { result: searchResult, selected: { shortlisted: 0, needsReview: 0 } };
 
-  const classificationResult = await runClassificationPhase(deps, page, jobId, authSessionId, config, emitJobUpdate, portal.stateName);
+  const classificationResult = await runClassificationPhase(
+    {
+      ...deps,
+      saveDocuments: (tender, detailPage) => saveTenderDocuments(ctx, jobId, config, tender, detailPage),
+      // The same rule that picks the tenders this run collects.
+      wantsDocuments: (tenderId) => selectionFor(jobId).includes(tenderId),
+    },
+    page, jobId, authSessionId, config, emitJobUpdate, portal.stateName
+  );
   syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, jobId, portal.id, { screening: classificationResult.outcome === 'SUCCESS' }));
-  if (classificationResult.outcome !== 'SUCCESS') return { result: classificationResult, selected: 0 };
+  if (classificationResult.outcome !== 'SUCCESS') return { result: classificationResult, selected: { shortlisted: 0, needsReview: 0 } };
 
   // No pause for the operator: shortlisted and needs-review tenders are
   // downloaded in this signed-in session, and decided later in the Inbox.
   const selected = selectAutomatically(jobId);
   const result = await collectDocuments(ctx, jobId, authSessionId, selected);
-  return { result, selected: selected.length };
+  return { result, selected: countCollected(selected) };
 }
 
 // Times one date may sign in again after the portal crashes or signs out.
@@ -1082,7 +1140,7 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
   let dates = plan.toRun;
   let batch = { dates: [...dates], done: [] as string[], skipped: [...plan.skipped] };
   activeBatch = batch;
-  let shortlisted = 0;
+  const collected: CollectedCounts = { shortlisted: 0, needsReview: 0 };
   let lastResult: AuthJobUpdate | undefined;
   for (let index = 0; ; index += 1) {
     const date = dates[index];
@@ -1093,7 +1151,7 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
         ...lastResult!,
         outcome: undefined,
         awaitingMoreDates: true,
-        statusMessage: `${runFinishedMessage(shortlisted, batch.done.length)}${skippedNote ? ` ${skippedNote}` : ''}`,
+        statusMessage: `${runFinishedMessage(collected, batch.done.length)}${skippedNote ? ` ${skippedNote}` : ''}`,
       });
       // The operator may browse the portal while deciding.
       portalHost?.setAutomationPopups(false);
@@ -1101,7 +1159,7 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
       portalHost?.setAutomationPopups(true);
       if (ctx.abortController.signal.aborted) return;
       if (!more) {
-        emitJobUpdate({ ...lastResult!, awaitingMoreDates: false, outcome: 'SUCCESS', statusMessage: runFinishedMessage(shortlisted, batch.done.length) });
+        emitJobUpdate({ ...lastResult!, awaitingMoreDates: false, outcome: 'SUCCESS', statusMessage: runFinishedMessage(collected, batch.done.length) });
         return;
       }
       dates = [...dates, ...more.toRun];
@@ -1138,7 +1196,8 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
       }
       return;
     }
-    shortlisted += selected;
+    collected.shortlisted += selected.shortlisted;
+    collected.needsReview += selected.needsReview;
     batch = { ...batch, done: [...batch.done, date] };
     activeBatch = batch;
   }
@@ -1292,14 +1351,14 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
       if (signedIn.outcome !== 'SUCCESS') return;
       const selected = selectAutomatically(jobId);
       const collected = await collectDocuments(ctx, jobId, signedIn.authSessionId, selected);
-      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(selected.length) });
+      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(countCollected(selected)) });
       return;
     }
     // Documents already chosen: saved files need no portal, and collection
     // asks for sign-in as soon as something still has to be downloaded.
     prepareForDocumentCollection(jobs, jobMachine, jobId);
     const collected = await collectDocuments(ctx, jobId, latestSession?.id ?? '', plan.selectedTenderIds);
-    if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(plan.selectedTenderIds.length) });
+    if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(countCollected(plan.selectedTenderIds)) });
   })();
   activeJobCompletion = finishRun(ctx, run, () => {});
   return { jobId, plan: plan.kind };

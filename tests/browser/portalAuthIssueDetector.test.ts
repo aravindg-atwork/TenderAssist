@@ -24,3 +24,21 @@ describe('detectPortalAuthIssue', () => {
     expect(shouldSurfacePortalAuthIssue(issue!, false)).toBe(true);
   });
 });
+
+describe('DSC page with a connected token', () => {
+  it('does not report a missing token when the portal lists the certificate', () => {
+    const page = [
+      'Digital Certificate Authentication',
+      '1. You have registered with DSC. Please insert your DSC card / e-Token for authentication.',
+      'S.No Alias Name Serial No. Certificate Type Expiry Date Type Status',
+      '1. KUMARAN 68 7e 6f 21 0f 6b Signing 03-Apr-2027 06:25 PM Class 3 Live',
+      'DSC Login Logout',
+      '6. Ensure that your DSC token is inserted into your computer.',
+    ].join('\n');
+    expect(detectPortalAuthIssue(page)).toBeNull();
+  });
+
+  it('still reports it when no certificate is listed', () => {
+    expect(detectPortalAuthIssue('Please insert your DSC card / e-Token for authentication.')?.code).toBe('DSC_TOKEN_REQUIRED');
+  });
+});

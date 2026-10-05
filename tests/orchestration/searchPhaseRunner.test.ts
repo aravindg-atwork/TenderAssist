@@ -179,6 +179,40 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
     expect(updates.at(-1)?.outcome).toBe('SUCCESS');
   });
 
+  it('favourites a tender whose title does not decide it, for the full check in My Tenders', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    await runSearchPhase(
+      { jobs, sessions, jobMachine, searches, tenders, classifications },
+      page, jobId, authSessionId, () => {}, new Date(), undefined,
+      { keywords: ['documentary film'], excludedKeywords: [] }
+    );
+
+    const [tender] = tenders.listForJob(jobId);
+    expect(tender.favorited).toBe(1);
+    // Not opened from the search results; decided later from its details page.
+    expect(tender.detail_reviewed_at).toBeNull();
+    expect(classifications.listForTender(tender.id).find((gate) => gate.gate === 'G3')?.reason_code).toBe('TITLE_NEEDS_DETAIL');
+  });
+
+  it('does not favourite a tender whose title has an excluded word', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    await runSearchPhase(
+      { jobs, sessions, jobMachine, searches, tenders, classifications },
+      page, jobId, authSessionId, () => {}, new Date(), undefined,
+      { keywords: ['documentary film'], excludedKeywords: ['title'] }
+    );
+
+    const [tender] = tenders.listForJob(jobId);
+    expect(tender.favorited).toBe(0);
+    expect(classifications.getFinalForTender(tender.id)).toBe('REJECT');
+  });
+
   it('uses the explicit searchDate for every category, formatted dd/MM/yyyy, instead of defaulting to today', async () => {
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
     const page = browser.contexts()[0].pages()[0];

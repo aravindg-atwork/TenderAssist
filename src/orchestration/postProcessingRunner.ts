@@ -144,6 +144,9 @@ export async function runPostProcessing(
             throw new PortalSessionExpiredError(PORTAL_SESSION_EXPIRED_REASON);
           }
           if (body.length === 0 || body.length > MAX_DOCUMENT_BYTES) throw new Error('Document is empty or exceeds the 100 MB safety limit.');
+          // The portal's links answer with a web page when used away from the
+          // tender page; that is not the document.
+          if (/text\/html/i.test(response.headers()['content-type'] ?? '')) throw new Error('The portal returned a web page instead of the file.');
           const fileName = fileNameForResponse(proposedFileName, response.headers()['content-type']);
           const path = join(folder, fileName);
           writeFileSync(path, body);

@@ -96,6 +96,9 @@ const TRANSIENT_FAILURE_BUDGET_MS = 15000;
 // files, or in production multiple concurrent auth jobs, each launching
 // their own Chrome instance).
 const CDP_CALL_TIMEOUT_MS = 5000;
+// Filling the login form pauses between fields (automation pacing, 2-5 s
+// each by default), so it gets longer than a single page call.
+const LOGIN_FILL_TIMEOUT_MS = 30_000;
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
@@ -267,7 +270,7 @@ export async function runAuthJob(
   onUpdate(snapshot());
 
   let activeCredentials = deps.portalCredentials;
-  const prepared = await bounded(flow.prepareLogin(activeCredentials), CDP_CALL_TIMEOUT_MS);
+  const prepared = await bounded(flow.prepareLogin(activeCredentials), LOGIN_FILL_TIMEOUT_MS);
   // Remove the password from the caller-owned dependency object immediately.
   // A local reference is retained only during the bounded authentication
   // phase so a portal-returned login form can be restored automatically.
@@ -365,7 +368,7 @@ export async function runAuthJob(
 
     if (!check.authenticated) {
       if (activeCredentials) {
-        const refill = await bounded(flow.refillVisibleLogin(activeCredentials), CDP_CALL_TIMEOUT_MS);
+        const refill = await bounded(flow.refillVisibleLogin(activeCredentials), LOGIN_FILL_TIMEOUT_MS);
         if (refill.kind === 'ok' && refill.value) {
           authStep = 'CAPTCHA_REQUIRED';
           authErrorCode = undefined;

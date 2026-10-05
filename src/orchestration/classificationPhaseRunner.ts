@@ -1,11 +1,11 @@
 import type { Page } from 'playwright-core';
 import type { JobRepository } from '../persistence/repositories/jobRepository.js';
 import type { AuthSessionRepository } from '../persistence/repositories/authSessionRepository.js';
-import type { TenderRepository } from '../persistence/repositories/tenderRepository.js';
+import type { TenderRepository, TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
-import { navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
+import { navigateToMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
 import { evaluateIntentKeywords, evaluateExcludedScope } from '../classification/intentGates.js';
@@ -26,6 +26,13 @@ export interface ClassificationPhaseDeps {
   paceAction?: PaceAction;
   /** Pauses between retries of a timed-out My Tenders page. */
   retryDelaysMs?: readonly number[];
+  /**
+   * Saves a kept tender's documents while its details page is still open,
+   * the only place the portal's document links work.
+   */
+  saveDocuments?: (tender: TenderRow, detailPage: Page) => Promise<void>;
+  /** Whether a decided tender's documents are wanted; defaults to kept tenders. */
+  wantsDocuments?: (tenderId: string) => boolean;
   /** The portal's entry page, opened again if a step leaves the page blank. */
   portalHomeUrl?: string;
 }
@@ -93,95 +100,109 @@ export async function runClassificationPhase(
   }
 
   const evaluatedAgainst = `${config.searchDate}T23:59:59+05:30`;
-  const reviewBatch = await reviewTendersFromMyTenders(page, currentJobTenders, 100, deps.paceAction);
+  // Each tender is decided from its full details page, and a kept tender's
+  // documents are downloaded before that page closes.
+  const recordDecision = (tender: TenderRow, detail: TenderDetailSnapshot) => {
+    const publishedDate = detail.publishedDateRaw ? parseTenderPortalDate(detail.publishedDateRaw) : null;
+    const actualCategories = detail.productCategories.length > 0
+      ? detail.productCategories
+      : [tender.product_category].filter(Boolean);
+    const detailProductCategory = actualCategories[0] ?? null;
+    tenders.updateDetail(tender.id, {
+      organisationChain: detail.organisationChain,
+      department: detail.department ?? detail.organisationChain?.split('||').map((part) => part.trim()).find(Boolean) ?? null,
+      stateName: detail.stateName ?? portalStateName ?? null,
+      publishedDate,
+      productCategory: detailProductCategory,
+      tenderCategory: detail.tenderCategory,
+      detailText: detail.bodyText,
+      documentLinks: detail.documentLinks,
+    });
+
+    const g1 = publishedDate
+      ? evaluateGate1(publishedDate, evaluatedAgainst, 7)
+      : {
+          result: 'PASS' as const,
+          reason_code: 'SEARCH_DATE_FILTER_MATCH',
+          published_at: null,
+          evaluated_against: evaluatedAgainst,
+          age_days: 0,
+          max_age_days: 7,
+          search_date: config.searchDate,
+        };
+    classifications.saveGate({
+      tenderId: tender.id,
+      gate: 'G1',
+      result: g1.result,
+      reasonCode: g1.reason_code,
+      evidence: g1,
+      classifierVersion: CLASSIFIER_VERSION,
+    });
+
+    const matchedCategories = actualCategories.filter((actual) =>
+      config.productCategories.some((configured) => sameCategory(actual, configured))
+    );
+    classifications.saveGate({
+      tenderId: tender.id,
+      gate: 'G2',
+      result: matchedCategories.length > 0 ? 'PASS' : 'REJECT',
+      reasonCode: matchedCategories.length > 0
+        ? detail.productCategories.length > 0 ? 'PRODUCT_CATEGORY_MATCH' : 'SEARCH_RESULT_CATEGORY_MATCH'
+        : 'PRODUCT_CATEGORY_MISMATCH',
+      evidence: { actual: actualCategories, configured: config.productCategories, matched: matchedCategories },
+      classifierVersion: CLASSIFIER_VERSION,
+    });
+
+    const g3 = evaluateIntentKeywords(`${tender.title} ${detail.bodyText}`, config.keywords);
+    classifications.saveGate({
+      tenderId: tender.id,
+      gate: 'G3',
+      result: g3.result,
+      reasonCode: g3.reasonCode,
+      evidence: { matchedKeywords: g3.matchedTerms, configuredKeywords: config.keywords },
+      classifierVersion: CLASSIFIER_VERSION,
+    });
+
+    const primaryScopeText = [tender.title, detail.tenderCategory, ...detail.productCategories].filter(Boolean).join(' ');
+    const g4 = evaluateExcludedScope(primaryScopeText, config.excludedKeywords);
+    classifications.saveGate({
+      tenderId: tender.id,
+      gate: 'G4',
+      result: g4.result,
+      reasonCode: g4.reasonCode,
+      evidence: { matchedExcludedKeywords: g4.matchedTerms, evaluatedText: primaryScopeText },
+      classifierVersion: CLASSIFIER_VERSION,
+    });
+  };
+
+  const decided = new Set<string>();
+  const reviewBatch = await reviewTendersFromMyTenders(page, currentJobTenders, 100, deps.paceAction, async (tender, detail, detailPage) => {
+    if (isCancellationRequested(deps.signal)) return;
+    recordDecision(tender, detail);
+    decided.add(tender.id);
+    onUpdate(snapshot());
+    const wanted = deps.wantsDocuments?.(tender.id) ?? classifications.getFinalForTender(tender.id) === 'KEEP';
+    if (deps.saveDocuments && wanted) {
+      onUpdate({ ...snapshot(), statusMessage: `Downloading the documents and zip file for ${tender.title}.` });
+      // A failed file is recorded by saveDocuments; the decision stands.
+      await deps.saveDocuments(tender, detailPage).catch(() => {});
+    }
+  });
   if (isCancellationRequested(deps.signal)) return cancelled();
   for (const tender of currentJobTenders) {
     if (isCancellationRequested(deps.signal)) return cancelled();
-    try {
-      const detail = reviewBatch.reviewed.get(tender.id);
-      if (!detail) throw reviewBatch.errors.get(tender.id) ?? new Error('Tender detail review did not return a result.');
-      const publishedDate = detail.publishedDateRaw ? parseTenderPortalDate(detail.publishedDateRaw) : null;
-      const actualCategories = detail.productCategories.length > 0
-        ? detail.productCategories
-        : [tender.product_category].filter(Boolean);
-      const detailProductCategory = actualCategories[0] ?? null;
-      tenders.updateDetail(tender.id, {
-        organisationChain: detail.organisationChain,
-        department: detail.department ?? detail.organisationChain?.split('||').map((part) => part.trim()).find(Boolean) ?? null,
-        stateName: detail.stateName ?? portalStateName ?? null,
-        publishedDate,
-        productCategory: detailProductCategory,
-        tenderCategory: detail.tenderCategory,
-        detailText: detail.bodyText,
-        documentLinks: detail.documentLinks,
-      });
-
-      const g1 = publishedDate
-        ? evaluateGate1(publishedDate, evaluatedAgainst, 7)
-        : {
-            result: 'PASS' as const,
-            reason_code: 'SEARCH_DATE_FILTER_MATCH',
-            published_at: null,
-            evaluated_against: evaluatedAgainst,
-            age_days: 0,
-            max_age_days: 7,
-            search_date: config.searchDate,
-          };
+    if (decided.has(tender.id)) continue;
+    const error = reviewBatch.errors.get(tender.id) ?? new Error('Tender detail review did not return a result.');
+    const evidence = { error: error.message };
+    for (const gate of ['G1', 'G2', 'G3', 'G4'] as const) {
       classifications.saveGate({
         tenderId: tender.id,
-        gate: 'G1',
-        result: g1.result,
-        reasonCode: g1.reason_code,
-        evidence: g1,
+        gate,
+        result: 'UNCERTAIN',
+        reasonCode: 'DETAIL_REVIEW_FAILED',
+        evidence,
         classifierVersion: CLASSIFIER_VERSION,
       });
-
-      const matchedCategories = actualCategories.filter((actual) =>
-        config.productCategories.some((configured) => sameCategory(actual, configured))
-      );
-      classifications.saveGate({
-        tenderId: tender.id,
-        gate: 'G2',
-        result: matchedCategories.length > 0 ? 'PASS' : 'REJECT',
-        reasonCode: matchedCategories.length > 0
-          ? detail.productCategories.length > 0 ? 'PRODUCT_CATEGORY_MATCH' : 'SEARCH_RESULT_CATEGORY_MATCH'
-          : 'PRODUCT_CATEGORY_MISMATCH',
-        evidence: { actual: actualCategories, configured: config.productCategories, matched: matchedCategories },
-        classifierVersion: CLASSIFIER_VERSION,
-      });
-
-      const g3 = evaluateIntentKeywords(`${tender.title} ${detail.bodyText}`, config.keywords);
-      classifications.saveGate({
-        tenderId: tender.id,
-        gate: 'G3',
-        result: g3.result,
-        reasonCode: g3.reasonCode,
-        evidence: { matchedKeywords: g3.matchedTerms, configuredKeywords: config.keywords },
-        classifierVersion: CLASSIFIER_VERSION,
-      });
-
-      const primaryScopeText = [tender.title, detail.tenderCategory, ...detail.productCategories].filter(Boolean).join(' ');
-      const g4 = evaluateExcludedScope(primaryScopeText, config.excludedKeywords);
-      classifications.saveGate({
-        tenderId: tender.id,
-        gate: 'G4',
-        result: g4.result,
-        reasonCode: g4.reasonCode,
-        evidence: { matchedExcludedKeywords: g4.matchedTerms, evaluatedText: primaryScopeText },
-        classifierVersion: CLASSIFIER_VERSION,
-      });
-    } catch (error) {
-      const evidence = { error: error instanceof Error ? error.message : String(error) };
-      for (const gate of ['G1', 'G2', 'G3', 'G4'] as const) {
-        classifications.saveGate({
-          tenderId: tender.id,
-          gate,
-          result: 'UNCERTAIN',
-          reasonCode: 'DETAIL_REVIEW_FAILED',
-          evidence,
-          classifierVersion: CLASSIFIER_VERSION,
-        });
-      }
     }
     onUpdate(snapshot());
   }

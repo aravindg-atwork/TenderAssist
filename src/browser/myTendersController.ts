@@ -84,13 +84,16 @@ async function extractTenderDetails(detailPage: Page): Promise<TenderDetailSnaps
       /(?:e-?published|published)\s+date\s*:?\s*(\d{1,2}-[a-z]{3}-\d{4}\s+\d{1,2}:\d{2}\s*(?:am|pm))/i
     )?.[1] ?? null;
 
+    // Only the tender's own files: names with a file extension in the NIT
+    // and Work Item tables (Tendernotice_1.pdf, BOQ_845450.xls) and the
+    // "Download as zip file" link. Menu items such as "Downloads" are not.
     const documentLinks = Array.from(document.querySelectorAll('a[href]'))
       .map((anchor) => {
         const link = anchor as HTMLAnchorElement;
         const text = compactText(link.innerText || link.title || link.getAttribute('aria-label'));
         const href = link.href;
-        const looksLikeDocument = /download|document|attachment|tender notice|boq|schedule|corrigendum|file/i.test(`${text} ${href}`);
-        if (!looksLikeDocument || !href) return null;
+        const looksLikeDocument = /\.(?:pdf|xlsx?|docx?|zip|rar|7z|dwg|jpe?g|png|txt|csv)$/i.test(text) || /download\s+as\s+zip/i.test(text);
+        if (!looksLikeDocument || !href || /^javascript:\s*void/i.test(href)) return null;
         const urlName = (() => {
           try { return decodeURIComponent(new URL(href).pathname.split('/').pop() || 'tender-document'); }
           catch { return 'tender-document'; }
@@ -114,11 +117,15 @@ async function extractTenderDetails(detailPage: Page): Promise<TenderDetailSnaps
   });
 }
 
+/** Runs while a tender's details page is still open, e.g. to decide and download its documents. */
+export type WhileDetailOpen = (tender: TenderRow, details: TenderDetailSnapshot, detailPage: Page) => Promise<void>;
+
 async function reviewTenderAtRow(
   page: Page,
   tender: TenderRow,
   row: Awaited<ReturnType<Page['locator']>>,
-  paceAction: PaceAction = noPacing
+  paceAction: PaceAction = noPacing,
+  whileOpen?: WhileDetailOpen
 ): Promise<TenderDetailSnapshot> {
   let detailLink = row.locator('a:has(img[title*="View Tender Information" i]), a[title*="View Tender Information" i]').first();
   if ((await detailLink.count()) === 0) {
@@ -146,21 +153,35 @@ async function reviewTenderAtRow(
     throw new Error(`The details of tender ${tender.tender_portal_id ?? tender.tender_ref} did not open.`);
   }
   const detailPage = popup ?? page;
-  await detailPage.waitForLoadState('load').catch(() => {});
-  const details = await extractTenderDetails(detailPage);
+  let details: TenderDetailSnapshot;
+  try {
+    // A pop-up starts on a blank page before it reaches the tender.
+    if (popup) await popup.waitForURL((url) => url.href !== 'about:blank', { timeout: 15_000 }).catch(() => {});
+    await detailPage.waitForLoadState('load').catch(() => {});
+    details = await extractTenderDetails(detailPage).catch(async (error: unknown) => {
+      // The page moved on mid-read; read it again once it has loaded.
+      if (!/context was destroyed|navigat/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      await detailPage.waitForLoadState('load').catch(() => {});
+      return extractTenderDetails(detailPage);
+    });
+    details = {
+      ...details,
+      tenderPortalId: compact(details.tenderPortalId ?? '') || tender.tender_portal_id,
+      tenderReferenceNumber: compact(details.tenderReferenceNumber ?? '') || tender.tender_ref,
+    };
+    await whileOpen?.(tender, details, detailPage);
+  } finally {
+    // Always close the pop-up: the portal re-uses one named window, so a
+    // pop-up left open makes the next tender's details never appear.
+    if (popup) await popup.close().catch(() => {});
+  }
 
-  if (popup) {
-    await popup.close().catch(() => {});
-  } else if (page.url() !== beforeUrl) {
+  if (!popup && page.url() !== beforeUrl) {
     await paceAction();
     await page.goBack({ waitUntil: 'load' }).catch(() => {});
   }
 
-  return {
-    ...details,
-    tenderPortalId: compact(details.tenderPortalId ?? '') || tender.tender_portal_id,
-    tenderReferenceNumber: compact(details.tenderReferenceNumber ?? '') || tender.tender_ref,
-  };
+  return details;
 }
 
 async function goToNextPage(page: Page, paceAction: PaceAction): Promise<boolean> {
@@ -202,7 +223,8 @@ export async function reviewTendersFromMyTenders(
   page: Page,
   tenders: TenderRow[],
   maxPages = 100,
-  paceAction: PaceAction = noPacing
+  paceAction: PaceAction = noPacing,
+  whileOpen?: WhileDetailOpen
 ): Promise<TenderReviewBatch> {
   const pending = new Map(tenders.map((tender) => [tender.id, tender]));
   const reviewed = new Map<string, TenderDetailSnapshot>();
@@ -221,7 +243,7 @@ export async function reviewTendersFromMyTenders(
       const row = await findTenderRow(page, tender);
       if (!row) continue;
       try {
-        reviewed.set(tenderId, await reviewTenderAtRow(page, tender, row, paceAction));
+        reviewed.set(tenderId, await reviewTenderAtRow(page, tender, row, paceAction, whileOpen));
       } catch (error) {
         errors.set(tenderId, error instanceof Error ? error : new Error(String(error)));
       }
@@ -259,4 +281,68 @@ export async function reviewTenderFromSearchResults(page: Page, tender: TenderRo
   const row = await findTenderRow(page, tender);
   if (!row) throw new Error(`Tender ${tender.tender_portal_id ?? tender.tender_ref} is not visible in search results.`);
   return reviewTenderAtRow(page, tender, row, paceAction);
+}
+
+export interface DetailDocumentResult {
+  url: string;
+  fileName: string;
+  /** Where the file was saved, when it downloaded. */
+  filePath?: string;
+  error?: string;
+}
+
+/** Starts a file download with `click` and resolves with where it was saved. */
+export type CaptureDownload = (click: () => Promise<void>) => Promise<{ filePath: string; fileName: string }>;
+
+/**
+ * Clicks each document on an open tender details page, the way an operator
+ * would: every file in the NIT and Work Item tables, then "Download as zip
+ * file". The portal's links only work from the live page, so files are not
+ * fetched separately. One file at a time; a failure is recorded and the
+ * rest still download.
+ */
+export async function downloadDetailDocuments(
+  detailPage: Page,
+  capture: CaptureDownload,
+  paceAction: PaceAction = noPacing
+): Promise<DetailDocumentResult[]> {
+  // Marks each document link so it can be clicked again; repeated after
+  // returning to the page, since going back reloads it without the marks.
+  const markLinks = () => detailPage.evaluate(() => {
+    const compactText = (value: string | null | undefined) => (value ?? '').trim().replace(/\s+/g, ' ');
+    return Array.from(document.querySelectorAll('a[href]')).flatMap((anchor, index) => {
+      const link = anchor as HTMLAnchorElement;
+      const text = compactText(link.innerText || link.title);
+      const isFile = /\.(?:pdf|xlsx?|docx?|zip|rar|7z|dwg|jpe?g|png|txt|csv)$/i.test(text);
+      const isZip = /download\s+as\s+zip/i.test(text);
+      if ((!isFile && !isZip) || /^javascript:\s*void/i.test(link.href)) return [];
+      link.setAttribute('data-tenderassist-document', String(index));
+      return [{ marker: String(index), url: link.href, fileName: text, isZip }];
+    });
+  });
+  const links = await markLinks();
+  // Individual files first; the zip, usually the largest, last.
+  links.sort((a, b) => Number(a.isZip) - Number(b.isZip));
+
+  const results: DetailDocumentResult[] = [];
+  const seen = new Set<string>();
+  for (const link of links) {
+    if (seen.has(link.url)) continue;
+    seen.add(link.url);
+    const detailUrl = detailPage.url();
+    try {
+      await paceAction();
+      const saved = await capture(() => detailPage.locator(`a[data-tenderassist-document="${link.marker}"]`).first().click());
+      results.push({ url: link.url, fileName: saved.fileName, filePath: saved.filePath });
+    } catch (error) {
+      results.push({ url: link.url, fileName: link.fileName, error: error instanceof Error ? error.message : String(error) });
+    }
+    // A link that opened a page (for example a CAPTCHA) instead of a file:
+    // return to the tender so the next file can be clicked.
+    if (detailPage.url() !== detailUrl) {
+      await detailPage.goBack({ waitUntil: 'load' }).catch(() => {});
+      await markLinks().catch(() => []);
+    }
+  }
+  return results;
 }

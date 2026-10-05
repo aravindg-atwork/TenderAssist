@@ -1,6 +1,6 @@
 import { app, BrowserWindow, WebContentsView, session, type Rectangle } from 'electron';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   finalizeDscDownload,
@@ -30,13 +30,38 @@ const HEALTH_CHECK_TIMEOUT_MS = 10_000;
 const HEALTH_CHECK_MISSES = 4;
 // Automatic reloads after a page fails to load, before leaving it to the operator.
 const MAX_LOAD_RETRIES = 3;
-// A hidden tender-details window the automation forgot is closed after this long.
-const AUTOMATION_POPUP_LIFETIME_MS = 2 * 60_000;
+// A hidden tender-details window still open after this long is closed, so the
+// portal's re-used window name cannot get stuck on it.
+const AUTOMATION_POPUP_LIFETIME_MS = 30_000;
+// A document click must start a download this soon, or the portal showed a
+// page (such as a CAPTCHA) instead of the file...
+const DOCUMENT_START_TIMEOUT_MS = 20_000;
+// ...and the file must finish within this long (zips can be large).
+const DOCUMENT_FINISH_TIMEOUT_MS = 10 * 60_000;
+
+interface PendingDocument {
+  directory: string;
+  started: () => void;
+  finished: (saved: { filePath: string; fileName: string }) => void;
+  failed: (message: string) => void;
+}
+
+/** A safe, unused file name in `directory` for the portal's suggested name. */
+export function documentFileName(directory: string, suggested: string): string {
+  const clean = suggested.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 150) || 'document';
+  const extension = extname(clean);
+  const stem = clean.slice(0, clean.length - extension.length);
+  let candidate = clean;
+  for (let copy = 2; existsSync(join(directory, candidate)); copy += 1) candidate = `${stem} (${copy})${extension}`;
+  return candidate;
+}
 
 export class EmbeddedPortalHost {
   private view: WebContentsView | undefined;
   private crashed = false;
   private automationPopups = false;
+  private readonly automationContents = new Set<Electron.WebContents>();
+  private pendingDocument: PendingDocument | undefined;
   private readonly crashListeners = new Set<(reason: string) => void>();
   private visible = false;
   private bounds: Rectangle = { x: 0, y: 0, width: 1, height: 1 };
@@ -115,6 +140,10 @@ export class EmbeddedPortalHost {
     });
 
     view.webContents.on('did-create-window', (popup) => {
+      // Files clicked in the hidden details window download like the portal's own.
+      const contents = popup.webContents;
+      this.automationContents.add(contents);
+      contents.once('destroyed', () => this.automationContents.delete(contents));
       popup.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       popup.webContents.on('will-navigate', (event, targetUrl) => {
         if (!isTrustedPortalUrl(targetUrl, this.portal)) event.preventDefault();
@@ -223,6 +252,40 @@ export class EmbeddedPortalHost {
     this.automationPopups = enabled;
   }
 
+  /**
+   * Runs `click` and saves the file the portal sends in response into
+   * `directory`. Rejects if no file starts within 20 seconds (the portal
+   * showed a page instead) or it does not finish in 10 minutes.
+   */
+  captureDocument(directory: string, click: () => Promise<void>): Promise<{ filePath: string; fileName: string }> {
+    if (this.pendingDocument) return Promise.reject(new Error('Another document is still downloading.'));
+    mkdirSync(directory, { recursive: true });
+    return new Promise((resolve, reject) => {
+      let timer = setTimeout(() => fail('The portal did not send the file. It may have shown a page or a CAPTCHA instead.'), DOCUMENT_START_TIMEOUT_MS);
+      const settle = () => {
+        clearTimeout(timer);
+        this.pendingDocument = undefined;
+      };
+      const fail = (message: string) => {
+        settle();
+        reject(new Error(message));
+      };
+      this.pendingDocument = {
+        directory,
+        started: () => {
+          clearTimeout(timer);
+          timer = setTimeout(() => fail('The file took too long to download.'), DOCUMENT_FINISH_TIMEOUT_MS);
+        },
+        finished: (saved) => {
+          settle();
+          resolve(saved);
+        },
+        failed: fail,
+      };
+      click().catch((error: unknown) => fail(`Could not click the document link: ${error instanceof Error ? error.message : String(error)}`));
+    });
+  }
+
   /** Called when the portal page crashes or hangs, with the reason. */
   onCrashed(listener: (reason: string) => void): () => void {
     this.crashListeners.add(listener);
@@ -254,19 +317,36 @@ export class EmbeddedPortalHost {
     return () => this.dscListeners.delete(listener);
   }
 
+  /** A tender document the automation clicked: save it where it was asked for. */
+  private saveRequestedDocument(item: Electron.DownloadItem): void {
+    const pending = this.pendingDocument;
+    if (!pending || !isTrustedPortalUrl(item.getURL(), this.portal)) return;
+    const fileName = documentFileName(pending.directory, item.getFilename());
+    const filePath = join(pending.directory, fileName);
+    item.setSavePath(filePath);
+    pending.started();
+    item.once('done', (_doneEvent, state) => {
+      if (state === 'completed') pending.finished({ filePath, fileName });
+      else pending.failed(`The download was ${state === 'cancelled' ? 'cancelled' : 'interrupted'}.`);
+    });
+  }
+
   private configureSession(): void {
     this.portalSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     this.portalSession.setPermissionCheckHandler(() => false);
 
     this.portalSession.on('will-download', (_event, item, webContents) => {
-      if (webContents !== this.view?.webContents) return;
+      if (webContents !== this.view?.webContents && !this.automationContents.has(webContents)) return;
       const candidate: DscDownloadCandidate = {
         sourceUrl: item.getURL(),
         suggestedFilename: item.getFilename(),
       };
       const hosts = portalAllowedHosts(this.portal);
       const pathPrefix = `${new URL(this.portal.url).pathname.replace(/\/app\/?$/i, '')}/`;
-      if (!isTrustedDscDownload(candidate, hosts, pathPrefix)) return;
+      if (!isTrustedDscDownload(candidate, hosts, pathPrefix)) {
+        this.saveRequestedDocument(item);
+        return;
+      }
 
       const temporaryPath = join(this.dscDownloadDirectory, `${randomUUID()}.download`);
       item.setSavePath(temporaryPath);

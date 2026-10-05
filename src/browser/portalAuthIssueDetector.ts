@@ -39,9 +39,20 @@ const ISSUE_PATTERNS: Array<{ pattern: RegExp; issue: PortalAuthIssue }> = [
   },
 ];
 
+/**
+ * The DSC page always shows "insert your DSC card / e-Token" instructions;
+ * when it also lists a certificate (serial number, certificate type), the
+ * token is connected.
+ */
+function listsConnectedCertificate(pageText: string): boolean {
+  return /serial\s*no/i.test(pageText) && /certificate\s*type/i.test(pageText);
+}
+
 export function detectPortalAuthIssue(pageText: string): PortalAuthIssue | null {
   for (const candidate of ISSUE_PATTERNS) {
-    if (candidate.pattern.test(pageText)) return candidate.issue;
+    if (!candidate.pattern.test(pageText)) continue;
+    if (candidate.issue.code === 'DSC_TOKEN_REQUIRED' && listsConnectedCertificate(pageText)) continue;
+    return candidate.issue;
   }
   return null;
 }

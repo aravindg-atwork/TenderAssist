@@ -8,11 +8,10 @@ import type { TenderRepository } from '../persistence/repositories/tenderReposit
 import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import { CONFIGURED_SEARCHES } from '../search/searchConfig.js';
 import { searchCategory, favoriteVisibleRows } from '../browser/searchFormController.js';
-import { reviewTenderFromSearchResults } from '../browser/myTendersController.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
 import type { ConfiguredSearch } from '../search/searchConfig.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
-import { triageTenderDetail, triageTenderTitle, type PreFavoriteIntent } from '../classification/preFavoriteTriage.js';
+import { triageTenderTitle, type PreFavoriteIntent } from '../classification/preFavoriteTriage.js';
 import type { PaceAction } from './actionPacer.js';
 import { DEFAULT_RETRY_DELAYS_MS, retryTransient } from './transientRetry.js';
 
@@ -172,48 +171,20 @@ export async function runSearchPhase(
           continue;
         }
 
-        try {
-          const detail = await retryTransient(() => reviewTenderFromSearchResults(page, tender, deps.paceAction), {
-            delaysMs: retryDelaysMs, canRetry: sessionUsable, signal: deps.signal,
-          });
-          const detailProductCategory = detail.productCategories[0] ?? null;
-          tenders.updateDetail(tender.id, {
-            organisationChain: detail.organisationChain,
-            department: detail.department,
-            stateName: detail.stateName,
-            publishedDate: null,
-            productCategory: detailProductCategory,
-            tenderCategory: detail.tenderCategory,
-            detailText: detail.bodyText,
-            documentLinks: detail.documentLinks,
-          });
-          const primaryScope = [row.title, detail.tenderCategory, ...detail.productCategories].filter(Boolean).join(' ');
-          const detailDecision = triageTenderDetail(row.title, detail.bodyText, primaryScope, intent);
-          classifications.saveGate({
-            tenderId: tender.id, gate: 'G3', result: detailDecision.intent.result,
-            reasonCode: detailDecision.reasonCode,
-            evidence: { stage: 'DETAIL', confidence: detailDecision.confidence, matchedKeywords: detailDecision.intent.matchedTerms },
-            classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
-          });
-          classifications.saveGate({
-            tenderId: tender.id, gate: 'G4', result: detailDecision.exclusion.result,
-            reasonCode: detailDecision.exclusion.reasonCode,
-            evidence: { stage: 'DETAIL', confidence: detailDecision.confidence, matchedExcludedKeywords: detailDecision.exclusion.matchedTerms },
-            classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
-          });
-          if (detailDecision.action === 'FAVORITE') favoriteReferences.push(row.referenceNumber);
-          else if (detailDecision.action === 'REJECT') rejectedCount += 1;
-          else heldCount += 1;
-        } catch (error) {
-          const evidence = { stage: 'DETAIL', confidence: 'LOW', error: error instanceof Error ? error.message : String(error) };
-          for (const gate of ['G3', 'G4'] as const) {
-            classifications.saveGate({
-              tenderId: tender.id, gate, result: 'UNCERTAIN', reasonCode: 'PREFAVORITE_DETAIL_REVIEW_FAILED',
-              evidence, classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
-            });
-          }
-          heldCount += 1;
-        }
+        // Not decided by the title: favourite it, and decide in My Tenders
+        // from the full tender page. Opening details from the search results
+        // instead loses the results page, and the portal signs out.
+        classifications.saveGate({
+          tenderId: tender.id, gate: 'G3', result: 'UNCERTAIN', reasonCode: 'TITLE_NEEDS_DETAIL',
+          evidence: { stage: 'TITLE', confidence: titleDecision.confidence, matchedKeywords: [] },
+          classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
+        });
+        classifications.saveGate({
+          tenderId: tender.id, gate: 'G4', result: 'PASS', reasonCode: titleDecision.exclusion.reasonCode,
+          evidence: { stage: 'TITLE', confidence: titleDecision.confidence, matchedExcludedKeywords: [] },
+          classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
+        });
+        favoriteReferences.push(row.referenceNumber);
       }
 
       if (favoriteReferences.length > 0) {

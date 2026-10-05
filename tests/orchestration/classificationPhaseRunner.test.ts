@@ -159,4 +159,48 @@ describe.skipIf(!CHROME_PATH)('runClassificationPhase', { timeout: 30_000 }, () 
     expect(reviewed.published_date).toBe('2026-09-21T10:00:00+05:30');
     expect(reviewed.detail_reviewed_at).not.toBeNull();
   });
+
+  it('saves a kept tender documents while its details pop-up is still open', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    const calls: Array<{ tenderId: string; url: string; open: boolean; text: string }> = [];
+    const config = {
+      searchDate: '2026-09-21',
+      productCategories: ['Information Technology'],
+      keywords: ['software development'],
+      excludedKeywords: [],
+    };
+
+    await runClassificationPhase(
+      {
+        jobs, sessions, jobMachine, tenders, classifications,
+        saveDocuments: async (tender, detailPage) => {
+          calls.push({ tenderId: tender.id, url: detailPage.url(), open: !detailPage.isClosed(), text: await detailPage.innerText('h1') });
+        },
+      },
+      page, jobId, authSessionId, config, () => {}
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ tenderId, open: true, text: 'Development of Citizen Services Portal' });
+    expect(calls[0].url).toContain('/detail');
+  });
+
+  it('does not save documents for a tender that does not match the intent', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    let saved = 0;
+
+    await runClassificationPhase(
+      { jobs, sessions, jobMachine, tenders, classifications, saveDocuments: async () => { saved += 1; } },
+      page, jobId, authSessionId,
+      { searchDate: '2026-09-21', productCategories: ['Information Technology'], keywords: ['documentary film'], excludedKeywords: [] },
+      () => {}
+    );
+
+    expect(classifications.getFinalForTender(tenderId)).toBe('REJECT');
+    expect(saved).toBe(0);
+  });
 });

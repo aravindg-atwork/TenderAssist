@@ -8,14 +8,14 @@ const tender = (
 ): SelectableTender => ({ id, effectiveClassification, opportunityLifecycle });
 
 describe('automatic download selection', () => {
-  it('collects shortlisted and needs-review tenders without asking', () => {
+  it('collects only kept tenders, not uncertain ones', () => {
     const selected = automaticDownloadSelection([
       tender('keep', 'KEEP'),
       tender('review', 'UNCERTAIN', 'SCREENED'),
       tender('rejected', 'REJECT'),
       tender('not-run', 'NOT_RUN'),
     ]);
-    expect(selected).toEqual(['keep', 'review']);
+    expect(selected).toEqual(['keep']);
   });
 
   it('respects earlier Inbox decisions', () => {
