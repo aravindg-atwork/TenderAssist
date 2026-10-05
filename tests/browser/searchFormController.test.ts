@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import http, { type Server } from 'node:http';
 import { chromium } from 'playwright-core';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
-import { searchCategory, favoriteAllVisibleRows, favoriteVisibleRows } from '../../src/browser/searchFormController.js';
+import { ensurePortalMenu, searchCategory, favoriteAllVisibleRows, favoriteVisibleRows } from '../../src/browser/searchFormController.js';
 import { CHROME_PATH } from '../support/chrome.js';
 import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
@@ -86,6 +86,7 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
   let currentRows: Array<{ id: string; title: string; ref: string; category: string; value: string }> = [];
   let lastFavoriteBody = '';
   let blankAfterFavorite = false;
+  let flakyHomeFailures = 0;
 
   beforeEach(async () => {
     currentRows = [];
@@ -97,6 +98,15 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
       } else if (req.url?.startsWith('/favorited')) {
         req.on('data', (chunk) => { lastFavoriteBody += chunk.toString(); });
         req.on('end', () => res.end(blankAfterFavorite ? '' : '<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>'));
+      } else if (req.url?.startsWith('/flaky-home')) {
+        // The portal sometimes answers with a server error and no page.
+        if (flakyHomeFailures > 0) {
+          flakyHomeFailures -= 1;
+          res.writeHead(500);
+          res.end('');
+        } else {
+          res.end(SEARCH_FORM_HTML);
+        }
       } else if (req.url?.startsWith('/blank')) {
         res.end('');
       } else {
@@ -231,6 +241,19 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
     const favorited = await favoriteVisibleRows(page, ['REF/A'], undefined, `http://127.0.0.1:${serverPort}/`);
 
     expect(favorited).toEqual(['REF/A']);
+    expect(await page.locator('text=Search Active Tenders').first().isVisible()).toBe(true);
+    await browser.close();
+  });
+
+  it('ensurePortalMenu keeps trying the portal home while the server answers with errors', async () => {
+    flakyHomeFailures = 2;
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/blank`);
+
+    await ensurePortalMenu(page, 'Search Active Tenders', `http://127.0.0.1:${serverPort}/flaky-home`, undefined, [100, 100, 100]);
+
+    expect(flakyHomeFailures).toBe(0);
     expect(await page.locator('text=Search Active Tenders').first().isVisible()).toBe(true);
     await browser.close();
   });

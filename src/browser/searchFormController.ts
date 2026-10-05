@@ -9,6 +9,9 @@ const noPacing: PaceAction = async () => {};
 // The portal can take a while to answer a submit; wait this long before
 // deciding the page was left blank.
 const SUBMIT_LOAD_TIMEOUT_MS = 45_000;
+// Pauses before opening the portal home again when it answered with an
+// error or an empty page.
+const PORTAL_ERROR_PAUSES_MS: readonly number[] = [5_000, 10_000, 15_000];
 
 /**
  * Makes sure a portal menu item is on screen before using it. A submit the
@@ -18,13 +21,25 @@ const SUBMIT_LOAD_TIMEOUT_MS = 45_000;
  * signed in. If the portal signed out instead, its sign-in page appears and
  * the run signs in again.
  */
-export async function ensurePortalMenu(page: Page, menuText: string, portalHomeUrl?: string, paceAction: PaceAction = noPacing): Promise<void> {
-  const visible = await page.locator(`text=${menuText}`).first()
+export async function ensurePortalMenu(
+  page: Page,
+  menuText: string,
+  portalHomeUrl?: string,
+  paceAction: PaceAction = noPacing,
+  retryPausesMs: readonly number[] = PORTAL_ERROR_PAUSES_MS
+): Promise<void> {
+  const menuVisible = () => page.locator(`text=${menuText}`).first()
     .waitFor({ state: 'visible', timeout: 5_000 })
     .then(() => true, () => false);
-  if (visible || !portalHomeUrl) return;
-  await paceAction();
-  await page.goto(portalHomeUrl, { waitUntil: 'load', timeout: SUBMIT_LOAD_TIMEOUT_MS }).catch(() => {});
+  if (!portalHomeUrl || (await menuVisible())) return;
+  // The portal's server sometimes answers with an error or an empty page;
+  // it usually recovers within seconds, so try again after a pause.
+  for (const pauseMs of [0, ...retryPausesMs]) {
+    if (pauseMs > 0) await new Promise((resolve) => setTimeout(resolve, pauseMs));
+    await paceAction();
+    await page.goto(portalHomeUrl, { waitUntil: 'load', timeout: SUBMIT_LOAD_TIMEOUT_MS }).catch(() => null);
+    if (await menuVisible()) return;
+  }
 }
 
 /**
