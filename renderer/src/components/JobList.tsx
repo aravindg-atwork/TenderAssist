@@ -47,6 +47,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
   const [error, setError] = useState<string | null>(null);
   const [searchDate, setSearchDate] = useState(todayIso());
   const [untilDate, setUntilDate] = useState(todayIso());
+  const [runAgain, setRunAgain] = useState(false);
   const [moreFrom, setMoreFrom] = useState(todayIso());
   const [moreTo, setMoreTo] = useState(todayIso());
   const [moreBusy, setMoreBusy] = useState(false);
@@ -193,7 +194,8 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
       if (blocker) throw new Error(blocker.message);
       const { jobId, skipped } = await window.tenderAssist.startJob(
         { searchDate, portalId: selectedPortalId, ...settings.defaults },
-        untilDate > searchDate ? untilDate : searchDate
+        untilDate > searchDate ? untilDate : searchDate,
+        { runAgain }
       );
       if (skipped.length > 0) setStartNotice(`Already run, skipped: ${skipped.join(', ')}`);
       onActiveJobChange(jobId);
@@ -421,6 +423,10 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
               onChange={(event) => setUntilDate(event.target.value)}
               disabled={starting || activeJobId !== null}
             />
+          </label>
+          <label className="run-again" title="Search dates that already have a completed run again, for example after TenderAssist's screening improved.">
+            <input type="checkbox" checked={runAgain} onChange={(event) => setRunAgain(event.target.checked)} disabled={starting || activeJobId !== null} />
+            Run again even if already run
           </label>
           <button
             className="btn btn-primary"

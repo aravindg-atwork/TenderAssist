@@ -2716,6 +2716,16 @@ input:focus-visible {
   flex: 1 1 auto;
 }
 
+.run-again {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  min-height: 2.5rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
 .run-finished__actions {
   display: flex;
   flex-shrink: 0;

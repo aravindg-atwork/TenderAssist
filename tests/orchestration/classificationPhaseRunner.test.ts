@@ -38,7 +38,7 @@ const MY_TENDERS_PAGE_2_HTML = `<html><body>
   </table>
 </body></html>`;
 
-const DETAIL_HTML = `<html><body>
+const DETAIL_HTML = `<html><head><meta charset="utf-8"></head><body>
   <h1>Development of Citizen Services Portal</h1>
   <table>
     <tr><td>Tender ID</td><td>2026_TEST_1</td></tr>
@@ -47,6 +47,7 @@ const DETAIL_HTML = `<html><body>
     <tr><td>Product Category</td><td>Information Technology</td></tr>
     <tr><td>Published Date</td><td>21-Sep-2026 10:00 AM</td></tr>
     <tr><td>Organisation Chain</td><td>Department of Information Technology</td></tr>
+    <tr><td>Tender Fee in ₹</td><td>1,180</td><td>EMD Amount in ₹</td><td>25,000</td></tr>
   </table>
   <p>The primary deliverable is software development of a web application for citizen services.</p>
 </body></html>`;
@@ -158,6 +159,8 @@ describe.skipIf(!CHROME_PATH)('runClassificationPhase', { timeout: 30_000 }, () 
     expect(reviewed.detail_product_category).toBe('Information Technology');
     expect(reviewed.published_date).toBe('2026-09-21T10:00:00+05:30');
     expect(reviewed.detail_reviewed_at).not.toBeNull();
+    // A label | value | label | value row is two fields.
+    expect(reviewed.detail_text).toContain('Tender Fee in ₹: 1,180\nEMD Amount in ₹: 25,000');
   });
 
   it('saves a kept tender documents while its details pop-up is still open', async () => {

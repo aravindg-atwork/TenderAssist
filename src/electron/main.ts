@@ -1237,7 +1237,7 @@ function finishRun(ctx: RunContext, run: Promise<unknown>, onFailure: (err: unkn
     });
 }
 
-ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, untilDate?: unknown) => {
+ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) => {
   const { abortController, paceAction } = claimRun();
   let ctx: RunContext;
   let plan: DateBatchPlan;
@@ -1246,7 +1246,12 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, un
     const config = normalizeRunConfiguration(requestedConfig);
     const portal = getPortalDefinition(config.portalId);
     config.portalId = portal.id;
-    plan = planDatesToRun(portal.id, config.searchDate, typeof untilDate === 'string' && untilDate ? untilDate : config.searchDate);
+    plan = planDatesToRun(
+      portal.id,
+      config.searchDate,
+      typeof untilDate === 'string' && untilDate ? untilDate : config.searchDate,
+      options?.runAgain === true
+    );
     config.searchDate = plan.toRun[0];
     const outputSettings = publishingSettings.get(portal.id);
     ctx = { portal, config, outputSettings, abortController, paceAction };
@@ -1295,12 +1300,13 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, un
 });
 
 /** The dates in a range still to run for a portal; throws when there are none. */
-function planDatesToRun(portalId: string, from: string, to: string): DateBatchPlan {
-  const plan = planDateBatch(from, to, runConfigurations.listCompletedRunDates(portalId));
+function planDatesToRun(portalId: string, from: string, to: string, runAgain = false): DateBatchPlan {
+  // Run again: search dates already run too, e.g. after the screening improved.
+  const plan = planDateBatch(from, to, runAgain ? [] : runConfigurations.listCompletedRunDates(portalId));
   if (plan.toRun.length === 0) {
     throw new Error(from === to
       ? `${from} already has a completed run for this portal. Its tenders are in the Inbox and Tenders pages.`
-      : `Every date from ${from} to ${to} already has a completed run for this portal.`);
+      : `Every date from ${from} to ${to} already has a completed run for this portal. Tick "Run again" to search them again.`);
   }
   return plan;
 }

@@ -16,7 +16,18 @@ export interface TenderDetailSnapshot {
   department: string | null;
   stateName: string | null;
   bodyText: string;
+  /** Every label and value on the page, in page order, as the portal shows them. */
+  fields: Array<{ label: string; value: string }>;
   documentLinks: Array<{ url: string; fileName: string }>;
+}
+
+/**
+ * The tender text kept for screening and the eligibility sheet: one
+ * "Label: value" line per portal field, then the page text.
+ */
+export function detailTextFor(details: Pick<TenderDetailSnapshot, 'fields' | 'bodyText'>): string {
+  const lines = details.fields.map((field) => `${field.label}: ${field.value}`);
+  return lines.length > 0 ? `${lines.join('\n')}\n\n${details.bodyText}` : details.bodyText;
 }
 
 function compact(value: string): string {
@@ -49,13 +60,31 @@ async function extractTenderDetails(detailPage: Page): Promise<TenderDetailSnaps
     const compactText = (value: string | null | undefined) => (value ?? '').trim().replace(/\s+/g, ' ');
     const normalizedLabel = (value: string) => compactText(value).replace(/\s*:\s*$/, '').toLocaleLowerCase();
     const entries: Array<{ label: string; value: string }> = [];
+    const fields: Array<{ label: string; value: string }> = [];
+    const seenFields = new Set<string>();
+    const addField = (rawLabel: string, rawValue: string) => {
+      const label = compactText(rawLabel).replace(/\s*:\s*$/, '');
+      const value = compactText(rawValue);
+      if (!label || !value || label.length > 80) return;
+      entries.push({ label: label.toLocaleLowerCase(), value });
+      const key = `${label.toLocaleLowerCase()}|${value}`;
+      if (!seenFields.has(key)) {
+        seenFields.add(key);
+        fields.push({ label, value });
+      }
+    };
 
+    // Only innermost rows: an outer layout row contains the whole page.
     for (const row of Array.from(document.querySelectorAll('tr'))) {
+      if (row.querySelector('tr')) continue;
       const cells = Array.from(row.children).filter((child) => child.matches('td, th')) as HTMLElement[];
       if (cells.length < 2) continue;
-      const label = normalizedLabel(cells[0].innerText);
-      const value = compactText(cells.slice(1).map((cell) => cell.innerText).join(' '));
-      if (label && value) entries.push({ label, value });
+      // The portal lays fields out as label | value | label | value.
+      if (cells.length % 2 === 0) {
+        for (let index = 0; index < cells.length; index += 2) addField(cells[index].innerText, cells[index + 1].innerText);
+      } else {
+        addField(cells[0].innerText, cells.slice(1).map((cell) => cell.innerText).join(' '));
+      }
     }
 
     const bodyRaw = document.body?.innerText ?? '';
@@ -112,6 +141,7 @@ async function extractTenderDetails(detailPage: Page): Promise<TenderDetailSnaps
       department: first('department name', 'department'),
       stateName: first('state'),
       bodyText: compactText(bodyRaw),
+      fields,
       documentLinks: Array.from(new Map(documentLinks.map((item) => [item.url, item])).values()),
     };
   });

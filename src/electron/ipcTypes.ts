@@ -146,9 +146,9 @@ export interface TenderAssistApi {
   /**
    * Start a run for one published date, or for each date from
    * `config.searchDate` to `untilDate` in one sign-in. Dates that already
-   * have a completed run are skipped.
+   * have a completed run are skipped, unless `runAgain` is set.
    */
-  startJob(config: RunConfiguration, untilDate?: string): Promise<{ jobId: string; dates: string[]; skipped: string[] }>;
+  startJob(config: RunConfiguration, untilDate?: string, options?: { runAgain?: boolean }): Promise<{ jobId: string; dates: string[]; skipped: string[] }>;
   /** While the run waits after its last date: run these published dates in the same sign-in. */
   runMoreDates(from: string, to: string): Promise<{ toRun: string[]; skipped: string[] }>;
   /** While the run waits after its last date: sign out and finish. */

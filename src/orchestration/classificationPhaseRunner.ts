@@ -5,7 +5,7 @@ import type { TenderRepository, TenderRow } from '../persistence/repositories/te
 import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
-import { navigateToMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
+import { detailTextFor, navigateToMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
 import { evaluateIntentKeywords, evaluateExcludedScope } from '../classification/intentGates.js';
@@ -115,7 +115,7 @@ export async function runClassificationPhase(
       publishedDate,
       productCategory: detailProductCategory,
       tenderCategory: detail.tenderCategory,
-      detailText: detail.bodyText,
+      detailText: detailTextFor(detail),
       documentLinks: detail.documentLinks,
     });
 
