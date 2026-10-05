@@ -150,7 +150,7 @@ export interface TenderAssistApi {
    */
   startJob(config: RunConfiguration, untilDate?: string, options?: { runAgain?: boolean }): Promise<{ jobId: string; dates: string[]; skipped: string[] }>;
   /** While the run waits after its last date: run these published dates in the same sign-in. */
-  runMoreDates(from: string, to: string): Promise<{ toRun: string[]; skipped: string[] }>;
+  runMoreDates(from: string, to: string, options?: { runAgain?: boolean }): Promise<{ toRun: string[]; skipped: string[] }>;
   /** While the run waits after its last date: sign out and finish. */
   finishRun(): Promise<void>;
   getJobDetail(jobId: string): Promise<JobDetail>;

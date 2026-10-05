@@ -32,6 +32,13 @@ const todayIso = (): string => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+/** Dates from `from` to `to`, both included. */
+function daysBetween(from: string, to: string): number {
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+}
+
 const RUN_PHASES = [
   { phase: 'AUTH', label: 'Sign in', detail: 'Credentials, CAPTCHA and DSC' },
   { phase: 'SEARCH', label: 'Search', detail: 'Find tenders for the selected date' },
@@ -51,6 +58,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
   const [moreFrom, setMoreFrom] = useState(todayIso());
   const [moreTo, setMoreTo] = useState(todayIso());
   const [moreBusy, setMoreBusy] = useState(false);
+  const [moreRunAgain, setMoreRunAgain] = useState(false);
   const [launchingDsc, setLaunchingDsc] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [recoveryJob, setRecoveryJob] = useState<RecoveryJob | null>(null);
@@ -115,7 +123,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     setMoreBusy(true);
     setError(null);
     try {
-      await window.tenderAssist.runMoreDates(moreFrom, moreTo);
+      await window.tenderAssist.runMoreDates(moreFrom, moreTo, { runAgain: moreRunAgain });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -350,8 +358,9 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
                     value={moreFrom}
                     max={todayIso()}
                     onChange={(event) => {
-                      setMoreFrom(event.target.value);
-                      setMoreTo(event.target.value);
+                      const from = event.target.value;
+                      if (moreTo === moreFrom || moreTo < from) setMoreTo(from);
+                      setMoreFrom(from);
                     }}
                     disabled={moreBusy}
                   />
@@ -361,7 +370,13 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
                   <input type="date" value={moreTo} min={moreFrom} max={todayIso()} onChange={(event) => setMoreTo(event.target.value)} disabled={moreBusy} />
                 </label>
               </div>
-              <p className="more-dates__hint">Each date is searched on its own as the published date. Dates already run are skipped.</p>
+              <label className="run-again">
+                <input type="checkbox" checked={moreRunAgain} onChange={(event) => setMoreRunAgain(event.target.checked)} disabled={moreBusy} />
+                Run again even if already run
+              </label>
+              <p className="more-dates__hint">
+                Each date is searched on its own as the published date, one after another. {moreRunAgain ? 'Dates run before are searched again.' : 'Dates already run are skipped.'}
+              </p>
               <div className="more-dates__actions">
                 <button className="btn btn-primary" type="button" onClick={handleRunMoreDates} disabled={moreBusy || !moreFrom || !moreTo}>
                   Run these dates
@@ -405,9 +420,11 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
               value={searchDate}
               max={todayIso()}
               onChange={(event) => {
-                // "To" follows "from" so one date is the default; change "to" for a range.
-                setSearchDate(event.target.value);
-                setUntilDate(event.target.value);
+                // "To" follows "from" while one date is picked; a range already
+                // set stays, unless it would end before the new start.
+                const from = event.target.value;
+                if (untilDate === searchDate || untilDate < from) setUntilDate(from);
+                setSearchDate(from);
               }}
               disabled={starting || activeJobId !== null}
             />
@@ -433,7 +450,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
             onClick={handleStart}
             disabled={starting || !settings}
           >
-            {starting ? 'Opening portal…' : untilDate > searchDate ? 'Start jobs for these dates' : 'Start job'}
+            {starting ? 'Opening portal…' : untilDate > searchDate ? `Start jobs for ${daysBetween(searchDate, untilDate)} dates` : 'Start job'}
           </button>
         </div>
       </div>

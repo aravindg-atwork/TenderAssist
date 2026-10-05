@@ -1311,13 +1311,19 @@ function planDatesToRun(portalId: string, from: string, to: string, runAgain = f
   return plan;
 }
 
-ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown): DateBatchPlan => {
+ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown, options?: { runAgain?: unknown }): DateBatchPlan => {
   if (!pendingMoreDates || !activeRunPortalId) throw new Error('The run is not waiting for more dates.');
   if (typeof from !== 'string' || typeof to !== 'string') throw new Error('Choose the published dates to run.');
-  // Dates already run in this sign-in are not run twice.
+  // Dates already run in this sign-in are never run twice; with "Run
+  // again", dates from earlier runs are searched again.
   const queued = activeBatch?.dates ?? [];
-  const plan = planDateBatch(from, to, [...runConfigurations.listCompletedRunDates(activeRunPortalId), ...queued]);
-  if (plan.toRun.length === 0) throw new Error('Every date in that range has already been run.');
+  const earlier = options?.runAgain === true ? [] : runConfigurations.listCompletedRunDates(activeRunPortalId);
+  const plan = planDateBatch(from, to, [...earlier, ...queued]);
+  if (plan.toRun.length === 0) {
+    throw new Error(options?.runAgain === true
+      ? 'Every date in that range already ran in this sign-in.'
+      : 'Every date in that range has already been run. Tick "Run again" to search them again.');
+  }
   pendingMoreDates(plan);
   return plan;
 });
