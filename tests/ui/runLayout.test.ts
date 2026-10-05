@@ -45,7 +45,7 @@ describe('run workspace layout', () => {
     expect(suggestedFocus({ phase: 'AUTH', authStep: 'DSC_READY' })).toBe('instructions');
     expect(suggestedFocus({ phase: 'SEARCH' })).toBe('balanced');
     expect(suggestedFocus({ phase: 'ACQUISITION', jobState: 'SESSION_EXPIRED' })).toBe('instructions');
-    expect(suggestedFocus({ phase: 'CLASSIFICATION', jobState: 'AUTHENTICATED', awaitingSelection: true })).toBe('instructions');
+    expect(suggestedFocus({ phase: 'CLASSIFICATION', jobState: 'SHORTLISTED' })).toBe('balanced');
     expect(suggestedFocus(null)).toBe('balanced');
   });
 });

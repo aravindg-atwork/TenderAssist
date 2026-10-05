@@ -121,6 +121,17 @@ export class RunConfigurationRepository {
     return rows.map((row) => row.search_date);
   }
 
+  /** Published dates that have a completed run for the portal. */
+  listCompletedRunDates(portalId: string): string[] {
+    const rows = this.db.prepare(
+      `SELECT DISTINCT config.search_date
+       FROM job_run_configs config
+       JOIN jobs ON jobs.id = config.job_id
+       WHERE config.portal_id = ? AND jobs.state = 'COMPLETE'`
+    ).all(portalId) as unknown as Array<{ search_date: string }>;
+    return rows.map((row) => row.search_date);
+  }
+
   deleteForJob(jobId: string): void {
     this.db.prepare('DELETE FROM job_run_configs WHERE job_id = ?').run(jobId);
   }

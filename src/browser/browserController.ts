@@ -10,7 +10,7 @@ import {
   type DscJnlpArtifact,
 } from './dscDownloadSecurity.js';
 
-export type SessionLossReason = 'TAB_CLOSED' | 'TARGET_DESTROYED' | 'SESSION_EXPIRED_PAGE';
+export type SessionLossReason = 'TAB_CLOSED' | 'TARGET_DESTROYED' | 'SESSION_EXPIRED_PAGE' | 'PAGE_CRASHED';
 
 export interface BrowserControllerOptions {
   cdpEndpoint: string;
@@ -50,6 +50,8 @@ export class BrowserController {
     this.targetId = targetInfo.targetInfo.targetId;
 
     this.page.on('close', () => this.reportLoss('TAB_CLOSED'));
+    // A crashed portal page never recovers on its own; treat it as lost so the run can sign in again.
+    this.page.on('crash', () => this.reportLoss('PAGE_CRASHED'));
     this.page.on('framenavigated', (frame) => {
       if (frame !== this.page!.mainFrame()) return;
       void this.checkSessionExpired();

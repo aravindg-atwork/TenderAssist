@@ -141,8 +141,18 @@ export interface TenderAssistApi {
   setPortalZoom(portalId: string, percent: number): Promise<number>;
   launchDscSigner(jobId: string): Promise<void>;
   cancelJob(jobId: string): Promise<void>;
-  confirmDocumentSelection(jobId: string, tenderIds: string[]): Promise<void>;
-  startJob(config: RunConfiguration): Promise<{ jobId: string }>;
+  /** Opens an allowed help page, such as the OpenWebStart download, in the default browser. */
+  openHelpLink(url: string): Promise<void>;
+  /**
+   * Start a run for one published date, or for each date from
+   * `config.searchDate` to `untilDate` in one sign-in. Dates that already
+   * have a completed run are skipped.
+   */
+  startJob(config: RunConfiguration, untilDate?: string): Promise<{ jobId: string; dates: string[]; skipped: string[] }>;
+  /** While the run waits after its last date: run these published dates in the same sign-in. */
+  runMoreDates(from: string, to: string): Promise<{ toRun: string[]; skipped: string[] }>;
+  /** While the run waits after its last date: sign out and finish. */
+  finishRun(): Promise<void>;
   getJobDetail(jobId: string): Promise<JobDetail>;
   deleteJob(jobId: string): Promise<void>;
   onJobUpdate(callback: (update: AuthJobUpdate) => void): () => void;

@@ -57,6 +57,14 @@ export class JobOutputRepository {
     return this.getPlan(jobId)!;
   }
 
+  /** The tender's S.No if it was ever given an output folder. */
+  findSerialNumber(tenderId: string): number | undefined {
+    const row = this.db.prepare('SELECT serial_number FROM job_output_tenders WHERE tender_id = ?').get(tenderId) as
+      | { serial_number: number }
+      | undefined;
+    return row?.serial_number;
+  }
+
   /**
    * Stable S.No for a tender inside its day folder. Numbers continue across
    * every job sharing the folder and never change once assigned.

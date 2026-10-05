@@ -34,6 +34,19 @@ describe('RunConfigurationRepository', () => {
     expect(repo.listRecentRunDates('tamil-nadu')).toEqual(['2026-09-22', '2026-09-21', '2026-09-20']);
   });
 
+  it('lists only dates with a completed run, per portal, so a date range can skip them', () => {
+    const jobs = new JobRepository(db);
+    const config = (searchDate: string, portalId = 'tamil-nadu') => ({ searchDate, portalId, productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
+    repo.saveForJob(jobId, config('2026-09-20'));
+    db.prepare("UPDATE jobs SET state = 'COMPLETE' WHERE id = ?").run(jobId);
+    const interrupted = jobs.create().id;
+    repo.saveForJob(interrupted, config('2026-09-21'));
+    const otherPortal = jobs.create().id;
+    repo.saveForJob(otherPortal, config('2026-09-22', 'kerala'));
+    db.prepare("UPDATE jobs SET state = 'COMPLETE' WHERE id = ?").run(otherPortal);
+    expect(repo.listCompletedRunDates('tamil-nadu')).toEqual(['2026-09-20']);
+  });
+
   it('remembers the confirmed tender selection, including an empty one', () => {
     repo.saveForJob(jobId, { searchDate: '2026-09-20', portalId: 'tamil-nadu', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
     expect(repo.getSelection(jobId)).toBeNull();

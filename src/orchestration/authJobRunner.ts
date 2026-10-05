@@ -27,6 +27,11 @@ export interface AuthJobRunnerDeps {
   paceAction?: PaceAction;
   /** Sign an existing job in again (after its portal session expired) instead of creating a new one. */
   existingJobId?: string;
+  /**
+   * The job running in this session when it is lost. Several dates can run
+   * one after another in one sign-in; defaults to the job signed in here.
+   */
+  currentJobId?: () => string | undefined;
 }
 
 export type AuthAssistStep =
@@ -53,8 +58,12 @@ export interface AuthJobUpdate {
   authErrorCode?: string;
   recoveryAction?: string;
   statusMessage?: string;
-  /** The run is paused on the shortlist, waiting for the operator's tender choice. */
-  awaitingSelection?: boolean;
+  /** The published date this job searches. */
+  searchDate?: string;
+  /** Progress through a range of published dates run in one sign-in. */
+  batch?: { dates: string[]; done: string[]; skipped: string[] };
+  /** Every date has run; the portal stays signed in while the operator picks more dates or finishes. */
+  awaitingMoreDates?: boolean;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;
@@ -193,7 +202,8 @@ export async function runAuthJob(
   const flow = new AuthFlow({
     sessions,
     machine: authMachine,
-    onAuthSessionLost: reactToAuthSessionLoss(jobMachine, job.id),
+    onAuthSessionLost: (reason, terminalState) =>
+      reactToAuthSessionLoss(jobMachine, deps.currentJobId?.() ?? job.id)(reason, terminalState),
     dscDownloadDirectory: deps.dscDownloadDirectory,
     targetUrlPrefix: deps.targetUrlPrefix,
     paceAction: deps.paceAction,

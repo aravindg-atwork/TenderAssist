@@ -141,6 +141,7 @@ export function App() {
             onOpenSettings={openSettings}
             selectedPortalId={selectedPortalId}
             onPortalChange={setSelectedPortalId}
+            onOpenInbox={() => navigate('inbox')}
           />
         )}
       </main>

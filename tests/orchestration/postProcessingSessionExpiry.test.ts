@@ -83,7 +83,7 @@ function setup() {
   const run = (page: Page | undefined, authSessionId: string) => runPostProcessing(
     deps, page, job.id, authSessionId,
     { searchDate: '2026-09-23', productCategories: ['Information Technology'], keywords: [], excludedKeywords: [] },
-    outputRoot, () => {}, '', PORTAL_URL, [tender.id]
+    outputRoot, () => {}, PORTAL_URL, [tender.id]
   );
   return { db, jobs, sessions, jobMachine, authMachine, workflow, job, session, tender, outputRoot, run };
 }
@@ -120,6 +120,23 @@ describe('runPostProcessing when the portal session expires', () => {
     expect(t.jobs.getById(t.job.id)?.state).toBe('COMPLETE');
     expect(requested).toEqual([`${PORTAL_URL}/download/second.pdf`]);
     expect(t.workflow.listDocuments(t.tender.id).every((d) => d.state === 'DOWNLOADED')).toBe(true);
+  });
+
+  it('pauses for sign-in when the portal page crashes mid-download, without failing the remaining files', async () => {
+    const t = setup();
+    const requested: string[] = [];
+    const page = fakePage((url) => {
+      // The page crashes right after the first file arrives.
+      if (url.endsWith('first.pdf')) t.authMachine.transition(t.session.id, 'TAB_LOST', 'portal page crashed');
+      return pdf(url);
+    }, requested);
+    const result = await t.run(page, t.session.id);
+
+    expect(result.abortReason).toBe(PORTAL_SESSION_EXPIRED_REASON);
+    expect(requested).toEqual([`${PORTAL_URL}/download/first.pdf`]);
+    const documents = t.workflow.listDocuments(t.tender.id);
+    expect(documents.find((d) => d.file_name === 'first.pdf')?.state).toBe('DOWNLOADED');
+    expect(documents.find((d) => d.file_name === 'second.pdf')?.state).not.toBe('FAILED');
   });
 
   it('asks for sign-in before any download when the session already expired during selection', async () => {

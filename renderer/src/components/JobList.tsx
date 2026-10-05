@@ -5,7 +5,6 @@ import { StatePill } from './StatePill';
 import { TrashIcon } from './icons';
 import type { PreflightReport } from '../../../src/system/preflight';
 import { RunWorkspace } from './RunWorkspace';
-import { LiveShortlist } from './LiveShortlist';
 import { DEFAULT_PORTAL_ID, getPortalDefinition } from '../../../src/config/portalRegistry';
 import { PortalCompatibilityBadge, PortalSelect } from './PortalSelect';
 
@@ -18,7 +17,12 @@ export interface JobListProps {
   onOpenSettings: (section?: SettingsSection) => void;
   selectedPortalId: string;
   onPortalChange: (portalId: string) => void;
+  onOpenInbox: () => void;
 }
+
+const OPENWEBSTART_DOWNLOAD_URL = 'https://openwebstart.com/download/';
+// How long the signer may take to appear before help is offered.
+const SIGNER_HELP_DELAY_MS = 60_000;
 
 const todayIso = (): string => {
   const now = new Date();
@@ -32,22 +36,29 @@ const RUN_PHASES = [
   { phase: 'AUTH', label: 'Sign in', detail: 'Credentials, CAPTCHA and DSC' },
   { phase: 'SEARCH', label: 'Search', detail: 'Find tenders for the selected date' },
   { phase: 'CLASSIFICATION', label: 'Review', detail: 'Check each tender against intent' },
-  { phase: 'ACQUISITION', label: 'Download', detail: 'Save approved tender documents' },
+  { phase: 'ACQUISITION', label: 'Download', detail: 'Save shortlisted tender documents' },
   { phase: 'EXTRACTION', label: 'Extract', detail: 'Read requirements and key details' },
-  { phase: 'PUBLISHING', label: 'Publish', detail: 'Create the report and Drive copy' },
+  { phase: 'PUBLISHING', label: 'Save', detail: 'Create the report in the local folder' },
 ] as const;
 
-export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJobChange, settings, onOpenSettings, selectedPortalId, onPortalChange }: JobListProps) {
+export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJobChange, settings, onOpenSettings, selectedPortalId, onPortalChange, onOpenInbox }: JobListProps) {
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchDate, setSearchDate] = useState(todayIso());
+  const [untilDate, setUntilDate] = useState(todayIso());
+  const [moreFrom, setMoreFrom] = useState(todayIso());
+  const [moreTo, setMoreTo] = useState(todayIso());
+  const [moreBusy, setMoreBusy] = useState(false);
   const [launchingDsc, setLaunchingDsc] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [recoveryJob, setRecoveryJob] = useState<RecoveryJob | null>(null);
   const [preflight, setPreflight] = useState<PreflightReport | null>(null);
   const [checkingReadiness, setCheckingReadiness] = useState(false);
   const [history, setHistory] = useState<RunHistorySummary>({ recentRunDates: [], missedDates: [] });
+  const [finishedRun, setFinishedRun] = useState<{ jobId: string; message: string } | null>(null);
+  const [startNotice, setStartNotice] = useState<string | null>(null);
+  const [signerSlow, setSignerSlow] = useState(false);
   const selectedPortal = getPortalDefinition(selectedPortalId);
 
   const refresh = useCallback(() => {
@@ -61,6 +72,9 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     refresh();
     window.tenderAssist.getRecoveryJob().then(setRecoveryJob).catch(() => {});
     const unsubscribe = window.tenderAssist.onJobUpdate((update) => {
+      if (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING' && update.statusMessage) {
+        setFinishedRun({ jobId: update.jobId, message: update.statusMessage });
+      }
       if (update.outcome) {
         refresh();
         window.tenderAssist.getRunHistory(selectedPortalId).then(setHistory).catch(() => {});
@@ -83,6 +97,43 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     return () => { current = false; };
   }, [selectedPortalId]);
 
+  // If the signer window never appears, say why instead of waiting silently.
+  const signerLaunched = activeJobUpdate?.authStep === 'DSC_LAUNCHED';
+  useEffect(() => {
+    setSignerSlow(false);
+    if (!signerLaunched) return;
+    const timer = setTimeout(() => setSignerSlow(true), SIGNER_HELP_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [signerLaunched]);
+
+  const openHelp = (url: string) => {
+    window.tenderAssist.openHelpLink(url).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  };
+
+  const handleRunMoreDates = async () => {
+    setMoreBusy(true);
+    setError(null);
+    try {
+      await window.tenderAssist.runMoreDates(moreFrom, moreTo);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMoreBusy(false);
+    }
+  };
+
+  const handleFinishRun = async () => {
+    setMoreBusy(true);
+    setError(null);
+    try {
+      await window.tenderAssist.finishRun();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMoreBusy(false);
+    }
+  };
+
   const retryInterruptedJob = async () => {
     if (!recoveryJob) return;
     setStarting(true);
@@ -90,6 +141,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     try {
       await window.tenderAssist.dismissRecoveryJob(recoveryJob.jobId);
       setSearchDate(recoveryJob.config.searchDate);
+      setUntilDate(recoveryJob.config.searchDate);
       onPortalChange(recoveryJob.config.portalId ?? DEFAULT_PORTAL_ID);
       const { jobId } = await window.tenderAssist.startJob(recoveryJob.config);
       setRecoveryJob(null);
@@ -132,12 +184,18 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     }
     setStarting(true);
     setError(null);
+    setFinishedRun(null);
+    setStartNotice(null);
     try {
       const readiness = await window.tenderAssist.runPreflight(selectedPortalId);
       setPreflight(readiness);
       const blocker = readiness.checks.find((check) => check.level === 'BLOCKED');
       if (blocker) throw new Error(blocker.message);
-      const { jobId } = await window.tenderAssist.startJob({ searchDate, portalId: selectedPortalId, ...settings.defaults });
+      const { jobId, skipped } = await window.tenderAssist.startJob(
+        { searchDate, portalId: selectedPortalId, ...settings.defaults },
+        untilDate > searchDate ? untilDate : searchDate
+      );
+      if (skipped.length > 0) setStartNotice(`Already run, skipped: ${skipped.join(', ')}`);
       onActiveJobChange(jobId);
       refresh();
     } catch (err) {
@@ -174,15 +232,17 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
     }
   };
 
-  const assistCopy = activeJobUpdate?.awaitingSelection
-    ? { title: 'Shortlist ready', body: activeJobUpdate.statusMessage ?? 'Choose the tenders to download below.' }
+  const assistCopy = activeJobUpdate?.awaitingMoreDates
+    ? { title: 'Done. Run other dates?', body: `${activeJobUpdate.statusMessage ?? ''} The portal is still signed in, so other published dates can run now without another CAPTCHA or DSC.` }
     : activeJobUpdate?.phase === 'AUTH'
     ? activeJobUpdate.authStep === 'CAPTCHA_REQUIRED'
       ? { title: 'Enter the CAPTCHA below', body: 'Your saved login ID and password are filled. Enter the visible CAPTCHA and select Proceed in the embedded portal.' }
       : activeJobUpdate.authStep === 'DSC_READY'
         ? { title: 'DSC signer is ready', body: 'Launch the verified signer file, then select your certificate and enter the DSC password in the signer window.' }
         : activeJobUpdate.authStep === 'DSC_LAUNCHED'
-          ? { title: 'DSC signer opened', body: 'Select Run in the Java prompt, then choose your certificate and enter the DSC password. TenderAssist will continue after the portal confirms the signature.' }
+          ? signerSlow
+            ? { title: 'The DSC signer has not finished', body: 'If no Java or OpenWebStart window opened, OpenWebStart may be missing or blocked: install it, then select Launch DSC signer again. If a signer window is open, check that your DSC token is plugged in, choose the certificate, and enter the DSC password.' }
+            : { title: 'DSC signer opened', body: 'Select Run in the Java prompt, then choose your certificate and enter the DSC password. TenderAssist will continue after the portal confirms the signature.' }
         : activeJobUpdate.authStep === 'DSC_LOGIN_STARTING'
           ? { title: 'Preparing the DSC signer', body: 'TenderAssist selected DSC Login and is validating the trusted signData.jnlp download. The launch button will appear when it is ready.' }
       : activeJobUpdate.authStep === 'AUTH_ERROR'
@@ -191,19 +251,19 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
           ? { title: 'Complete login below', body: 'Saved credentials were not available or the login form needs attention. Sign in in the embedded portal; TenderAssist will continue when the dashboard appears.' }
           : activeJobUpdate.authStep === 'AUTHENTICATED'
             ? { title: 'Login confirmed', body: 'TenderAssist is continuing the run.' }
-            : { title: `Opening ${selectedPortal.name}`, body: 'TenderAssist is preparing the secure embedded login page.' }
+            : { title: `Opening ${selectedPortal.name}`, body: activeJobUpdate.statusMessage ?? 'TenderAssist is preparing the secure embedded login page.' }
     : activeJobUpdate?.phase === 'SEARCH'
       ? { title: 'Screening before favourite', body: activeJobUpdate.statusMessage ?? 'TenderAssist is reading titles first and opening details only when the title is not decisive.' }
       : activeJobUpdate?.phase === 'CLASSIFICATION'
-        ? { title: 'Verifying shortlisted tenders', body: 'The selected My Tenders entries are being checked against the complete saved intent.' }
+        ? { title: 'Verifying shortlisted tenders', body: 'Each favourite in My Tenders is checked against your saved categories and intent. Nothing needs you yet.' }
         : activeJobUpdate?.phase === 'ACQUISITION' && (activeJobUpdate.jobState === 'SESSION_EXPIRED' || activeJobUpdate.jobState === 'AUTH_REQUIRED')
           ? { title: 'Sign in again to continue', body: activeJobUpdate.statusMessage ?? 'The portal signed you out. Files already saved are kept; sign in below and downloads will continue.' }
         : activeJobUpdate?.phase === 'ACQUISITION'
-          ? { title: 'Downloading approved documents', body: 'Only tenders that passed review are being saved to the configured output folder.' }
+          ? { title: 'Downloading tender documents', body: 'Documents and zip files for shortlisted and needs-review tenders are being saved to your local output folder. You decide on them in the Inbox afterwards.' }
           : activeJobUpdate?.phase === 'EXTRACTION'
             ? { title: 'Reading tender requirements', body: 'TenderAssist is extracting the important requirements from approved documents.' }
             : activeJobUpdate?.phase === 'PUBLISHING'
-              ? { title: 'Creating the final output', body: 'The workbook, local folders, and optional Drive copy are being prepared.' }
+              ? { title: 'Saving the report', body: 'The workbook and tender folders are being written to your local output folder. Tenders go to Drive when you approve them in the Inbox.' }
               : null;
 
   const handleDelete = async (event: MouseEvent, jobId: string) => {
@@ -234,7 +294,13 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
           </div>
 
           <dl className="run-sidebar__meta">
-            <div><dt>Published date</dt><dd>{searchDate}</dd></div>
+            <div><dt>Published date</dt><dd>{activeJobUpdate?.searchDate ?? searchDate}</dd></div>
+            {activeJobUpdate?.batch && activeJobUpdate.batch.dates.length > 1 && (
+              <div>
+                <dt>Dates</dt>
+                <dd>{Math.min(activeJobUpdate.batch.done.length + (activeJobUpdate.awaitingMoreDates ? 0 : 1), activeJobUpdate.batch.dates.length)} of {activeJobUpdate.batch.dates.length}</dd>
+              </div>
+            )}
             <div><dt>Job ID</dt><dd>{activeJobId.slice(0, 8)}</dd></div>
           </dl>
 
@@ -254,14 +320,47 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
             <h2>{assistCopy?.title ?? 'TenderAssist is working'}</h2>
             <p>{assistCopy?.body ?? 'The workflow will continue automatically. Keep this window open.'}</p>
             {activeJobUpdate?.dscFileName && <span className="auth-assist-panel__file">{activeJobUpdate.dscFileName}</span>}
-            {activeJobUpdate?.authStep === 'DSC_READY' && (
-              <button className="btn btn-primary run-action-card__button" type="button" onClick={handleLaunchDsc} disabled={launchingDsc}>
-                {launchingDsc ? 'Launching…' : 'Launch DSC signer'}
+            {(activeJobUpdate?.authStep === 'DSC_READY' || signerLaunched) && (
+              <button
+                className={signerLaunched ? 'btn btn-secondary run-action-card__button' : 'btn btn-primary run-action-card__button'}
+                type="button"
+                onClick={handleLaunchDsc}
+                disabled={launchingDsc}
+              >
+                {launchingDsc ? 'Launching…' : signerLaunched ? 'Launch DSC signer again' : 'Launch DSC signer'}
+              </button>
+            )}
+            {signerLaunched && signerSlow && (
+              <button className="btn btn-secondary run-action-card__button" type="button" onClick={() => openHelp(OPENWEBSTART_DOWNLOAD_URL)}>
+                Download OpenWebStart
               </button>
             )}
           </section>
 
-          {activeJobUpdate?.awaitingSelection && <LiveShortlist key={activeJobUpdate.jobId} jobId={activeJobUpdate.jobId} onEditSettings={() => onOpenSettings('relevance')} />}
+          {activeJobUpdate?.awaitingMoreDates && (
+            <section className="more-dates" aria-labelledby="more-dates-title">
+              <h2 id="more-dates-title">Run other published dates</h2>
+              <div className="more-dates__range">
+                <label>
+                  <span>From</span>
+                  <input type="date" value={moreFrom} max={todayIso()} onChange={(event) => setMoreFrom(event.target.value)} disabled={moreBusy} />
+                </label>
+                <label>
+                  <span>To</span>
+                  <input type="date" value={moreTo} min={moreFrom} max={todayIso()} onChange={(event) => setMoreTo(event.target.value)} disabled={moreBusy} />
+                </label>
+              </div>
+              <p className="more-dates__hint">Each date is searched on its own as the published date. Dates already run are skipped.</p>
+              <div className="more-dates__actions">
+                <button className="btn btn-primary" type="button" onClick={handleRunMoreDates} disabled={moreBusy || !moreFrom || !moreTo}>
+                  Run these dates
+                </button>
+                <button className="btn btn-secondary" type="button" onClick={handleFinishRun} disabled={moreBusy}>
+                  Finish and sign out
+                </button>
+              </div>
+            </section>
+          )}
 
           {error && <p className="error-text run-sidebar__error">{error}</p>}
           <div className="run-sidebar__footer">
@@ -288,13 +387,28 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
             <PortalSelect id="job-portal" value={selectedPortalId} onChange={onPortalChange} disabled={starting || activeJobId !== null} />
           </label>
           <label className="date-control" htmlFor="job-search-date">
-            <span>Published date</span>
+            <span>Published from</span>
             <input
               id="job-search-date"
               type="date"
               value={searchDate}
               max={todayIso()}
-              onChange={(event) => setSearchDate(event.target.value)}
+              onChange={(event) => {
+                setSearchDate(event.target.value);
+                if (untilDate < event.target.value) setUntilDate(event.target.value);
+              }}
+              disabled={starting || activeJobId !== null}
+            />
+          </label>
+          <label className="date-control" htmlFor="job-until-date">
+            <span>Published to</span>
+            <input
+              id="job-until-date"
+              type="date"
+              value={untilDate}
+              min={searchDate}
+              max={todayIso()}
+              onChange={(event) => setUntilDate(event.target.value)}
               disabled={starting || activeJobId !== null}
             />
           </label>
@@ -303,7 +417,7 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
             onClick={handleStart}
             disabled={starting || !settings}
           >
-            {starting ? 'Opening portal…' : 'Start job'}
+            {starting ? 'Opening portal…' : untilDate > searchDate ? 'Start jobs for these dates' : 'Start job'}
           </button>
         </div>
       </div>
@@ -335,6 +449,16 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
           <button className="btn btn-secondary" onClick={() => onOpenSettings('relevance')}>Open settings</button>
         </div>
       )}
+      {finishedRun && !activeJobId && (
+        <section className="notice run-finished" aria-live="polite">
+          <span>{finishedRun.message}</span>
+          <div className="run-finished__actions">
+            <button className="btn btn-secondary" onClick={() => onSelectJob(finishedRun.jobId)}>View run</button>
+            <button className="btn btn-primary" onClick={onOpenInbox}>Open Inbox</button>
+          </div>
+        </section>
+      )}
+      {startNotice && !activeJobId && <p className="notice">{startNotice}</p>}
       {recoveryJob && !activeJobId && (
         <section className="recovery-panel" aria-live="polite">
           <div><h2>Interrupted job found</h2><p>Job {recoveryJob.jobId.slice(0, 8)} stopped during {recoveryJob.state.toLowerCase().replaceAll('_', ' ')}. {recoveryJob.resumeDescription}</p></div>
@@ -355,7 +479,15 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
         <details className="readiness-panel" open={!preflight.ready}>
           <summary>{preflight.ready ? 'Readiness warnings' : 'Setup required before starting'}</summary>
           <ul>{preflight.checks.filter((check) => check.level !== 'PASS').map((check) => (
-            <li key={check.id}><strong>{check.label}</strong><span>{check.message}</span></li>
+            <li key={check.id}>
+              <strong>{check.label}</strong>
+              <span>{check.message}</span>
+              {check.helpUrl && (
+                <button className="btn btn-secondary readiness-panel__help" onClick={() => openHelp(check.helpUrl!)}>
+                  {check.id === 'jnlp' ? 'Download OpenWebStart' : 'Open help'}
+                </button>
+              )}
+            </li>
           ))}</ul>
           <button className="btn btn-secondary" disabled={checkingReadiness} onClick={async () => {
             setCheckingReadiness(true);

@@ -41,7 +41,6 @@ interface FocusSignal {
   phase?: string;
   authStep?: string;
   jobState?: string;
-  awaitingSelection?: boolean;
 }
 
 /** Where the operator's attention belongs right now, for the optional automatic focus. */
@@ -51,6 +50,6 @@ export function suggestedFocus(update: FocusSignal | null): RunFocusPreset {
     return 'portal';
   }
   if (update.phase === 'AUTH' && ['DSC_READY', 'DSC_LAUNCHED'].includes(update.authStep ?? '')) return 'instructions';
-  if (update.awaitingSelection || update.jobState === 'SESSION_EXPIRED') return 'instructions';
+  if (update.jobState === 'SESSION_EXPIRED') return 'instructions';
   return 'balanced';
 }

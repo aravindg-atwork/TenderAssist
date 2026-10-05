@@ -10,7 +10,7 @@ import { JobRepository } from '../persistence/repositories/jobRepository.js';
 import { AuthSessionRepository } from '../persistence/repositories/authSessionRepository.js';
 import { StateTransitionRepository } from '../persistence/repositories/stateTransitionRepository.js';
 import { SearchRepository } from '../persistence/repositories/searchRepository.js';
-import { TenderRepository } from '../persistence/repositories/tenderRepository.js';
+import { TenderRepository, type TenderRow } from '../persistence/repositories/tenderRepository.js';
 import { RunConfigurationRepository } from '../persistence/repositories/runConfigurationRepository.js';
 import { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import { PortalCredentialRepository } from '../persistence/repositories/portalCredentialRepository.js';
@@ -20,7 +20,9 @@ import { DisplaySettingsRepository, type TextSize } from '../persistence/reposit
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
-import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, recordDownloadSelection, syncJobOpportunities } from '../orchestration/opportunitySync.js';
+import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, syncJobOpportunities } from '../orchestration/opportunitySync.js';
+import { automaticDownloadSelection } from '../orchestration/automaticSelection.js';
+import { describeSkipped, planDateBatch, type DateBatchPlan } from '../orchestration/dateBatch.js';
 import { buildInbox, type InboxView } from '../review/inbox.js';
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
@@ -35,6 +37,7 @@ import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
 import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
 import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing } from '../orchestration/postProcessingRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
+import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
 import type { Page } from 'playwright-core';
 import type {
   JobListItem,
@@ -48,9 +51,11 @@ import type {
 import { normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
-import { localDateFromTimestamp, mirrorJobOutputToDrive, publishJobWorkbook } from '../publishing/jobPublisher.js';
+import { mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../publishing/jobPublisher.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
 import { runPreflight } from '../system/preflight.js';
+import { detectJnlpLauncher, MISSING_SIGNER_MESSAGE, OPENWEBSTART_DOWNLOAD_URL } from '../system/jnlpLauncher.js';
+import { spawn } from 'node:child_process';
 import { applyPendingRestore, createBackup, inspectBackup, stageRestore } from '../system/backup.js';
 import { buildSupportBundle } from '../system/supportBundle.js';
 import { EmbeddedPortalHost, embeddedPortalTargetPrefix } from './embeddedPortalHost.js';
@@ -118,39 +123,19 @@ let activeJobAbortController: AbortController | undefined;
 let activeStopWatchingSessionLoss: (() => void) | undefined;
 let activeJobCompletion: Promise<unknown> | undefined;
 let lastActiveJobUpdate: AuthJobUpdate | undefined;
+// The active run's place in its range of published dates.
+let activeSearchDate: string | undefined;
+let activeBatch: AuthJobUpdate['batch'];
+let activeRunPortalId: string | undefined;
+// Resolves the "run other dates?" question: dates to run next, or null to finish.
+let pendingMoreDates: ((choice: DateBatchPlan | null) => void) | undefined;
 const dscDownloadDirectory = join(getAppDataDir(), 'dsc-downloads');
 const dscArtifacts = new Map<string, DscJnlpArtifact>();
-const pendingDocumentSelections = new Map<string, (tenderIds: string[]) => void>();
-
-// Pauses the job right after shortlisting (job state stays SHORTLISTED) so
-// the renderer's review panel can show live certain/needs-review counts and
-// let the user tick which tenders to actually download, OCR/extract, and
-// publish an eligibility sheet for -- rather than acquiring documents for
-// every automatic KEEP the instant classification finishes. Resolves with
-// null if the job is cancelled while still waiting on that human choice.
 // Fresh sign-ins allowed while collecting documents before the run stops.
 const MAX_ACQUISITION_SIGN_INS = 3;
 
-function waitForDocumentSelection(jobId: string, signal: AbortSignal): Promise<string[] | null> {
-  return new Promise((resolve) => {
-    const onAbort = () => {
-      pendingDocumentSelections.delete(jobId);
-      resolve(null);
-    };
-    if (signal.aborted) {
-      onAbort();
-      return;
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-    pendingDocumentSelections.set(jobId, (tenderIds) => {
-      signal.removeEventListener('abort', onAbort);
-      pendingDocumentSelections.delete(jobId);
-      resolve(tenderIds);
-    });
-  });
-}
-
-function emitJobUpdate(update: AuthJobUpdate): void {
+function emitJobUpdate(raw: AuthJobUpdate): void {
+  const update: AuthJobUpdate = { searchDate: activeSearchDate, batch: activeBatch, ...raw };
   lastActiveJobUpdate = update;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
 }
@@ -423,6 +408,7 @@ ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unk
   }
   if (!OPERATOR_DECISIONS.includes(decision as OperatorDecision)) throw new Error('Unknown decision.');
   opportunities.decide(opportunityIds, decision as OperatorDecision, { note: typeof note === 'string' ? note : null });
+  if (decision === 'APPROVE') afterApproval(approvedTenderRowsFor(opportunityIds));
   return buildInbox(opportunities);
 });
 
@@ -510,21 +496,17 @@ function publishStoredJob(jobId: string) {
   const items = explicitlyProcessed.length > 0
     ? explicitlyProcessed
     : allItems.filter((item) => (item.manualReview?.decision ?? item.automaticDecision) === 'KEEP');
-  const settings = publishingSettings.get(config.portalId ?? DEFAULT_PORTAL_ID);
   const numbered = items.map((item) => ({ ...item, serialNumber: jobOutputs.serialNumberFor(plan, item.tender.id) }));
-  return publishJobWorkbook(plan.outputRoot, plan.outputDate, jobId, numbered, plan.structure, plan.runNumber).then((published) => {
-    mirrorJobOutputToDrive(published.jobDirectory, settings.driveOutputRoot, plan.outputDate, jobId, plan.structure);
-    return published;
-  });
+  return publishJobWorkbook(plan.outputRoot, plan.outputDate, jobId, numbered, plan.structure, plan.runNumber);
 }
 
 // Jobs published before output plans existed get one from today's settings
-// on first use; after that the plan is frozen.
+// on first use, in the published date's day folder; after that the plan is frozen.
 function outputPlanFor(jobId: string, portalId?: string) {
-  const job = jobs.getById(jobId);
-  if (!job) throw new Error('Job not found.');
+  const config = runConfigurations.getForJob(jobId);
+  if (!jobs.getById(jobId) || !config) throw new Error('Job not found.');
   const settings = publishingSettings.get(portalId ?? DEFAULT_PORTAL_ID);
-  return jobOutputs.getOrCreatePlan(jobId, settings.localOutputRoot, localDateFromTimestamp(job.created_at), settings.structure);
+  return jobOutputs.getOrCreatePlan(jobId, settings.localOutputRoot, config.searchDate, settings.structure);
 }
 
 ipcMain.handle('get-update-status', () => getUpdateStatus());
@@ -582,6 +564,7 @@ ipcMain.handle('save-tender-review', async (_event, tenderId: string, decision: 
   syncOpportunities('review', () => applyTenderDecision(opportunitySync, opportunityId, decision === 'KEEP' ? 'APPROVE' : 'REJECT', { jobId: tender.job_id, note: reason }));
   const job = jobs.getById(tender.job_id);
   if (job?.state === 'COMPLETE' || job?.state === 'REPORTING') await publishStoredJob(tender.job_id);
+  if (decision === 'KEEP' && opportunityId) afterApproval(tenders.listForOpportunity(opportunityId));
   return review;
 });
 
@@ -634,6 +617,24 @@ ipcMain.handle(
   }
 );
 
+/** Start Java Web Start on the verified file; resolves once the process is running. */
+function startSigner(executable: string, jnlpPath: string): Promise<void> {
+  return new Promise((resolveStart, rejectStart) => {
+    const child = spawn(executable, [jnlpPath], { detached: true, stdio: 'ignore', windowsHide: false });
+    child.once('error', (error) => rejectStart(new Error(`Could not start OpenWebStart (${error.message}). Reinstall OpenWebStart and try again.`)));
+    child.once('spawn', () => {
+      child.unref();
+      resolveStart();
+    });
+  });
+}
+
+ipcMain.handle('open-help-link', async (_event, url: unknown): Promise<void> => {
+  // Only fixed help pages, never a URL chosen by page content.
+  if (url !== OPENWEBSTART_DOWNLOAD_URL) throw new Error('This link is not allowed.');
+  await shell.openExternal(url);
+});
+
 ipcMain.handle('launch-dsc-signer', async (_event, jobId: string): Promise<void> => {
   const artifact = dscArtifacts.get(jobId);
   if (!artifact) throw new Error('No verified DSC signer file is ready for this job.');
@@ -646,8 +647,14 @@ ipcMain.handle('launch-dsc-signer', async (_event, jobId: string): Promise<void>
   if (!existsSync(target) || !isValidJnlpFile(target)) {
     throw new Error('The DSC signer file is missing or invalid. Download it again from TN Tenders.');
   }
-  const openError = await shell.openPath(target);
-  if (openError) throw new Error(`Could not launch the DSC signer: ${openError}`);
+  const launcher = detectJnlpLauncher();
+  if (launcher.status === 'MISSING') throw new Error(MISSING_SIGNER_MESSAGE);
+  if (launcher.executable) {
+    await startSigner(launcher.executable, target);
+  } else {
+    const openError = await shell.openPath(target);
+    if (openError) throw new Error(`Could not launch the DSC signer: ${openError}`);
+  }
   if (activeJobId === jobId && lastActiveJobUpdate?.jobId === jobId) {
     emitJobUpdate({
       ...lastActiveJobUpdate,
@@ -683,13 +690,6 @@ ipcMain.handle('cancel-job', async (_event, jobId: string): Promise<void> => {
   // The renderer gets an immediate acknowledgement. Cooperative phase
   // cancellation and final cleanup continue on activeJobCompletion.
   void activeJobCompletion?.catch(() => {});
-});
-
-ipcMain.handle('confirm-document-selection', (_event, jobId: string, tenderIds: string[]): void => {
-  if (!jobId || activeJobId !== jobId) throw new Error('This job is no longer running.');
-  const resolve = pendingDocumentSelections.get(jobId);
-  if (!resolve) throw new Error('This job is not waiting for a tender selection.');
-  resolve(Array.isArray(tenderIds) ? tenderIds : []);
 });
 
 ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
@@ -750,6 +750,8 @@ interface RunContext {
   paceAction: PaceAction;
   page?: Page;
   stopWatchingSessionLoss?: () => void;
+  /** The job currently running in this sign-in; one per published date. */
+  jobId?: string;
 }
 
 /** Claim the single active-run slot synchronously, before any await. */
@@ -762,6 +764,9 @@ function claimRun(): { abortController: AbortController; paceAction: PaceAction 
   activeJobAbortController = abortController;
   activeStopWatchingSessionLoss = undefined;
   lastActiveJobUpdate = undefined;
+  activeSearchDate = undefined;
+  activeBatch = undefined;
+  activeRunPortalId = undefined;
   return { abortController, paceAction: createActionPacer(automationSettings.get(), abortController.signal) };
 }
 
@@ -772,6 +777,10 @@ function releaseRun(abortController: AbortController): void {
   activeStopWatchingSessionLoss = undefined;
   activeJobCompletion = undefined;
   lastActiveJobUpdate = undefined;
+  activeSearchDate = undefined;
+  activeBatch = undefined;
+  activeRunPortalId = undefined;
+  pendingMoreDates = undefined;
 }
 
 async function checkReadiness(portal: PortalDefinition, outputSettings: PublishingSettings): Promise<void> {
@@ -780,9 +789,24 @@ async function checkReadiness(portal: PortalDefinition, outputSettings: Publishi
   if (blocker) throw new Error(blocker.message);
 }
 
+/**
+ * The portal page crashed or hung. Mark the signed-in session lost so the
+ * running phase stops promptly; the run then reopens the portal and signs in
+ * again with the saved login.
+ */
+function handlePortalCrash(reason: string): void {
+  console.error(`[TenderAssist] portal page crashed (${reason})`);
+  const sessionId = lastActiveJobUpdate?.authSessionId;
+  const session = sessionId ? sessions.getById(sessionId) : undefined;
+  if (!session || (session.state !== 'AUTH_PENDING' && session.state !== 'AUTHENTICATED')) return;
+  authMachine.transition(session.id, 'TAB_LOST', `portal page crashed: ${reason}`);
+  if (activeJobId && activeJobId !== 'pending') reactToAuthSessionLoss(jobMachine, activeJobId)('PAGE_CRASHED', 'TAB_LOST');
+}
+
 async function openPortal(portal: PortalDefinition): Promise<void> {
   portalHost?.close();
   portalHost = new EmbeddedPortalHost(() => mainWindow, dscDownloadDirectory, portal);
+  portalHost.onCrashed(handlePortalCrash);
   portalHost.setZoomPercent(displaySettings.getPortalZoom(portal.id));
   await portalHost.open(portal.url);
   await waitForCdpReady(EMBEDDED_CDP_PORT, 15000);
@@ -805,6 +829,7 @@ function signIn(
       signal: ctx.abortController.signal,
       paceAction: ctx.paceAction,
       existingJobId,
+      currentJobId: () => ctx.jobId,
     },
     `http://127.0.0.1:${EMBEDDED_CDP_PORT}`,
     ctx.portal.url,
@@ -833,13 +858,20 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
       authSessionId,
       ctx.config,
       ctx.outputSettings.localOutputRoot,
-      emitJobUpdate,
-      ctx.outputSettings.driveOutputRoot,
+      // Success is reported by the caller once the run really is finished.
+      (update) => { if (update.outcome !== 'SUCCESS') emitJobUpdate(update); },
       ctx.portal.url,
       selectedTenderIds,
       ctx.outputSettings.structure
     );
     syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, jobId));
+    if (result.outcome === 'SUCCESS') {
+      // Tenders approved in the Inbox before this run had their documents
+      // collected just now, so they go to Drive straight away.
+      reportDriveProblems(copyApprovedTendersToDrive(tenders.listForJob(jobId)));
+      // The caller reports success, since more dates may follow in this sign-in.
+      return result;
+    }
     if (result.abortReason !== PORTAL_SESSION_EXPIRED_REASON || result.outcome || ctx.abortController.signal.aborted) return result;
     if (signIns >= MAX_ACQUISITION_SIGN_INS) {
       jobMachine.transition(jobId, 'FAILED_MANUAL', 'portal session kept expiring during document acquisition');
@@ -853,6 +885,7 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
       return result;
     }
     ctx.stopWatchingSessionLoss?.();
+    // A crashed page reports not open, and is replaced.
     if (!portalHost?.isOpen) await openPortal(ctx.portal);
     const credentials = await loadPortalCredentials(ctx.portal.id).catch(() => undefined);
     const signedIn = await signIn(ctx, credentials, emitJobUpdate, jobId);
@@ -862,26 +895,241 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
 }
 
 /**
- * Pause on the shortlist until the operator ticks tenders in the live run
- * panel, with the portal still signed in, and remember the choice so an
- * interrupted run can resume downloads.
+ * Choose the tenders to download from the screening result, without
+ * stopping the run, and remember the choice so an interrupted run can
+ * resume downloads. This is not approval: the tenders stay in the Inbox.
  */
-async function awaitSelection(ctx: RunContext, jobId: string, authSessionId: string): Promise<string[] | null> {
-  const waiting = waitForDocumentSelection(jobId, ctx.abortController.signal);
-  emitJobUpdate({
+function selectAutomatically(jobId: string): string[] {
+  const selected = automaticDownloadSelection(tenders.listForJob(jobId).map((tender) => ({
+    id: tender.id,
+    effectiveClassification: workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id),
+    opportunityLifecycle: tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle ?? null : null,
+  })));
+  runConfigurations.saveSelection(jobId, selected);
+  return selected;
+}
+
+// Lifecycles in which the operator has approved a tender.
+const APPROVED_LIFECYCLES: readonly string[] = ['APPROVED', 'DOCUMENTS_COLLECTED', 'ELIGIBILITY_REVIEWED', 'PREPARING'];
+
+/**
+ * Copy approved tenders' saved folders from the local output folder to the
+ * portal's Drive folder. Tenders without a saved folder, or portals without
+ * a Drive folder, are skipped. Returns the problems, if any.
+ */
+function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
+  const problems: string[] = [];
+  for (const tender of tenderRows) {
+    const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
+    if (!lifecycle || !APPROVED_LIFECYCLES.includes(lifecycle)) continue;
+    const portalId = runConfigurations.getForJob(tender.job_id)?.portalId ?? DEFAULT_PORTAL_ID;
+    const driveRoot = publishingSettings.get(portalId).driveOutputRoot;
+    const plan = jobOutputs.getPlan(tender.job_id);
+    const serialNumber = jobOutputs.findSerialNumber(tender.id);
+    if (!driveRoot.trim() || !plan || serialNumber === undefined) continue;
+    const folder = tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate);
+    if (!existsSync(folder)) continue;
+    try {
+      mirrorTenderFolderToDrive(folder, plan.outputRoot, driveRoot);
+    } catch (error) {
+      problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return problems;
+}
+
+function reportDriveProblems(problems: string[]): void {
+  if (problems.length === 0) return;
+  dialog.showErrorBox(
+    'Not copied to Drive',
+    `The approval is saved, and the files are safe in the local output folder, but they could not be copied to Drive:\n\n${problems.join('\n')}\n\nCheck that the Drive folder in Settings exists and Google Drive is running, then approve again.`
+  );
+}
+
+function approvedTenderRowsFor(opportunityIds: string[]): TenderRow[] {
+  return opportunityIds.flatMap((id) => tenders.listForOpportunity(id));
+}
+
+/** Documents and Drive copy for tenders the operator just approved. */
+function afterApproval(tenderRows: TenderRow[]): void {
+  for (const jobId of new Set(tenderRows.map((tender) => tender.job_id))) {
+    syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, jobId));
+  }
+  reportDriveProblems(copyApprovedTendersToDrive(tenderRows));
+}
+
+function runFinishedMessage(selectedCount: number, dateCount = 1): string {
+  const dates = dateCount > 1 ? ` across ${dateCount} published dates` : '';
+  if (selectedCount === 0) return `No tender matched your filters${dates}. Open a run to see what was checked.`;
+  return `${selectedCount} tender${selectedCount === 1 ? '' : 's'} shortlisted${dates} and documents saved locally. Review them in the Inbox; approved tenders are copied to Drive.`;
+}
+
+/** A new job for the next published date, signed in through the session already open. */
+function startDateJob(ctx: RunContext, searchDate: string): string {
+  const job = jobs.create();
+  jobMachine.transition(job.id, 'AUTH_REQUIRED', `next published date ${searchDate} in the same portal session`);
+  jobMachine.transition(job.id, 'AUTH_PENDING', 'reusing the signed-in portal session');
+  jobMachine.transition(job.id, 'AUTHENTICATED', 'portal session already signed in');
+  runConfigurations.saveForJob(job.id, { ...ctx.config, searchDate });
+  ctx.jobId = job.id;
+  activeJobId = job.id;
+  return job.id;
+}
+
+/** Search, screen, and collect documents for one published date. */
+async function runDate(ctx: RunContext, jobId: string, authSessionId: string): Promise<{ result: AuthJobUpdate; selected: number }> {
+  const config = runConfigurations.getForJob(jobId)!;
+  // Shared, not copied: a sign-in again during downloads updates ctx.page for later dates.
+  ctx.config = config;
+  const { portal, abortController, paceAction } = ctx;
+  const deps = { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction };
+  const page = ctx.page!;
+  const searchResult = await runSearchPhase(
+    { ...deps, searches },
+    page,
     jobId,
     authSessionId,
-    jobState: jobs.getById(jobId)!.state,
-    authState: sessions.getById(authSessionId)?.state ?? 'NOT_STARTED',
-    phase: 'CLASSIFICATION',
-    awaitingSelection: true,
-    statusMessage: 'The portal stays signed in while you choose. Nothing downloads until you confirm.',
+    emitJobUpdate,
+    // Local midnight, so "YYYY-MM-DD" is the calendar day picked, not UTC.
+    new Date(`${config.searchDate}T00:00:00`),
+    config.productCategories.map((productCategory, index) => ({ searchKey: `search_${index + 1}`, productCategory })),
+    { keywords: config.keywords, excludedKeywords: config.excludedKeywords }
+  );
+  // Record what the run saw even if the search stopped part-way.
+  syncOpportunities('search', () => syncJobOpportunities(opportunitySync, jobId, portal.id, { screening: false }));
+  if (searchResult.outcome !== 'SUCCESS') return { result: searchResult, selected: 0 };
+
+  const classificationResult = await runClassificationPhase(deps, page, jobId, authSessionId, config, emitJobUpdate, portal.stateName);
+  syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, jobId, portal.id, { screening: classificationResult.outcome === 'SUCCESS' }));
+  if (classificationResult.outcome !== 'SUCCESS') return { result: classificationResult, selected: 0 };
+
+  // No pause for the operator: shortlisted and needs-review tenders are
+  // downloaded in this signed-in session, and decided later in the Inbox.
+  const selected = selectAutomatically(jobId);
+  const result = await collectDocuments(ctx, jobId, authSessionId, selected);
+  return { result, selected: selected.length };
+}
+
+// Times one date may sign in again after the portal crashes or signs out.
+const MAX_DATE_RECOVERIES = 2;
+
+function sessionWasLost(authSessionId: string): boolean {
+  const state = sessions.getById(authSessionId)?.state;
+  return state === 'TAB_LOST' || state === 'SESSION_EXPIRED';
+}
+
+function endJob(jobId: string, reason: string): void {
+  const state = jobs.getById(jobId)?.state;
+  if (state && state !== 'COMPLETE' && state !== 'CANCELLED' && state !== 'FAILED_MANUAL') jobMachine.transition(jobId, 'FAILED_MANUAL', reason);
+}
+
+/**
+ * Reopen the portal and sign in again with the saved login ID and password,
+ * as a fresh job for the date. The operator only enters CAPTCHA and DSC.
+ */
+async function signInAgainForDate(ctx: RunContext, date: string): Promise<{ jobId: string; authSessionId: string } | null> {
+  ctx.stopWatchingSessionLoss?.();
+  await openPortal(ctx.portal);
+  const credentials = await loadPortalCredentials(ctx.portal.id).catch(() => undefined);
+  let captured = false;
+  const signedIn = await signIn(ctx, credentials, (update) => {
+    if (!captured) {
+      captured = true;
+      ctx.jobId = update.jobId;
+      activeJobId = update.jobId;
+      runConfigurations.saveForJob(update.jobId, { ...ctx.config, searchDate: date });
+    }
+    emitJobUpdate({ ...update, statusMessage: 'The portal page stopped working, so TenderAssist reopened it. Your saved login is filled in; enter the CAPTCHA (and DSC if asked) to continue.' });
   });
-  const selected = await waiting;
-  if (selected === null) return null;
-  runConfigurations.saveSelection(jobId, selected);
-  syncOpportunities('selection', () => recordDownloadSelection(opportunitySync, jobId, selected));
-  return selected;
+  return signedIn.outcome === 'SUCCESS' ? { jobId: signedIn.jobId, authSessionId: signedIn.authSessionId } : null;
+}
+
+/** Waits for the operator to pick more dates (or finish) while the portal stays signed in. */
+function waitForMoreDates(signal: AbortSignal): Promise<DateBatchPlan | null> {
+  return new Promise((resolveChoice) => {
+    if (signal.aborted) {
+      resolveChoice(null);
+      return;
+    }
+    const onAbort = () => {
+      pendingMoreDates = undefined;
+      resolveChoice(null);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    pendingMoreDates = (choice) => {
+      signal.removeEventListener('abort', onAbort);
+      pendingMoreDates = undefined;
+      resolveChoice(choice);
+    };
+  });
+}
+
+/**
+ * Runs each published date as its own job in one sign-in, then asks whether
+ * to run other dates before signing out. A date that does not finish stops
+ * the batch; the dates left are named so the operator can start them again.
+ */
+async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: string, plan: DateBatchPlan): Promise<void> {
+  let dates = plan.toRun;
+  let batch = { dates: [...dates], done: [] as string[], skipped: [...plan.skipped] };
+  activeBatch = batch;
+  let shortlisted = 0;
+  let lastResult: AuthJobUpdate | undefined;
+  for (let index = 0; ; index += 1) {
+    const date = dates[index];
+    if (date === undefined) {
+      // Every chosen date has run. Keep the portal signed in and ask.
+      const skippedNote = describeSkipped(batch.skipped);
+      emitJobUpdate({
+        ...lastResult!,
+        outcome: undefined,
+        awaitingMoreDates: true,
+        statusMessage: `${runFinishedMessage(shortlisted, batch.done.length)}${skippedNote ? ` ${skippedNote}` : ''}`,
+      });
+      const more = await waitForMoreDates(ctx.abortController.signal);
+      if (ctx.abortController.signal.aborted) return;
+      if (!more) {
+        emitJobUpdate({ ...lastResult!, awaitingMoreDates: false, outcome: 'SUCCESS', statusMessage: runFinishedMessage(shortlisted, batch.done.length) });
+        return;
+      }
+      dates = [...dates, ...more.toRun];
+      batch = { dates: [...dates], done: batch.done, skipped: [...batch.skipped, ...more.skipped] };
+      activeBatch = batch;
+      index -= 1;
+      continue;
+    }
+
+    activeSearchDate = date;
+    let jobId = index === 0 ? firstJobId : startDateJob(ctx, date);
+    let { result, selected } = await runDate(ctx, jobId, authSessionId);
+    // A crashed or signed-out portal restarts this date after signing in again.
+    for (let recovery = 1; result.outcome !== 'SUCCESS' && recovery <= MAX_DATE_RECOVERIES && sessionWasLost(result.authSessionId || authSessionId); recovery += 1) {
+      if (ctx.abortController.signal.aborted) break;
+      endJob(jobId, 'portal page crashed or signed out; the date is restarted after signing in again');
+      const signedIn = await signInAgainForDate(ctx, date);
+      if (!signedIn) return;
+      jobId = signedIn.jobId;
+      authSessionId = signedIn.authSessionId;
+      ({ result, selected } = await runDate(ctx, jobId, authSessionId));
+    }
+    lastResult = result;
+    // A sign-in again during downloads gives the session a new id.
+    authSessionId = result.authSessionId || authSessionId;
+    if (result.outcome !== 'SUCCESS') {
+      const remaining = dates.slice(index + 1);
+      if (remaining.length > 0 && !ctx.abortController.signal.aborted) {
+        emitJobUpdate({
+          ...result,
+          outcome: result.outcome ?? 'ABORTED',
+          abortReason: `${result.abortReason ?? `The run for ${date} did not finish.`} These dates were not run: ${remaining.join(', ')}. Start the same range again to run them; finished dates are skipped.`,
+        });
+      }
+      return;
+    }
+    shortlisted += selected;
+    batch = { ...batch, done: [...batch.done, date] };
+    activeBatch = batch;
+  }
 }
 
 /**
@@ -918,16 +1166,21 @@ function finishRun(ctx: RunContext, run: Promise<unknown>, onFailure: (err: unkn
     });
 }
 
-ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) => {
+ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, untilDate?: unknown) => {
   const { abortController, paceAction } = claimRun();
   let ctx: RunContext;
+  let plan: DateBatchPlan;
   let savedPortalCredentials: PortalCredentials | undefined;
   try {
     const config = normalizeRunConfiguration(requestedConfig);
     const portal = getPortalDefinition(config.portalId);
     config.portalId = portal.id;
+    plan = planDatesToRun(portal.id, config.searchDate, typeof untilDate === 'string' && untilDate ? untilDate : config.searchDate);
+    config.searchDate = plan.toRun[0];
     const outputSettings = publishingSettings.get(portal.id);
     ctx = { portal, config, outputSettings, abortController, paceAction };
+    activeRunPortalId = portal.id;
+    activeSearchDate = config.searchDate;
     await checkReadiness(portal, outputSettings);
     if (!runConfigurations.hasSavedDefaults()) {
       throw new Error('Save your product categories and intent in Settings before starting a job.');
@@ -941,16 +1194,6 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     releaseRun(abortController);
     throw error;
   }
-  const { portal, config } = ctx;
-
-  // Append a local-midnight time so "YYYY-MM-DD" parses as the calendar day
-  // the person actually picked, not UTC midnight (which rolls back a day in
-  // any timezone ahead of UTC).
-  const searchDate = new Date(`${config.searchDate}T00:00:00`);
-  const configuredSearches = config.productCategories.map((productCategory, index) => ({
-    searchKey: `search_${index + 1}`,
-    productCategory,
-  }));
 
   let resolveStarted!: (jobId: string) => void;
   let rejectStarted!: (err: unknown) => void;
@@ -964,55 +1207,47 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration) =>
     if (!jobIdCaptured) {
       jobIdCaptured = true;
       activeJobId = update.jobId;
-      runConfigurations.saveForJob(update.jobId, config);
+      ctx.jobId = update.jobId;
+      runConfigurations.saveForJob(update.jobId, ctx.config);
       resolveStarted(update.jobId);
     }
     emitJobUpdate(update);
-  })
-    .then(async (authResult) => {
-      if (authResult.outcome !== 'SUCCESS' || !ctx.page) return authResult;
-      return runSearchPhase(
-        { jobs, sessions, jobMachine, searches, tenders, classifications, signal: abortController.signal, paceAction },
-        ctx.page,
-        authResult.jobId,
-        authResult.authSessionId,
-        emitJobUpdate,
-        searchDate,
-        configuredSearches,
-        { keywords: config.keywords, excludedKeywords: config.excludedKeywords }
-      );
-    })
-    .then(async (searchResult) => {
-      // Record what the run saw even if the search stopped part-way.
-      syncOpportunities('search', () => syncJobOpportunities(opportunitySync, searchResult.jobId, portal.id, { screening: false }));
-      if (searchResult.phase !== 'SEARCH' || searchResult.outcome !== 'SUCCESS' || !ctx.page) return searchResult;
-      return runClassificationPhase(
-        { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction },
-        ctx.page,
-        searchResult.jobId,
-        searchResult.authSessionId,
-        config,
-        emitJobUpdate,
-        portal.stateName
-      );
-    })
-    .then(async (classificationResult) => {
-      syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, classificationResult.jobId, portal.id, { screening: classificationResult.outcome === 'SUCCESS' }));
-      if (classificationResult.phase !== 'CLASSIFICATION' || classificationResult.outcome !== 'SUCCESS' || !ctx.page) {
-        return classificationResult;
-      }
-      // Job sits in SHORTLISTED here -- the renderer shows the review panel
-      // and waits for the operator to tick tenders and confirm before
-      // anything downloads. cancel-job aborts this wait too.
-      const selectedTenderIds = await awaitSelection(ctx, classificationResult.jobId, classificationResult.authSessionId);
-      if (selectedTenderIds === null) return classificationResult;
-      return collectDocuments(ctx, classificationResult.jobId, classificationResult.authSessionId, selectedTenderIds);
-    });
+  }).then(async (authResult) => {
+    if (authResult.outcome !== 'SUCCESS' || !ctx.page) return;
+    await runDateBatch(ctx, authResult.jobId, authResult.authSessionId, plan);
+  });
 
   // rejectStarted is a no-op once `started` resolved, but load-bearing if
   // sign-in fails before its first update.
   activeJobCompletion = finishRun(ctx, run, rejectStarted);
-  return { jobId: await started };
+  return { jobId: await started, dates: plan.toRun, skipped: plan.skipped };
+});
+
+/** The dates in a range still to run for a portal; throws when there are none. */
+function planDatesToRun(portalId: string, from: string, to: string): DateBatchPlan {
+  const plan = planDateBatch(from, to, runConfigurations.listCompletedRunDates(portalId));
+  if (plan.toRun.length === 0) {
+    throw new Error(from === to
+      ? `${from} already has a completed run for this portal. Its tenders are in the Inbox and Tenders pages.`
+      : `Every date from ${from} to ${to} already has a completed run for this portal.`);
+  }
+  return plan;
+}
+
+ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown): DateBatchPlan => {
+  if (!pendingMoreDates || !activeRunPortalId) throw new Error('The run is not waiting for more dates.');
+  if (typeof from !== 'string' || typeof to !== 'string') throw new Error('Choose the published dates to run.');
+  // Dates already run in this sign-in are not run twice.
+  const queued = activeBatch?.dates ?? [];
+  const plan = planDateBatch(from, to, [...runConfigurations.listCompletedRunDates(activeRunPortalId), ...queued]);
+  if (plan.toRun.length === 0) throw new Error('Every date in that range has already been run.');
+  pendingMoreDates(plan);
+  return plan;
+});
+
+ipcMain.handle('finish-run', (): void => {
+  if (!pendingMoreDates) throw new Error('The run is not waiting for more dates.');
+  pendingMoreDates(null);
 });
 
 ipcMain.handle('resume-job', async (_event, jobId: string) => {
@@ -1025,7 +1260,8 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
   const { abortController, paceAction } = claimRun();
   const portal = getPortalDefinition(config.portalId);
   const outputSettings = publishingSettings.get(portal.id);
-  const ctx: RunContext = { portal, config, outputSettings, abortController, paceAction };
+  const ctx: RunContext = { portal, config, outputSettings, abortController, paceAction, jobId };
+  activeSearchDate = config.searchDate;
   try {
     await checkReadiness(portal, outputSettings);
   } catch (error) {
@@ -1037,21 +1273,21 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
 
   const run = (async () => {
     if (plan.kind === 'SELECT_TENDERS') {
-      // Choosing tenders happens in the live run, so sign in first: the
-      // downloads then start straight after the choice, in that session.
+      // Sign in first so the downloads run in that session.
       await openPortal(portal);
       const credentials = await loadPortalCredentials(portal.id).catch(() => undefined);
       const signedIn = await signIn(ctx, credentials, emitJobUpdate, jobId);
       if (signedIn.outcome !== 'SUCCESS') return;
-      const selection = await awaitSelection(ctx, jobId, signedIn.authSessionId);
-      if (selection === null) return;
-      await collectDocuments(ctx, jobId, signedIn.authSessionId, selection);
+      const selected = selectAutomatically(jobId);
+      const collected = await collectDocuments(ctx, jobId, signedIn.authSessionId, selected);
+      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(selected.length) });
       return;
     }
     // Documents already chosen: saved files need no portal, and collection
     // asks for sign-in as soon as something still has to be downloaded.
     prepareForDocumentCollection(jobs, jobMachine, jobId);
-    await collectDocuments(ctx, jobId, latestSession?.id ?? '', plan.selectedTenderIds);
+    const collected = await collectDocuments(ctx, jobId, latestSession?.id ?? '', plan.selectedTenderIds);
+    if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(plan.selectedTenderIds.length) });
   })();
   activeJobCompletion = finishRun(ctx, run, () => {});
   return { jobId, plan: plan.kind };

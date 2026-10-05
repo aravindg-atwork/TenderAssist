@@ -21,8 +21,13 @@ function isTrustedPortalUrl(rawUrl: string, portal: PortalDefinition): boolean {
   }
 }
 
+// A portal page that stops responding for this long is treated as crashed.
+const UNRESPONSIVE_LIMIT_MS = 20_000;
+
 export class EmbeddedPortalHost {
   private view: WebContentsView | undefined;
+  private crashed = false;
+  private readonly crashListeners = new Set<(reason: string) => void>();
   private visible = false;
   private bounds: Rectangle = { x: 0, y: 0, width: 1, height: 1 };
   private zoomFactor = 1;
@@ -60,6 +65,7 @@ export class EmbeddedPortalHost {
       },
     });
     this.view = view;
+    this.crashed = false;
     view.setBounds(this.bounds);
     view.setVisible(this.visible);
     window.contentView.addChildView(view);
@@ -84,6 +90,22 @@ export class EmbeddedPortalHost {
     view.webContents.on('will-navigate', (event, targetUrl) => {
       if (!isTrustedPortalUrl(targetUrl, this.portal)) event.preventDefault();
     });
+
+    view.webContents.on('render-process-gone', (_event, details) => {
+      if (this.view !== view || details.reason === 'clean-exit') return;
+      this.crashed = true;
+      for (const listener of this.crashListeners) listener(details.reason);
+    });
+    // A hung page is ended so it can be reopened instead of freezing the run.
+    let unresponsiveTimer: NodeJS.Timeout | undefined;
+    view.webContents.on('unresponsive', () => {
+      clearTimeout(unresponsiveTimer);
+      unresponsiveTimer = setTimeout(() => {
+        if (this.view === view && !view.webContents.isDestroyed()) view.webContents.forcefullyCrashRenderer();
+      }, UNRESPONSIVE_LIMIT_MS);
+    });
+    view.webContents.on('responsive', () => clearTimeout(unresponsiveTimer));
+    view.webContents.once('destroyed', () => clearTimeout(unresponsiveTimer));
 
     await view.webContents.loadURL(url);
   }
@@ -114,8 +136,15 @@ export class EmbeddedPortalHost {
     this.view?.setBounds(this.bounds);
   }
 
+  /** False once the page has crashed: it must be opened again, not reused. */
   get isOpen(): boolean {
-    return Boolean(this.view && !this.view.webContents.isDestroyed());
+    return Boolean(this.view && !this.view.webContents.isDestroyed() && !this.crashed);
+  }
+
+  /** Called when the portal page crashes or hangs, with the reason. */
+  onCrashed(listener: (reason: string) => void): () => void {
+    this.crashListeners.add(listener);
+    return () => this.crashListeners.delete(listener);
   }
 
   get portalId(): string {

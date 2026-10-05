@@ -125,6 +125,13 @@ export class TenderRepository {
       .all(jobId) as unknown as TenderRow[];
   }
 
+  /** Every run-level row recorded for one durable tender, oldest first. */
+  listForOpportunity(opportunityId: string): TenderRow[] {
+    return this.db
+      .prepare('SELECT * FROM tenders WHERE opportunity_id = ? ORDER BY created_at ASC, rowid ASC')
+      .all(opportunityId) as unknown as TenderRow[];
+  }
+
   markFavorited(id: string, favoritedAt: string): void {
     this.db
       .prepare('UPDATE tenders SET favorited = 1, favorited_at = ?, updated_at = ? WHERE id = ?')

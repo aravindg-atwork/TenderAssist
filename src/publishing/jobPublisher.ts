@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import { cpSync, mkdirSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { FinalClassification } from '../persistence/repositories/classificationRepository.js';
 import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow } from '../persistence/repositories/tenderWorkflowRepository.js';
@@ -210,6 +210,25 @@ export async function publishJobWorkbook(
   const workbookPath = join(jobDirectory, approvedWorkbookName(resolveOutputStructure(structure, searchDate).approvedWorkbook, runNumber));
   await workbook.xlsx.writeFile(workbookPath);
   return { jobDirectory, workbookPath };
+}
+
+/**
+ * Copies one tender's saved folder (documents and eligibility sheet) to the
+ * same relative place under the Drive root. Returns the Drive folder, or null
+ * when Drive is not configured.
+ */
+export function mirrorTenderFolderToDrive(localTenderDirectory: string, localOutputRoot: string, driveOutputRoot: string): string | null {
+  const driveRoot = driveOutputRoot.trim();
+  if (!driveRoot) return null;
+  const relativePath = relative(resolve(localOutputRoot), resolve(localTenderDirectory));
+  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+    throw new Error('The tender folder is outside the local output folder.');
+  }
+  const destination = join(driveRoot, relativePath);
+  if (resolve(destination).toLocaleLowerCase() === resolve(localTenderDirectory).toLocaleLowerCase()) return destination;
+  mkdirSync(destination, { recursive: true });
+  cpSync(localTenderDirectory, destination, { recursive: true, force: true });
+  return destination;
 }
 
 export function mirrorJobOutputToDrive(

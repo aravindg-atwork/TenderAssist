@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import ExcelJS from 'exceljs';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { jobOutputDirectory, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
+import { jobOutputDirectory, mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
 import type { TenderRow } from '../../src/persistence/repositories/tenderRepository.js';
 import { DEFAULT_OUTPUT_STRUCTURE } from '../../src/publishing/outputStructure.js';
 
@@ -73,5 +73,32 @@ describe('publishJobWorkbook', () => {
     expect(output.jobDirectory).toBe(join(root, '2026-09', '2026.09.24'));
     expect(output.workbookPath).toBe(join(output.jobDirectory, 'Approved 24-09-2026.xlsx'));
     expect(existsSync(join(output.jobDirectory, '1 - Portal redesign', 'Requirements.xlsx'))).toBe(true);
+  });
+});
+
+describe('mirrorTenderFolderToDrive', () => {
+  const dirs: string[] = [];
+  afterEach(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); dirs.length = 0; });
+
+  it('copies one approved tender folder to the same place under the Drive root', () => {
+    const local = mkdtempSync(join(tmpdir(), 'tenderassist-local-')); dirs.push(local);
+    const drive = mkdtempSync(join(tmpdir(), 'tenderassist-drive-')); dirs.push(drive);
+    const approved = join(local, '09-2026', '23-09-2026', '23-09-2026_1_Approved');
+    const other = join(local, '09-2026', '23-09-2026', '23-09-2026_2_Not decided');
+    mkdirSync(join(approved, 'Documents'), { recursive: true });
+    mkdirSync(other, { recursive: true });
+    writeFileSync(join(approved, 'Documents', 'tender.zip'), 'zip');
+
+    const destination = mirrorTenderFolderToDrive(approved, local, drive);
+
+    expect(destination).toBe(join(drive, '09-2026', '23-09-2026', '23-09-2026_1_Approved'));
+    expect(existsSync(join(destination!, 'Documents', 'tender.zip'))).toBe(true);
+    expect(existsSync(join(drive, '09-2026', '23-09-2026', '23-09-2026_2_Not decided'))).toBe(false);
+  });
+
+  it('does nothing without a Drive folder and refuses folders outside the output root', () => {
+    const local = mkdtempSync(join(tmpdir(), 'tenderassist-local-')); dirs.push(local);
+    expect(mirrorTenderFolderToDrive(join(local, 'x'), local, '  ')).toBeNull();
+    expect(() => mirrorTenderFolderToDrive(tmpdir(), local, join(local, 'drive'))).toThrow(/outside/);
   });
 });

@@ -116,7 +116,6 @@ describe('runPostProcessing tender selection', () => {
       config,
       outputRoot,
       () => {},
-      '',
       PORTAL_URL,
       [selected.id]
     );
@@ -181,7 +180,6 @@ describe('runPostProcessing tender selection', () => {
       config,
       outputRoot,
       () => {},
-      '',
       PORTAL_URL,
       []
     );
@@ -225,7 +223,7 @@ describe('runPostProcessing tender selection', () => {
       });
       const result = await runPostProcessing(
         { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs, signal: undefined },
-        fakePage(), job.id, session.id, config, outputRoot, () => {}, '', PORTAL_URL, [tender.id]
+        fakePage(), job.id, session.id, config, outputRoot, () => {}, PORTAL_URL, [tender.id]
       );
       expect(result.outcome).toBe('SUCCESS');
     }

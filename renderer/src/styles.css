@@ -2667,7 +2667,9 @@ input:focus-visible {
 
 /* ---------- Live shortlist (run panel) ---------- */
 
-.live-shortlist {
+/* ---------- Run other dates, after a run ---------- */
+
+.more-dates {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2678,57 +2680,51 @@ input:focus-visible {
   background: var(--surface);
 }
 
-.live-shortlist h2 {
+.more-dates h2 {
   margin: 0;
   font-size: 1.0625rem;
 }
 
-.live-shortlist__group {
-  margin: 0;
-  padding: 0;
-  border: 0;
+.more-dates__range {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 10px;
 }
 
-.live-shortlist__group legend {
-  margin-bottom: 6px;
+.more-dates__range label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   color: var(--text-muted);
   font-size: 0.875rem;
   font-weight: 600;
 }
 
-.live-shortlist__item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 8px 0;
-  border-top: 1px solid var(--border);
-  cursor: pointer;
-}
-
-.live-shortlist__item input {
-  width: 1.125rem;
-  height: 1.125rem;
-  margin-top: 3px;
-}
-
-.live-shortlist__item strong,
-.live-shortlist__item small {
-  display: block;
-  overflow-wrap: anywhere;
-}
-
-.live-shortlist__item small {
+.more-dates__hint {
+  margin: 0;
   color: var(--text-muted);
   font-size: 0.875rem;
 }
 
-.live-shortlist__confirm {
-  width: 100%;
+.more-dates__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.live-shortlist__loading {
-  color: var(--text-muted);
+.more-dates__actions .btn {
+  flex: 1 1 auto;
+}
+
+.run-finished__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.readiness-panel__help {
+  grid-column: 2;
+  justify-self: start;
 }
 
 .failed-searches {
@@ -2746,11 +2742,6 @@ input:focus-visible {
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--surface);
-}
-
-.live-shortlist .no-matches {
-  padding: 0;
-  border: 0;
 }
 
 .no-matches h2 {

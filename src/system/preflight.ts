@@ -1,15 +1,23 @@
 import { accessSync, constants, mkdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { detectJnlpLauncher, MISSING_SIGNER_MESSAGE, OPENWEBSTART_DOWNLOAD_URL, type JnlpLauncher } from './jnlpLauncher.js';
 
 export type PreflightLevel = 'PASS' | 'WARNING' | 'BLOCKED';
-export interface PreflightCheck { id: string; label: string; level: PreflightLevel; message: string }
+export interface PreflightCheck {
+  id: string;
+  label: string;
+  level: PreflightLevel;
+  message: string;
+  /** A page that fixes the problem, such as an installer download. */
+  helpUrl?: string;
+}
 export interface PreflightReport { ready: boolean; checks: PreflightCheck[] }
 
 export async function runPreflight(
   outputRoot: string,
   portalUrl: string,
   portalLabel = 'Selected portal',
-  driveOutputRoot = ''
+  driveOutputRoot = '',
+  detectSigner: () => JnlpLauncher = detectJnlpLauncher
 ): Promise<PreflightReport> {
   const checks: PreflightCheck[] = [];
   checks.push({ id: 'browser', label: 'Embedded browser', level: 'PASS', message: `The secure ${portalLabel} browser is included with TenderAssist.` });
@@ -39,13 +47,12 @@ export async function runPreflight(
     checks.push({ id: 'portal', label: portalLabel, level: 'WARNING', message: 'Portal reachability could not be confirmed. You can retry when the network is available.' });
   }
 
-  if (process.platform === 'win32') {
-    try {
-      const association = execFileSync('cmd.exe', ['/d', '/s', '/c', 'assoc .jnlp'], { encoding: 'utf8', windowsHide: true }).trim();
-      checks.push({ id: 'jnlp', label: 'DSC signer', level: association.includes('=') ? 'PASS' : 'WARNING', message: association.includes('=') ? '.jnlp files have a registered application.' : 'Install OpenWebStart or associate .jnlp files before DSC login.' });
-    } catch {
-      checks.push({ id: 'jnlp', label: 'DSC signer', level: 'WARNING', message: 'No .jnlp file association was found. Install OpenWebStart before DSC login.' });
-    }
+  const signer = detectSigner();
+  if (signer.status === 'READY') {
+    checks.push({ id: 'jnlp', label: 'DSC signer (OpenWebStart)', level: 'PASS', message: 'Java Web Start is installed for the DSC signer.' });
+  } else if (signer.status === 'MISSING') {
+    // Sign-in cannot finish without the signer, so the run must not start.
+    checks.push({ id: 'jnlp', label: 'DSC signer (OpenWebStart)', level: 'BLOCKED', message: MISSING_SIGNER_MESSAGE, helpUrl: OPENWEBSTART_DOWNLOAD_URL });
   }
 
   return { ready: checks.every((check) => check.level !== 'BLOCKED'), checks };
