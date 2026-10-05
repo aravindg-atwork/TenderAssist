@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { runMigrations } from '../../../src/persistence/migrate.js';
 import { JobRepository } from '../../../src/persistence/repositories/jobRepository.js';
 import { TenderRepository, type CreateTenderInput } from '../../../src/persistence/repositories/tenderRepository.js';
+import { RunConfigurationRepository } from '../../../src/persistence/repositories/runConfigurationRepository.js';
 
 describe('TenderRepository', () => {
   let db: DatabaseSync;
@@ -97,5 +98,30 @@ describe('TenderRepository', () => {
     expect(fetched.detail_product_category).toBe('Information Technology');
     expect(fetched.detail_reviewed_at).not.toBeNull();
     expect(JSON.parse(fetched.document_links_json)).toHaveLength(1);
+  });
+
+  it('lists favourites from earlier runs of the same portal and date, not this run or other dates', () => {
+    const configs = new RunConfigurationRepository(db);
+    const config = (searchDate: string, portalId = 'tamil-nadu') => ({ searchDate, portalId, productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] });
+    const earlier = jobs.create().id;
+    const otherDate = jobs.create().id;
+    const otherPortal = jobs.create().id;
+    configs.saveForJob(jobId, config('2026-09-25'));
+    configs.saveForJob(earlier, config('2026-09-25'));
+    configs.saveForJob(otherDate, config('2026-09-26'));
+    configs.saveForJob(otherPortal, config('2026-09-25', 'kerala'));
+
+    const favourite = (job: string, ref: string, favourited = true) => {
+      const tender = repo.upsert(baseInput({ jobId: job, tenderRef: ref, tenderPortalId: ref }));
+      if (favourited) repo.markFavorited(tender.id, '2026-10-05T08:00:00Z');
+      return tender;
+    };
+    const wanted = favourite(earlier, 'EARLIER_FAV');
+    favourite(earlier, 'EARLIER_NOT_FAV', false);
+    favourite(otherDate, 'OTHER_DATE');
+    favourite(otherPortal, 'OTHER_PORTAL');
+    favourite(jobId, 'THIS_RUN');
+
+    expect(repo.listEarlierFavourites(jobId, 'tamil-nadu', '2026-09-25').map((t) => t.id)).toEqual([wanted.id]);
   });
 });

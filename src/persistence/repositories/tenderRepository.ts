@@ -125,6 +125,22 @@ export class TenderRepository {
       .all(jobId) as unknown as TenderRow[];
   }
 
+  /**
+   * Tenders favourited by earlier runs of the same portal and published
+   * date. A favourited tender no longer appears in the portal's search, so
+   * a later run of that date can only check it in My Tenders.
+   */
+  listEarlierFavourites(jobId: string, portalId: string, searchDate: string): TenderRow[] {
+    return this.db
+      .prepare(
+        `SELECT t.* FROM tenders t
+         JOIN job_run_configs c ON c.job_id = t.job_id
+         WHERE t.favorited = 1 AND t.job_id != ? AND c.portal_id = ? AND c.search_date = ?
+         ORDER BY t.created_at DESC, t.rowid DESC`
+      )
+      .all(jobId, portalId, searchDate) as unknown as TenderRow[];
+  }
+
   /** Every run-level row recorded for one durable tender, oldest first. */
   listForOpportunity(opportunityId: string): TenderRow[] {
     return this.db

@@ -51,6 +51,26 @@ export async function ensurePortalMenu(
  * is set directly via evaluate() rather than fill(), which Playwright
  * refuses on a readonly element), submits, and parses every result row.
  */
+/**
+ * Clicks a submit control and waits until the portal has shown a NEW page
+ * and finished loading it. Waiting only for "loaded" is not enough: the old
+ * page already counts as loaded, and with no pauses between actions the
+ * results were read from the search form itself and recorded as 0 tenders.
+ */
+export async function submitAndWaitForNewPage(page: Page, submit: () => Promise<void>, timeoutMs = SUBMIT_LOAD_TIMEOUT_MS): Promise<void> {
+  await page.evaluate(() => { (window as unknown as Record<string, unknown>).__tenderassistBeforeSubmit = true; });
+  await submit();
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const arrived = await page.evaluate(
+      () => !(window as unknown as Record<string, unknown>).__tenderassistBeforeSubmit && document.readyState === 'complete'
+    ).catch(() => false); // the old page is going away mid-check
+    if (arrived) return;
+    if (Date.now() > deadline) throw new Error('Timed out waiting for the portal to show the search results.');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 export async function searchCategory(
   page: Page,
   productCategory: string,
@@ -60,7 +80,7 @@ export async function searchCategory(
 ): Promise<ParsedActiveTenderRow[]> {
   await ensurePortalMenu(page, 'Search Active Tenders', portalHomeUrl, paceAction);
   await paceAction();
-  await page.click('text=Search Active Tenders');
+  await submitAndWaitForNewPage(page, () => page.click('text=Search Active Tenders'));
   await page.waitForSelector('#ProductCategory');
   await paceAction();
   await page.selectOption('#ProductCategory', { label: productCategory });
@@ -75,8 +95,7 @@ export async function searchCategory(
   }, fromToDateDdMmYyyy);
 
   await paceAction();
-  await page.click('#submit');
-  await page.waitForLoadState('load').catch(() => {});
+  await submitAndWaitForNewPage(page, () => page.click('#submit'));
 
   const cellRows = await page.evaluate(() => {
     // The real portal is a deeply nested-table page layout: an ANCESTOR <tr>
@@ -149,8 +168,8 @@ export async function favoriteAllVisibleRows(page: Page, paceAction: PaceAction 
   };
   page.on('dialog', onDialog);
   await paceAction();
-  await page.click('#save');
-  await page.waitForLoadState('load').catch(() => {});
+  // Wait for the portal's answer, so the next step cannot cut the save short.
+  await submitAndWaitForNewPage(page, () => page.click('#save')).catch(() => {});
   page.off('dialog', onDialog);
 
   return checkedCount;
@@ -183,8 +202,8 @@ export async function favoriteVisibleRows(
   const onDialog = (dialog: Dialog) => { void dialog.dismiss(); };
   page.on('dialog', onDialog);
   await paceAction();
-  await page.click('#save');
-  await page.waitForLoadState('load', { timeout: SUBMIT_LOAD_TIMEOUT_MS }).catch(() => {});
+  // Wait for the portal's answer, so the next search cannot cut the save short.
+  await submitAndWaitForNewPage(page, () => page.click('#save')).catch(() => {});
   page.off('dialog', onDialog);
   // A favourite submit the portal never answers leaves a blank page; recover
   // now so the next category does not fail on it.

@@ -1050,6 +1050,38 @@ async function saveTenderDocuments(ctx: RunContext, jobId: string, config: RunCo
   }
 }
 
+/**
+ * Adds to this run the date's earlier favourites that were never decided
+ * from their details page, so My Tenders checks them like new ones. A
+ * tender already decided (kept or rejected from its details) is left alone.
+ */
+function carryOverUndecidedFavourites(jobId: string, portalId: string, searchDate: string): void {
+  const inThisRun = new Set(tenders.listForJob(jobId).map((tender) => tender.tender_portal_id ?? tender.tender_ref));
+  const carried = new Set<string>();
+  for (const earlier of tenders.listEarlierFavourites(jobId, portalId, searchDate)) {
+    const key = earlier.tender_portal_id ?? earlier.tender_ref;
+    if (inThisRun.has(key) || carried.has(key)) continue;
+    carried.add(key);
+    // The newest earlier row tells whether this tender was ever properly decided.
+    if (earlier.detail_reviewed_at && classifications.getFinalForTender(earlier.id) !== 'UNCERTAIN') continue;
+    const tender = tenders.upsert({
+      jobId,
+      tenderRef: earlier.tender_ref,
+      tenderPortalId: earlier.tender_portal_id,
+      title: earlier.title,
+      organisationChain: earlier.organisation_chain,
+      department: earlier.department,
+      stateName: earlier.state_name,
+      publishedDate: earlier.published_date,
+      closingDate: earlier.closing_date,
+      openingDate: earlier.opening_date,
+      productCategory: earlier.product_category,
+      valueInRupees: earlier.value_in_rupees,
+    });
+    tenders.markFavorited(tender.id, earlier.favorited_at ?? new Date().toISOString());
+  }
+}
+
 /** Search, screen, and collect documents for one published date. */
 async function runDate(ctx: RunContext, jobId: string, authSessionId: string): Promise<{ result: AuthJobUpdate; selected: CollectedCounts }> {
   const config = runConfigurations.getForJob(jobId)!;
@@ -1072,6 +1104,10 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
   // Record what the run saw even if the search stopped part-way.
   syncOpportunities('search', () => syncJobOpportunities(opportunitySync, jobId, portal.id, { screening: false }));
   if (searchResult.outcome !== 'SUCCESS') return { result: searchResult, selected: { shortlisted: 0, needsReview: 0 } };
+
+  // Earlier favourites of this date never decided from their details page
+  // (they no longer show in search) are checked in My Tenders with this run.
+  carryOverUndecidedFavourites(jobId, portal.id, config.searchDate);
 
   const classificationResult = await runClassificationPhase(
     {

@@ -87,6 +87,7 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
   let lastFavoriteBody = '';
   let blankAfterFavorite = false;
   let flakyHomeFailures = 0;
+  let slowResultsMs = 0;
 
   beforeEach(async () => {
     currentRows = [];
@@ -94,7 +95,7 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
     blankAfterFavorite = false;
     server = http.createServer((req, res) => {
       if (req.url?.startsWith('/results')) {
-        res.end(resultsHtml(currentRows));
+        setTimeout(() => res.end(resultsHtml(currentRows)), slowResultsMs);
       } else if (req.url?.startsWith('/favorited')) {
         req.on('data', (chunk) => { lastFavoriteBody += chunk.toString(); });
         req.on('end', () => res.end(blankAfterFavorite ? '' : '<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>'));
@@ -255,6 +256,22 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
 
     expect(flakyHomeFailures).toBe(0);
     expect(await page.locator('text=Search Active Tenders').first().isVisible()).toBe(true);
+    await browser.close();
+  });
+
+  it('reads the results only after a slow portal has shown them, with no pauses between actions', async () => {
+    currentRows = [
+      { id: '2026_SLOW_1', title: 'Slow answer', ref: 'REF/SLOW', category: 'Information Technology', value: 'NA' },
+    ];
+    slowResultsMs = 1_500;
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    // No pacing, like the "Fast" setting.
+    const rows = await searchCategory(page, 'Information Technology', '21/09/2026');
+
+    expect(rows.map((row) => row.tenderId)).toEqual(['2026_SLOW_1']);
     await browser.close();
   });
 });

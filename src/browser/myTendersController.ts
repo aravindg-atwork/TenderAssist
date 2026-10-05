@@ -2,7 +2,7 @@
 import type { Page } from 'playwright-core';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { PaceAction } from '../orchestration/actionPacer.js';
-import { ensurePortalMenu } from './searchFormController.js';
+import { ensurePortalMenu, submitAndWaitForNewPage } from './searchFormController.js';
 
 const noPacing: PaceAction = async () => {};
 
@@ -40,8 +40,8 @@ export async function navigateToMyTenders(page: Page, paceAction: PaceAction = n
   const link = page.getByText('My Tenders', { exact: true }).first();
   await link.waitFor({ state: 'visible', timeout: 10_000 });
   await paceAction();
-  await link.click();
-  await page.waitForLoadState('load').catch(() => {});
+  // Read nothing until My Tenders itself has loaded, not the page before it.
+  await submitAndWaitForNewPage(page, () => link.click());
 }
 
 async function findTenderRow(page: Page, tender: TenderRow) {
@@ -234,8 +234,7 @@ async function goToNextPage(page: Page, paceAction: PaceAction): Promise<boolean
       const className = (await candidate.getAttribute('class')) ?? '';
       if (disabled || ariaDisabled === 'true' || /\bdisabled\b/i.test(className)) continue;
       await paceAction();
-      await candidate.click();
-      await page.waitForLoadState('load').catch(() => {});
+      await submitAndWaitForNewPage(page, () => candidate.click()).catch(() => {});
       return true;
     }
   }
