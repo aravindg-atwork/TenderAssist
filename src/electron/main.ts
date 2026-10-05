@@ -822,6 +822,8 @@ function signIn(
   onUpdate: (update: AuthJobUpdate) => void,
   existingJobId?: string
 ): Promise<AuthJobUpdate> {
+  // Pop-ups show in the portal view while the operator signs in.
+  portalHost?.setAutomationPopups(false);
   return runAuthJob(
     {
       jobs, sessions, jobMachine, authMachine,
@@ -842,7 +844,11 @@ function signIn(
       ctx.stopWatchingSessionLoss = stop;
       activeStopWatchingSessionLoss = stop;
     }
-  );
+  ).then((result) => {
+    // Signed in: automation reads tender pop-ups in hidden windows.
+    if (result.outcome === 'SUCCESS') portalHost?.setAutomationPopups(true);
+    return result;
+  });
 }
 
 /**
@@ -1089,7 +1095,10 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
         awaitingMoreDates: true,
         statusMessage: `${runFinishedMessage(shortlisted, batch.done.length)}${skippedNote ? ` ${skippedNote}` : ''}`,
       });
+      // The operator may browse the portal while deciding.
+      portalHost?.setAutomationPopups(false);
       const more = await waitForMoreDates(ctx.abortController.signal);
+      portalHost?.setAutomationPopups(true);
       if (ctx.abortController.signal.aborted) return;
       if (!more) {
         emitJobUpdate({ ...lastResult!, awaitingMoreDates: false, outcome: 'SUCCESS', statusMessage: runFinishedMessage(shortlisted, batch.done.length) });

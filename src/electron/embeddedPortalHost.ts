@@ -30,10 +30,13 @@ const HEALTH_CHECK_TIMEOUT_MS = 10_000;
 const HEALTH_CHECK_MISSES = 4;
 // Automatic reloads after a page fails to load, before leaving it to the operator.
 const MAX_LOAD_RETRIES = 3;
+// A hidden tender-details window the automation forgot is closed after this long.
+const AUTOMATION_POPUP_LIFETIME_MS = 2 * 60_000;
 
 export class EmbeddedPortalHost {
   private view: WebContentsView | undefined;
   private crashed = false;
+  private automationPopups = false;
   private readonly crashListeners = new Set<(reason: string) => void>();
   private visible = false;
   private bounds: Rectangle = { x: 0, y: 0, width: 1, height: 1 };
@@ -84,6 +87,19 @@ export class EmbeddedPortalHost {
     });
 
     view.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+      if (this.automationPopups && isTrustedPortalUrl(targetUrl, this.portal)) {
+        // While automation reads tenders, the portal's own pop-up (View
+        // Tender Information) opens as a real, hidden window. Loading it in
+        // place of the results page instead, then going Back to that
+        // submitted-form page, makes the portal sign the operator out.
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            show: false,
+            webPreferences: { partition: this.partition, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true },
+          },
+        };
+      }
       if (isTrustedPortalUrl(targetUrl, this.portal)) {
         queueMicrotask(() => {
           if (this.view === view && !view.webContents.isDestroyed()) {
@@ -96,6 +112,16 @@ export class EmbeddedPortalHost {
 
     view.webContents.on('will-navigate', (event, targetUrl) => {
       if (!isTrustedPortalUrl(targetUrl, this.portal)) event.preventDefault();
+    });
+
+    view.webContents.on('did-create-window', (popup) => {
+      popup.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      popup.webContents.on('will-navigate', (event, targetUrl) => {
+        if (!isTrustedPortalUrl(targetUrl, this.portal)) event.preventDefault();
+      });
+      const expiry = setTimeout(() => { if (!popup.isDestroyed()) popup.destroy(); }, AUTOMATION_POPUP_LIFETIME_MS);
+      popup.once('closed', () => clearTimeout(expiry));
+      view.webContents.once('destroyed', () => { if (!popup.isDestroyed()) popup.destroy(); });
     });
 
     view.webContents.on('render-process-gone', (_event, details) => {
@@ -186,6 +212,15 @@ export class EmbeddedPortalHost {
   /** False once the page has crashed: it must be opened again, not reused. */
   get isOpen(): boolean {
     return Boolean(this.view && !this.view.webContents.isDestroyed() && !this.crashed);
+  }
+
+  /**
+   * On while automation reads the signed-in portal: its pop-ups open as
+   * hidden windows. Off during sign-in and while the operator browses, so a
+   * pop-up they open shows in the portal view as before.
+   */
+  setAutomationPopups(enabled: boolean): void {
+    this.automationPopups = enabled;
   }
 
   /** Called when the portal page crashes or hangs, with the reason. */

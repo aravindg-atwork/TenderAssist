@@ -140,6 +140,11 @@ async function reviewTenderAtRow(
   await paceAction();
   await detailLink.click();
   const popup = await Promise.race([popupPromise, samePageNavigation]);
+  // Neither a pop-up nor a new page: reading on would take the results page
+  // for the tender's details.
+  if (!popup && page.url() === beforeUrl) {
+    throw new Error(`The details of tender ${tender.tender_portal_id ?? tender.tender_ref} did not open.`);
+  }
   const detailPage = popup ?? page;
   await detailPage.waitForLoadState('load').catch(() => {});
   const details = await extractTenderDetails(detailPage);
