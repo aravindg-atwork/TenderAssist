@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type MouseEvent } from 'react';
 import type { JobListItem } from '../../../src/electron/ipcTypes';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { relativeTime, absoluteDateTime } from '../format';
-import { plural, publishedLabel, runStatus } from '../words';
+import { plainError, plural, publishedLabel, runStatus } from '../words';
 import { TrashIcon } from './icons';
 
 export interface RunsPageProps {
@@ -11,12 +11,14 @@ export interface RunsPageProps {
 }
 
 /** Every search TenderAssist has run, newest first, in plain words. */
+const runName = (run: JobListItem) => run.purpose === 'DOCUMENTS' ? 'the documents run' : `the search for ${publishedLabel(run.searchDate)}`;
+
 export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
   const [runs, setRuns] = useState<JobListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    window.tenderAssist.listJobs().then(setRuns).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    window.tenderAssist.listJobs().then(setRuns).catch((err) => setError(plainError(err)));
   }, []);
   useEffect(() => {
     load();
@@ -25,9 +27,9 @@ export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
 
   const remove = async (event: MouseEvent, run: JobListItem) => {
     event.stopPropagation();
-    if (!window.confirm(`Delete the record of the search for ${publishedLabel(run.searchDate)}? Tenders and files are kept.`)) return;
+    if (!window.confirm(`Delete the record of ${runName(run)}? Tenders and files are kept.`)) return;
     try { await window.tenderAssist.deleteJob(run.jobId); load(); }
-    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    catch (err) { setError(plainError(err)); }
   };
 
   return (
@@ -49,7 +51,7 @@ export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
               return (
                 <tr key={run.jobId} onClick={() => onOpenRun(run.jobId)} tabIndex={0}
                   onKeyDown={(event) => { if (event.key === 'Enter') onOpenRun(run.jobId); }}>
-                  <td className="ledger__strong">{publishedLabel(run.searchDate)}</td>
+                  <td className="ledger__strong">{run.purpose === 'DOCUMENTS' ? 'Documents for approved tenders' : publishedLabel(run.searchDate)}</td>
                   <td><span className={`status status--${status.tone}`}>{status.text}</span></td>
                   <td className="num">{run.tendersFound}</td>
                   <td className="num">{run.kept > 0 ? <strong>{run.kept}</strong> : '0'}</td>
@@ -57,7 +59,7 @@ export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
                   <td title={absoluteDateTime(run.createdAt)}>{relativeTime(run.createdAt)}</td>
                   <td className="ledger__action">
                     {run.jobId !== activeJobId && (
-                      <button type="button" className="btn btn--icon" aria-label={`Delete the search for ${publishedLabel(run.searchDate)}`} onClick={(event) => remove(event, run)}>
+                      <button type="button" className="btn btn--icon" aria-label={`Delete the record of ${runName(run)}`} onClick={(event) => remove(event, run)}>
                         <TrashIcon />
                       </button>
                     )}

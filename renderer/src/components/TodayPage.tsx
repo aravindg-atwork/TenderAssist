@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { InboxItem, InboxView, OperatorDecision, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
+import type { DocumentsWaiting, InboxItem, InboxView, OperatorDecision, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
 import type { PreflightReport } from '../../../src/system/preflight';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { LIFECYCLE_LABELS } from '../format';
@@ -7,6 +7,7 @@ import { PortalSelect } from './PortalSelect';
 import { TenderFile, type FileAction } from './TenderFile';
 import { TenderTray, type TrayGroup } from './TenderTray';
 import { AlertIcon, ArrowRightIcon } from './icons';
+import { plainError } from '../words';
 
 export interface FinishedRun { jobId: string; message: string }
 
@@ -69,7 +70,16 @@ export function TodayPage({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [decideError, setDecideError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [documentsWaiting, setDocumentsWaiting] = useState<DocumentsWaiting | null>(null);
   const portal = getPortalDefinition(selectedPortalId);
+
+  const loadDocumentsWaiting = useCallback(() => {
+    window.tenderAssist.getDocumentsWaiting(selectedPortalId).then(setDocumentsWaiting).catch(() => {});
+  }, [selectedPortalId]);
+  useEffect(() => {
+    loadDocumentsWaiting();
+    return window.tenderAssist.onJobUpdate((update) => { if (update.outcome) loadDocumentsWaiting(); });
+  }, [loadDocumentsWaiting]);
 
   const applyInbox = useCallback((view: InboxView) => {
     setInbox(view);
@@ -77,7 +87,7 @@ export function TodayPage({
   }, [onInboxCount]);
 
   const loadInbox = useCallback(() => {
-    window.tenderAssist.getInbox().then(applyInbox).catch((err) => setDecideError(err instanceof Error ? err.message : String(err)));
+    window.tenderAssist.getInbox().then(applyInbox).catch((err) => setDecideError(plainError(err)));
   }, [applyInbox]);
 
   useEffect(() => {
@@ -121,12 +131,13 @@ export function TodayPage({
     try {
       const next = await window.tenderAssist.decideTenders([item.id], decision, note);
       applyInbox(next);
+      if (decision === 'APPROVE') loadDocumentsWaiting();
       setDone(`${DONE_MESSAGES[decision]} ${item.title.length > 60 ? `${item.title.slice(0, 60)}…` : item.title}`);
       // Open whatever now sits where the decided file was.
       const nextOrdered = [...next.recommended, ...next.uncertain, ...next.changed, ...next.autoRejected];
       setSelectedId(nextOrdered[Math.min(index, nextOrdered.length - 1)]?.id ?? null);
     } catch (err) {
-      setDecideError(err instanceof Error ? err.message : String(err));
+      setDecideError(plainError(err));
     } finally {
       setBusyId(null);
     }
@@ -138,7 +149,7 @@ export function TodayPage({
       applyInbox(await window.tenderAssist.acknowledgeTenderChanges([item.id]));
       setDone('Decision kept. The change is in the tender’s history.');
     } catch (err) {
-      setDecideError(err instanceof Error ? err.message : String(err));
+      setDecideError(plainError(err));
     } finally {
       setBusyId(null);
     }
@@ -207,7 +218,7 @@ export function TodayPage({
       if (skipped.length > 0) setSkippedNote(`Already searched, skipped: ${skipped.map(shortDate).join(', ')}.`);
       onRunStarted(jobId);
     } catch (err) {
-      setStartError(err instanceof Error ? err.message : String(err));
+      setStartError(plainError(err));
     } finally {
       setStarting(false);
     }
@@ -231,11 +242,27 @@ export function TodayPage({
       }
       setRecovery(null);
     } catch (err) {
-      setStartError(err instanceof Error ? err.message : String(err));
+      setStartError(plainError(err));
     }
   };
 
   const missed = history.missedDates;
+
+  const collectDocuments = async () => {
+    setStarting(true);
+    setStartError(null);
+    onDismissFinished();
+    try {
+      const { jobId } = await window.tenderAssist.startDocumentRun(selectedPortalId);
+      onRunStarted(jobId);
+    } catch (err) {
+      setStartError(plainError(err));
+    } finally {
+      setStarting(false);
+    }
+  };
+  const notInMyTenders = documentsWaiting?.notInMyTenders ?? [];
+  const searchAgainDates = [...new Set(notInMyTenders.map((tender) => tender.foundOnDate).filter((date): date is string => Boolean(date)))].sort();
 
   return (
     <div className="today">
@@ -309,6 +336,31 @@ export function TodayPage({
             <button type="button" className="btn btn--quiet btn--small" onClick={onDismissFinished}>Dismiss</button>
           </div>
         )}
+        {documentsWaiting && documentsWaiting.ready > 0 && (
+          <div className="notice notice--attention">
+            <AlertIcon />
+            <span>
+              <strong>{documentsWaiting.ready} approved {documentsWaiting.ready === 1 ? 'tender is' : 'tenders are'} waiting for {documentsWaiting.ready === 1 ? 'its' : 'their'} documents.</strong>{' '}
+              TenderAssist signs in, opens only {documentsWaiting.ready === 1 ? 'that tender' : 'those tenders'} in My Tenders, and saves the documents and zip file. Nothing is searched again.
+            </span>
+            <button type="button" className="btn btn--primary btn--small" disabled={starting || Boolean(blocker)} onClick={() => void collectDocuments()}>
+              Collect their documents
+            </button>
+          </div>
+        )}
+        {notInMyTenders.length > 0 && (
+          <div className="notice notice--quiet">
+            <span>
+              {notInMyTenders.length} approved {notInMyTenders.length === 1 ? 'tender never' : 'tenders never'} reached My Tenders, so {notInMyTenders.length === 1 ? 'its' : 'their'} documents cannot be collected yet.
+              {searchAgainDates.length > 0 && ` Search ${searchAgainDates.map(shortDate).join(', ')} again to read ${notInMyTenders.length === 1 ? 'it' : 'them'}.`}
+            </span>
+            {searchAgainDates.length > 0 && (
+              <button type="button" className="btn btn--quiet btn--small" onClick={() => { setFrom(searchAgainDates[0]); setTo(searchAgainDates[searchAgainDates.length - 1]); setRunAgain(true); }}>
+                Use these dates
+              </button>
+            )}
+          </div>
+        )}
         {missed.length > 0 && !finishedRun && (
           <div className="notice notice--quiet">
             <span>Not searched yet: {missed.slice(0, 6).map(shortDate).join(', ')}{missed.length > 6 ? ` and ${missed.length - 6} more` : ''}.</span>
@@ -338,6 +390,7 @@ export function TodayPage({
               actions={actionsFor(selected)}
               waitingNote={selected.group === 'CHANGED' ? selected.explanation : undefined}
               onDismissRelated={async (otherId) => { await window.tenderAssist.dismissRelatedTender(selected.id, otherId); loadInbox(); }}
+              onSearchDate={(date) => { setFrom(date); setTo(date); setRunAgain(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             />
           ) : inbox && (
             <div className="desk__empty">

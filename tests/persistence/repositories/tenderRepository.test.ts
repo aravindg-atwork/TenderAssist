@@ -123,5 +123,8 @@ describe('TenderRepository', () => {
     favourite(jobId, 'THIS_RUN');
 
     expect(repo.listEarlierFavourites(jobId, 'tamil-nadu', '2026-09-25').map((t) => t.id)).toEqual([wanted.id]);
+    // Every date: other dates' favourites too, never another portal's or this run's own.
+    const everyDate = repo.listEarlierFavourites(jobId, 'tamil-nadu', null).map((t) => t.tender_ref).sort();
+    expect(everyDate).toEqual(['EARLIER_FAV', 'OTHER_DATE']);
   });
 });

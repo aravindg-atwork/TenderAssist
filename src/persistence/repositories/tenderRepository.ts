@@ -113,6 +113,10 @@ export class TenderRepository {
     return row;
   }
 
+  getById(id: string): TenderRow | undefined {
+    return this.db.prepare('SELECT * FROM tenders WHERE id = ?').get(id) as TenderRow | undefined;
+  }
+
   findByJobAndRef(jobId: string, tenderRef: string): TenderRow | undefined {
     return this.db
       .prepare('SELECT * FROM tenders WHERE job_id = ? AND tender_ref = ?')
@@ -130,15 +134,16 @@ export class TenderRepository {
    * date. A favourited tender no longer appears in the portal's search, so
    * a later run of that date can only check it in My Tenders.
    */
-  listEarlierFavourites(jobId: string, portalId: string, searchDate: string): TenderRow[] {
+  listEarlierFavourites(jobId: string, portalId: string, searchDate: string | null): TenderRow[] {
+    // A null date means every date: all favourites still in My Tenders.
     return this.db
       .prepare(
         `SELECT t.* FROM tenders t
          JOIN job_run_configs c ON c.job_id = t.job_id
-         WHERE t.favorited = 1 AND t.job_id != ? AND c.portal_id = ? AND c.search_date = ?
+         WHERE t.favorited = 1 AND t.job_id != ? AND c.portal_id = ? AND (? IS NULL OR c.search_date = ?)
          ORDER BY t.created_at DESC, t.rowid DESC`
       )
-      .all(jobId, portalId, searchDate) as unknown as TenderRow[];
+      .all(jobId, portalId, searchDate, searchDate) as unknown as TenderRow[];
   }
 
   /** Every run-level row recorded for one durable tender, oldest first. */

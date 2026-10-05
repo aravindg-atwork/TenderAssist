@@ -22,6 +22,18 @@ describe('JobRepository', () => {
     expect(fetched).toEqual(created);
   });
 
+  it('is a search unless marked as a documents run, which lists its tenders', () => {
+    const search = repo.create();
+    expect(repo.getById(search.id)?.purpose).toBe('SEARCH');
+    expect(repo.documentTenderIds(repo.getById(search.id))).toEqual([]);
+
+    const documents = repo.create();
+    repo.markDocumentRun(documents.id, ['tender-a', 'tender-b']);
+    const row = repo.getById(documents.id);
+    expect(row?.purpose).toBe('DOCUMENTS');
+    expect(repo.documentTenderIds(row)).toEqual(['tender-a', 'tender-b']);
+  });
+
   it('returns undefined for an unknown id', () => {
     expect(repo.getById('does-not-exist')).toBeUndefined();
   });

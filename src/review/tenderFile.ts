@@ -24,6 +24,12 @@ export interface TenderFileView {
   hasFolder: boolean;
   /** Whether its details page has been read at all. */
   detailsRead: boolean;
+  /** What the portal's search list showed, before any details page was read. */
+  listing: TenderField[];
+  /** The published date it was found under, for searching that date again. */
+  foundOnDate: string | null;
+  /** Whether it was ticked into My Tenders, where the next search can read it. */
+  inMyTenders: boolean;
 }
 
 /** The "Label: value" lines TenderAssist stores at the top of a tender's text. */

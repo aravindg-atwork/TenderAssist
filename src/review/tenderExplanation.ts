@@ -72,13 +72,13 @@ function rejectClause(gate: ScreenedGate): string {
 }
 
 function uncertainSentence(gate: ScreenedGate | undefined): string {
-  if (!gate) return 'Uncertain: not every check ran, so it needs your judgement.';
+  if (!gate) return 'Not decided yet: not every check ran. The next search finishes them.';
   if (gate.reasonCode === 'DETAIL_REVIEW_FAILED' || gate.reasonCode === 'PREFAVORITE_DETAIL_REVIEW_FAILED' || gate.reasonCode === 'DETAIL_TEXT_MISSING') {
-    return 'Uncertain: the tender detail page could not be read.';
+    return 'Not decided yet: TenderAssist could not open its details page. The next search opens it again from My Tenders.';
   }
-  if (gate.gate === 'G3') return 'Uncertain: the title hints at your intent but the detail page did not confirm it.';
-  if (gate.gate === 'G4') return 'Uncertain: the scope may include excluded work.';
-  return 'Uncertain: needs your judgement.';
+  if (gate.gate === 'G3') return 'Needs your judgement: the title hints at your intent, but its details page did not confirm it.';
+  if (gate.gate === 'G4') return 'Needs your judgement: the work may include something you exclude.';
+  return 'Needs your judgement.';
 }
 
 export function explainScreening(recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN' | null, gates: ScreenedGate[]): TenderExplanation {

@@ -42,9 +42,9 @@ export async function runPreflight(
 
   try {
     const response = await fetch(portalUrl, { signal: AbortSignal.timeout(7000) });
-    checks.push({ id: 'portal', label: portalLabel, level: response.ok ? 'PASS' : 'WARNING', message: response.ok ? 'Portal is reachable.' : `Portal returned HTTP ${response.status}.` });
+    checks.push({ id: 'portal', label: portalLabel, level: response.ok ? 'PASS' : 'WARNING', message: response.ok ? 'The website is answering.' : 'The website is having trouble right now. You can still search; TenderAssist waits and tries again.' });
   } catch {
-    checks.push({ id: 'portal', label: portalLabel, level: 'WARNING', message: 'Portal reachability could not be confirmed. You can retry when the network is available.' });
+    checks.push({ id: 'portal', label: portalLabel, level: 'WARNING', message: 'The website could not be reached. Check the internet connection, or try again in a few minutes.' });
   }
 
   const signer = detectSigner();

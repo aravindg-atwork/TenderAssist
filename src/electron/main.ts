@@ -44,6 +44,7 @@ import type { Page } from 'playwright-core';
 import type {
   JobListItem,
   JobDetail,
+  DocumentsWaiting,
   RunSettingsState,
   PortalCredentialSettings,
   SavePortalCredentialInput,
@@ -54,7 +55,9 @@ import { normalizeRunConfiguration, type RunConfiguration } from '../config/runC
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
-import { downloadDetailDocuments } from '../browser/myTendersController.js';
+import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
+import { parseTenderPortalDate } from '../search/tenderDateParser.js';
+import { retryTransient } from '../orchestration/transientRetry.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
 import { runPreflight } from '../system/preflight.js';
 import { detectJnlpLauncher, MISSING_SIGNER_MESSAGE, OPENWEBSTART_DOWNLOAD_URL } from '../system/jnlpLauncher.js';
@@ -454,7 +457,18 @@ ipcMain.handle('get-tender-file', (_event, opportunityId: unknown): TenderFileVi
   const read = rows.find((tender) => tender.detail_text);
   const allFields = parseDetailFields(read?.detail_text);
   const withDocuments = rows.find((tender) => workflow.listDocuments(tender.id).length > 0);
+  const latest = rows[0];
+  const foundOnDate = latest ? runConfigurations.getForJob(latest.job_id)?.searchDate ?? null : null;
+  const listing = latest ? [
+    { label: 'Reference', value: latest.tender_ref },
+    { label: 'Category', value: latest.detail_product_category || latest.product_category },
+    { label: 'Organisation', value: (latest.organisation_chain ?? '').replace(/\|\|/g, ' › ') },
+    { label: 'Found when searching', value: foundOnDate ?? '' },
+  ].filter((field) => field.value) : [];
   return {
+    listing,
+    foundOnDate,
+    inMyTenders: rows.some((tender) => tender.favorited === 1),
     opportunityId,
     keyFacts: keyFactsFrom(allFields),
     allFields,
@@ -489,8 +503,20 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
   return jobs.listAll().map((job) => {
     const session = sessions.getLatestForJob(job.id);
     const config = runConfigurations.getForJob(job.id);
+    if (job.purpose === 'DOCUMENTS') {
+      const ids = jobs.documentTenderIds(job);
+      return {
+        jobId: job.id, jobState: job.state, authState: session?.state ?? null,
+        createdAt: job.created_at, updatedAt: job.updated_at,
+        portalId: config?.portalId ?? DEFAULT_PORTAL_ID, searchDate: null,
+        tendersFound: ids.length,
+        kept: ids.filter((id) => workflow.listDocuments(id).some((document) => document.state === 'DOWNLOADED')).length,
+        purpose: 'DOCUMENTS' as const,
+      };
+    }
     const found = tenders.listForJob(job.id);
     return {
+      purpose: 'SEARCH' as const,
       jobId: job.id,
       jobState: job.state,
       authState: session?.state ?? null,
@@ -757,19 +783,25 @@ ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
   const job = jobs.getById(jobId);
   if (!job) throw new Error(`Job not found: ${jobId}`);
   const session = sessions.getLatestForJob(jobId);
+  const documentRun = job.purpose === 'DOCUMENTS';
+  // A documents run's tenders belong to the searches that found them; all were approved.
+  const runTenders = documentRun
+    ? jobs.documentTenderIds(job).map((id) => tenders.getById(id)).filter((tender): tender is TenderRow => Boolean(tender))
+    : tenders.listForJob(jobId);
   return {
     jobId: job.id,
     jobState: job.state,
+    purpose: documentRun ? 'DOCUMENTS' : 'SEARCH',
     authSessionId: session?.id ?? null,
     authState: session?.state ?? null,
     jobTransitions: transitions.listFor('JOB', jobId),
     authTransitions: session ? transitions.listFor('AUTH_SESSION', session.id) : [],
-    tenders: tenders.listForJob(jobId).map((tender) => ({
+    tenders: runTenders.map((tender) => ({
       ...tender,
       classification: classifications.getFinalForTender(tender.id),
       classificationGates: classifications.listForTender(tender.id),
       manualReview: workflow.getReview(tender.id) ?? null,
-      effectiveClassification: workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id),
+      effectiveClassification: documentRun ? 'KEEP' as const : workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id),
       documents: workflow.listDocuments(tender.id),
       requirements: workflow.getRequirements(tender.id) ?? null,
       opportunityLifecycle: tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle ?? null : null,
@@ -813,6 +845,8 @@ interface RunContext {
   stopWatchingSessionLoss?: () => void;
   /** The job currently running in this sign-in; one per published date. */
   jobId?: string;
+  /** The session's first date also checks every undecided favourite, whatever its date. */
+  checkAllUndecided?: boolean;
 }
 
 /** Claim the single active-run slot synchronously, before any await. */
@@ -1099,19 +1133,22 @@ async function saveTenderDocuments(ctx: RunContext, jobId: string, config: RunCo
 }
 
 /**
- * Adds to this run the date's earlier favourites that were never decided
+ * Adds to this run the date's (or, with a null date, every date's) earlier favourites that were never decided
  * from their details page, so My Tenders checks them like new ones. A
  * tender already decided (kept or rejected from its details) is left alone.
  */
-function carryOverUndecidedFavourites(jobId: string, portalId: string, searchDate: string): void {
+function carryOverUndecidedFavourites(jobId: string, portalId: string, searchDate: string | null): void {
   const inThisRun = new Set(tenders.listForJob(jobId).map((tender) => tender.tender_portal_id ?? tender.tender_ref));
   const carried = new Set<string>();
   for (const earlier of tenders.listEarlierFavourites(jobId, portalId, searchDate)) {
     const key = earlier.tender_portal_id ?? earlier.tender_ref;
     if (inThisRun.has(key) || carried.has(key)) continue;
     carried.add(key);
-    // The newest earlier row tells whether this tender was ever properly decided.
+    // The newest earlier row tells whether this tender was ever properly decided,
+    // and a tender the operator has decided is theirs: it is never re-checked.
     if (earlier.detail_reviewed_at && classifications.getFinalForTender(earlier.id) !== 'UNCERTAIN') continue;
+    const lifecycle = earlier.opportunity_id ? opportunities.getById(earlier.opportunity_id)?.lifecycle : undefined;
+    if (lifecycle && lifecycle !== 'NEW' && lifecycle !== 'SCREENED') continue;
     const tender = tenders.upsert({
       jobId,
       tenderRef: earlier.tender_ref,
@@ -1155,7 +1192,8 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
 
   // Earlier favourites of this date never decided from their details page
   // (they no longer show in search) are checked in My Tenders with this run.
-  carryOverUndecidedFavourites(jobId, portal.id, config.searchDate);
+  carryOverUndecidedFavourites(jobId, portal.id, ctx.checkAllUndecided ? null : config.searchDate);
+  ctx.checkAllUndecided = false;
 
   const classificationResult = await runClassificationPhase(
     {
@@ -1238,6 +1276,8 @@ function waitForMoreDates(signal: AbortSignal): Promise<DateBatchPlan | null> {
 async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: string, plan: DateBatchPlan): Promise<void> {
   let dates = plan.toRun;
   let batch = { dates: [...dates], done: [] as string[], skipped: [...plan.skipped] };
+  // The first date of the session also clears every undecided favourite in My Tenders.
+  ctx.checkAllUndecided = true;
   activeBatch = batch;
   const collected: CollectedCounts = { shortlisted: 0, needsReview: 0 };
   let lastResult: AuthJobUpdate | undefined;
@@ -1335,6 +1375,170 @@ function finishRun(ctx: RunContext, run: Promise<unknown>, onFailure: (err: unkn
       releaseRun(ctx.abortController);
     });
 }
+
+/**
+ * Approved tenders whose documents are not saved yet. The ones in My Tenders
+ * can be opened by a documents run; a tender a finished documents run already
+ * opened, with nothing left failing, has no files on its page and is done.
+ */
+function approvedWaitingForDocuments(portalId: string): { ready: TenderRow[]; notInMyTenders: TenderRow[] } {
+  const opened = new Map<string, string>();
+  for (const job of jobs.listAll()) {
+    if (job.purpose !== 'DOCUMENTS' || job.state !== 'COMPLETE') continue;
+    for (const id of jobs.documentTenderIds(job)) opened.set(id, job.created_at);
+  }
+  const ready: TenderRow[] = [];
+  const notInMyTenders: TenderRow[] = [];
+  for (const opportunity of opportunities.list({ lifecycles: ['APPROVED'], portalId })) {
+    const rows = tenders.listForOpportunity(opportunity.id);
+    if (rows.length === 0) continue;
+    const favourite = [...rows].reverse().find((tender) => tender.favorited === 1);
+    if (!favourite) {
+      notInMyTenders.push(rows[rows.length - 1]);
+      continue;
+    }
+    const openedAt = opened.get(favourite.id);
+    const unfinished = workflow.listDocuments(favourite.id).some((document) => document.state !== 'DOWNLOADED');
+    if (openedAt && favourite.detail_reviewed_at && favourite.detail_reviewed_at >= openedAt && !unfinished) continue;
+    ready.push(favourite);
+  }
+  return { ready, notInMyTenders };
+}
+
+ipcMain.handle('get-documents-waiting', (_event, portalId: unknown): DocumentsWaiting => {
+  const waiting = approvedWaitingForDocuments(getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID).id);
+  return {
+    ready: waiting.ready.length,
+    notInMyTenders: waiting.notInMyTenders.map((tender) => ({
+      opportunityId: tender.opportunity_id ?? tender.id,
+      title: tender.title,
+      foundOnDate: runConfigurations.getForJob(tender.job_id)?.searchDate ?? null,
+    })),
+  };
+});
+
+/**
+ * Opens each approved tender from My Tenders, reads its details again, and
+ * saves its documents and zip into the folder its search gave it. Nothing is
+ * searched or screened again.
+ */
+async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSessionId: string, targets: TenderRow[]): Promise<void> {
+  const signal = ctx.abortController.signal;
+  const update = (extra: Partial<AuthJobUpdate> = {}): AuthJobUpdate => ({
+    jobId, authSessionId,
+    jobState: jobs.getById(jobId)!.state,
+    authState: sessions.getById(authSessionId)?.state ?? 'AUTHENTICATED',
+    phase: 'ACQUISITION',
+    ...extra,
+  });
+  const count = `${targets.length} approved ${targets.length === 1 ? 'tender' : 'tenders'}`;
+  try {
+    jobMachine.transition(jobId, 'ACQUIRING_DOCUMENTS', 'collecting the documents of approved tenders');
+    emitJobUpdate(update({ statusMessage: `Opening My Tenders to collect the documents of ${count}.` }));
+    await retryTransient(() => navigateToMyTenders(ctx.page!, ctx.paceAction, ctx.portal.url), {
+      signal,
+      canRetry: () => !sessionWasLost(authSessionId),
+    });
+    let opened = 0;
+    const batch = await reviewTendersFromMyTenders(ctx.page!, targets, 100, ctx.paceAction, async (tender, detail, detailPage) => {
+      if (signal.aborted) return;
+      opened += 1;
+      emitJobUpdate(update({ statusMessage: `Saving the documents and zip file of ${tender.title} (${opened} of ${targets.length}).` }));
+      tenders.updateDetail(tender.id, {
+        organisationChain: detail.organisationChain,
+        department: detail.department ?? undefined,
+        stateName: detail.stateName ?? undefined,
+        publishedDate: (detail.publishedDateRaw ? parseTenderPortalDate(detail.publishedDateRaw) : null) ?? tender.published_date,
+        productCategory: detail.productCategories[0] ?? tender.detail_product_category ?? tender.product_category,
+        tenderCategory: detail.tenderCategory,
+        detailText: detailTextFor(detail),
+        documentLinks: detail.documentLinks,
+      });
+      const config = runConfigurations.getForJob(tender.job_id) ?? ctx.config;
+      // A failed file is recorded as not saved; the next documents run tries it again.
+      await saveTenderDocuments(ctx, tender.job_id, config, tender, detailPage).catch(() => {});
+    }, ctx.portal.url);
+    if (signal.aborted) throw new Error(USER_CANCELLED_REASON);
+    for (const sourceJob of new Set(targets.map((tender) => tender.job_id))) {
+      syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, sourceJob));
+    }
+    // Approved tenders go to Drive once their files are saved.
+    reportDriveProblems(copyApprovedTendersToDrive(targets));
+    if (sessionWasLost(authSessionId)) {
+      endJob(jobId, 'portal signed out while collecting approved tenders\' documents');
+      emitJobUpdate(update({
+        jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED',
+        abortReason: 'The website signed you out part-way. Files already saved are kept; collect documents again to finish the rest.',
+      }));
+      return;
+    }
+    for (const [state, reason] of [
+      ['DOCUMENTS_LOCAL', 'approved tenders\' documents saved locally'],
+      ['PROCESSING_DOCUMENTS', 'documents run finishing'],
+      ['EXTRACTING_REQUIREMENTS', 'no requirement extraction in a documents run'],
+      ['UPLOADING', 'approved tenders copied to Drive'],
+      ['REPORTING', 'documents run reporting'],
+      ['COMPLETE', 'documents run complete'],
+    ] as const) jobMachine.transition(jobId, state, reason);
+    const saved = targets.filter((tender) => workflow.listDocuments(tender.id).some((document) => document.state === 'DOWNLOADED')).length;
+    const missing = targets.length - batch.reviewed.size;
+    emitJobUpdate(update({
+      jobState: 'COMPLETE', phase: 'PUBLISHING', outcome: 'SUCCESS',
+      statusMessage: `Documents saved for ${saved} of ${count}.${missing > 0 ? ` ${missing} could not be found in My Tenders.` : ''}`,
+    }));
+  } catch (error) {
+    if (signal.aborted) {
+      markJobCancelled(jobs, jobMachine, jobId);
+      emitJobUpdate(update({ jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED', abortReason: USER_CANCELLED_REASON }));
+      return;
+    }
+    endJob(jobId, 'documents run failed');
+    emitJobUpdate(update({ jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED', abortReason: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
+ipcMain.handle('start-document-run', async (_event, portalId: unknown) => {
+  const { abortController, paceAction } = claimRun();
+  let ctx: RunContext;
+  let targets: TenderRow[];
+  let credentials: PortalCredentials | undefined;
+  try {
+    const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+    targets = approvedWaitingForDocuments(portal.id).ready;
+    if (targets.length === 0) throw new Error('No approved tender in My Tenders is waiting for its documents.');
+    const outputSettings = publishingSettings.get(portal.id);
+    const config: RunConfiguration = { ...runConfigurations.getDefaults(), portalId: portal.id, searchDate: new Date().toLocaleDateString('en-CA') };
+    ctx = { portal, config, outputSettings, abortController, paceAction };
+    activeRunPortalId = portal.id;
+    await checkReadiness(portal, outputSettings);
+    credentials = await loadPortalCredentials(portal.id);
+    await openPortal(portal);
+  } catch (error) {
+    portalHost?.close();
+    releaseRun(abortController);
+    throw error;
+  }
+
+  let resolveStarted!: (jobId: string) => void;
+  let rejectStarted!: (err: unknown) => void;
+  const started = new Promise<string>((resolve, reject) => { resolveStarted = resolve; rejectStarted = reject; });
+  let captured = false;
+  const run = signIn(ctx, credentials, (signInUpdate) => {
+    if (!captured) {
+      captured = true;
+      jobs.markDocumentRun(signInUpdate.jobId, targets.map((tender) => tender.id));
+      activeJobId = signInUpdate.jobId;
+      ctx.jobId = signInUpdate.jobId;
+      resolveStarted(signInUpdate.jobId);
+    }
+    emitJobUpdate(signInUpdate);
+  }).then(async (signedIn) => {
+    if (signedIn.outcome !== 'SUCCESS' || !ctx.page) return;
+    await collectApprovedDocuments(ctx, signedIn.jobId, signedIn.authSessionId, targets);
+  });
+  activeJobCompletion = finishRun(ctx, run, rejectStarted);
+  return { jobId: await started, count: targets.length };
+});
 
 ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) => {
   const { abortController, paceAction } = claimRun();

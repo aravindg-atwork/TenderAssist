@@ -30,6 +30,10 @@ export interface TenderSummary {
   closingDate: string | null;
   /** UTC ISO; the UI renders it relative to now. */
   closingAt: string | null;
+  /** When the portal published it, as stored (ISO with offset). */
+  publishedDate: string | null;
+  /** When TenderAssist last screened it; dates its note on the file. */
+  screenedAt: string;
   value: string | null;
   lifecycle: OpportunityLifecycle;
   recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN' | null;
@@ -112,6 +116,8 @@ export function summarizeTender(row: InboxRow, related: RelatedTender[] = []): T
     department: row.department,
     closingDate: row.closing_date,
     closingAt: row.closing_at,
+    publishedDate: row.published_date,
+    screenedAt: row.screening_at ?? row.last_seen_at,
     value: row.value_in_rupees,
     lifecycle: row.lifecycle,
     recommendation: row.recommendation,

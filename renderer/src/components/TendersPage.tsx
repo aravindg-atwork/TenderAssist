@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { OperatorDecision, TenderSummary, TendersView } from '../../../src/electron/ipcTypes';
 import { TenderFile, type FileAction } from './TenderFile';
 import { TenderTray } from './TenderTray';
+import { plainError } from '../words';
 
 type Shelf = keyof TendersView;
 
@@ -32,7 +33,7 @@ export function TendersPage({ onInboxCount }: { onInboxCount?: (count: number) =
   const [done, setDone] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    window.tenderAssist.getTenders().then(setView).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    window.tenderAssist.getTenders().then(setView).catch((err) => setError(plainError(err)));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -49,7 +50,7 @@ export function TendersPage({ onInboxCount }: { onInboxCount?: (count: number) =
       setDone(decision === 'REOPEN' ? 'Moved back to Today for review.' : 'Approved. Its folder is copied to Drive.');
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(plainError(err));
     } finally {
       setBusy(false);
     }

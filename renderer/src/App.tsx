@@ -1,5 +1,5 @@
 // renderer/src/App.tsx
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AuthJobUpdate, RunSettingsState, SettingsSection } from '../../src/electron/ipcTypes';
 import { DEFAULT_PORTAL_ID, getPortalDefinition } from '../../src/config/portalRegistry';
 import { applyTextSize } from './display';
@@ -11,6 +11,7 @@ import { SettingsPage } from './components/SettingsPage';
 import { RunWorkspace } from './components/RunWorkspace';
 import { RunPanel } from './components/RunPanel';
 import { BrandMark } from './components/icons';
+import { SessionReport } from './components/SessionReport';
 
 type View = 'today' | 'tenders' | 'runs' | 'settings';
 
@@ -30,6 +31,9 @@ export function App() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeUpdate, setActiveUpdate] = useState<AuthJobUpdate | null>(null);
   const [finishedRun, setFinishedRun] = useState<FinishedRun | null>(null);
+  // The dates (jobs) of the search session in progress, and the report once it ends.
+  const sessionJobs = useRef<string[]>([]);
+  const [report, setReport] = useState<{ jobIds: string[]; message: string | null } | null>(null);
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
   const [waiting, setWaiting] = useState(0);
   const [settingsFocus, setSettingsFocus] = useState<{ section: SettingsSection; requestId: number } | null>(null);
@@ -42,6 +46,8 @@ export function App() {
   };
 
   const go = useCallback((next: View) => { setView(next); setOpenRunId(null); }, []);
+  // Leaving the report for any page (or Today again) closes it.
+  const goFromReport = useCallback((next: View) => { setReport(null); go(next); }, [go]);
   const openSettings = useCallback((section?: SettingsSection) => {
     go('settings');
     setSettingsFocus(section ? { section, requestId: Date.now() } : null);
@@ -61,6 +67,14 @@ export function App() {
   // App-level so "a search is running" survives moving between pages.
   useEffect(() => window.tenderAssist.onJobUpdate((update) => {
     const over = update.outcome === 'TIMEOUT' || update.outcome === 'ABORTED' || (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING');
+    if (!sessionJobs.current.includes(update.jobId)) sessionJobs.current = [...sessionJobs.current, update.jobId];
+    if (over) {
+      // The session ended: show what it did, then start a fresh list for the next one.
+      setReport({ jobIds: sessionJobs.current, message: update.statusMessage ?? update.abortReason ?? null });
+      sessionJobs.current = [];
+      setView('today');
+      setOpenRunId(null);
+    }
     setActiveJobId(over ? null : update.jobId);
     setActiveUpdate(over ? null : update);
     if (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING' && update.statusMessage) {
@@ -81,7 +95,7 @@ export function App() {
         <span className="bar__brand"><BrandMark /> TenderAssist</span>
         <nav className="bar__nav" aria-label="Main">
           {NAV.map((item) => (
-            <button key={item.id} type="button" className="bar__tab" aria-current={view === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
+            <button key={item.id} type="button" className="bar__tab" aria-current={view === item.id ? 'page' : undefined} onClick={() => goFromReport(item.id)}>
               {item.label}
               {item.id === 'today' && waiting > 0 && <span className="count count--bar" aria-label={`${waiting} waiting for a decision`}>{waiting}</span>}
               {item.id === 'settings' && settings && !settings.configured && <span className="bar__dot" aria-label="Needs setting up" />}
@@ -105,13 +119,20 @@ export function App() {
           />
         ) : openRunId ? (
           <RunDetail jobId={openRunId} isActive={openRunId === activeJobId} onBack={() => setOpenRunId(null)} onOpenSettings={openSettings} />
+        ) : view === 'today' && report && !running ? (
+          <SessionReport
+            jobIds={report.jobIds}
+            message={report.message}
+            onDecide={() => { setReport(null); setFinishedRun(null); }}
+            onOpenRun={(jobId) => setOpenRunId(jobId)}
+          />
         ) : view === 'today' ? (
           <TodayPage
             settings={settings}
             selectedPortalId={portalId}
             onPortalChange={setPortalId}
             onOpenSettings={openSettings}
-            onRunStarted={(jobId) => { setActiveJobId(jobId); setFinishedRun(null); }}
+            onRunStarted={(jobId) => { sessionJobs.current = [jobId]; setActiveJobId(jobId); setFinishedRun(null); setReport(null); }}
             onOpenRun={(jobId) => setOpenRunId(jobId)}
             onInboxCount={setWaiting}
             finishedRun={finishedRun}

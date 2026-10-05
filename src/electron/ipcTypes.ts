@@ -93,14 +93,25 @@ export interface JobListItem {
   updatedAt: string;
   portalId: string;
   searchDate: string | null;
-  /** Tenders the run saw, and how many of them it kept. */
+  /** Tenders the run saw, and how many of them it kept. For a documents run: tenders it collected for, and how many now have files. */
   tendersFound: number;
   kept: number;
+  /** SEARCH searches a published date; DOCUMENTS only collects approved tenders' documents. */
+  purpose: 'SEARCH' | 'DOCUMENTS';
+}
+
+/** Approved tenders still waiting for their documents. */
+export interface DocumentsWaiting {
+  /** In My Tenders, so a documents run can open them. */
+  ready: number;
+  /** Never reached My Tenders: their date has to be searched again. */
+  notInMyTenders: Array<{ opportunityId: string; title: string; foundOnDate: string | null }>;
 }
 
 export interface JobDetail {
   jobId: string;
   jobState: JobState;
+  purpose: 'SEARCH' | 'DOCUMENTS';
   authSessionId: string | null;
   authState: AuthState | null;
   jobTransitions: StateTransitionRow[];
@@ -158,6 +169,10 @@ export interface TenderAssistApi {
   startJob(config: RunConfiguration, untilDate?: string, options?: { runAgain?: boolean }): Promise<{ jobId: string; dates: string[]; skipped: string[] }>;
   /** While the run waits after its last date: run these published dates in the same sign-in. */
   runMoreDates(from: string, to: string, options?: { runAgain?: boolean }): Promise<{ toRun: string[]; skipped: string[] }>;
+  /** Approved tenders still waiting for their documents. */
+  getDocumentsWaiting(portalId: string): Promise<DocumentsWaiting>;
+  /** Signs in and collects only the documents of approved tenders in My Tenders. */
+  startDocumentRun(portalId: string): Promise<{ jobId: string; count: number }>;
   /** While the run waits after its last date: sign out and finish. */
   finishRun(): Promise<void>;
   getJobDetail(jobId: string): Promise<JobDetail>;

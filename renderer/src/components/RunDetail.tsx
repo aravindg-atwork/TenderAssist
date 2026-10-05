@@ -3,7 +3,7 @@ import type { JobDetail, SettingsSection, TenderDetailItem } from '../../../src/
 import type { ClassificationGateRow } from '../../../src/persistence/repositories/classificationRepository';
 import { describePortalError } from '../../../src/orchestration/transientRetry';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
-import { plural, publishedLabel, runStatus } from '../words';
+import { plainError, plural, publishedLabel, runStatus } from '../words';
 import { NoMatchesSummary } from './NoMatchesSummary';
 import { BackIcon, FolderIcon } from './icons';
 
@@ -40,7 +40,7 @@ function reasonFor(tender: TenderDetailItem): string {
 const DECISION_WORDS: Record<string, { text: string; tone: string }> = {
   KEEP: { text: 'Kept', tone: 'keep' },
   REJECT: { text: 'Rejected', tone: 'reject' },
-  UNCERTAIN: { text: 'Needs a look', tone: 'review' },
+  UNCERTAIN: { text: 'Needs a look', tone: 'look' },
   NOT_RUN: { text: 'Not checked', tone: 'plain' },
 };
 
@@ -52,7 +52,7 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
 
   useEffect(() => {
     const load = () => window.tenderAssist.getJobDetail(jobId).then((next) => { setDetail(next); setError(null); })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => setError(plainError(err)));
     void load();
     return window.tenderAssist.onJobUpdate((update) => { if (update.jobId === jobId) void load(); });
   }, [jobId]);
@@ -68,23 +68,24 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
   const order: Record<string, number> = { KEEP: 0, UNCERTAIN: 1, REJECT: 2, NOT_RUN: 3 };
   const sorted = [...detail.tenders].sort((a, b) => order[a.effectiveClassification] - order[b.effectiveClassification]);
   const config = detail.runConfiguration;
+  const documentRun = detail.purpose === 'DOCUMENTS';
 
   return (
     <div className="page">
       {back}
       <header className="page__head page__head--split">
         <div>
-          <h1>Search for {publishedLabel(config?.searchDate ?? null)}</h1>
+          <h1>{documentRun ? 'Documents for approved tenders' : `Search for ${publishedLabel(config?.searchDate ?? null)}`}</h1>
           <p>
             <span className={`status status--${status.tone}`}>{status.text}</span>
             {config && <> on {getPortalDefinition(config.portalId).name}</>}
           </p>
         </div>
-        {(detail.jobState === 'COMPLETE' || detail.jobState === 'REPORTING') && (
+        {!documentRun && (detail.jobState === 'COMPLETE' || detail.jobState === 'REPORTING') && (
           <button type="button" className="btn btn--quiet" disabled={opening} onClick={async () => {
             setOpening(true);
             try { await window.tenderAssist.openJobOutput(jobId); }
-            catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+            catch (err) { setError(plainError(err)); }
             finally { setOpening(false); }
           }}>
             <FolderIcon /> {opening ? 'Opening…' : 'Open this date’s folder'}
@@ -93,7 +94,9 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
       </header>
 
       <p className="lede">
-        {detail.tenders.length === 0
+        {documentRun
+          ? `Collected for ${plural(detail.tenders.length, 'approved tender')}: ${detail.tenders.filter((tender) => tender.documents.some((document) => document.state === 'DOWNLOADED')).length} now have their files saved.`
+          : detail.tenders.length === 0
           ? 'No tenders were found for this date in your categories.'
           : `Found ${plural(detail.tenders.length, 'tender')}: ${kept} kept, ${count('REJECT')} rejected${count('UNCERTAIN') ? `, ${count('UNCERTAIN')} need a look` : ''}.`}
       </p>
@@ -112,11 +115,11 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
       {detail.searches.length > 0 && (
         <section className="block">
           <h2>Categories searched</h2>
-          <ul className="categories">
+          <ul className="register">
             {detail.searches.map((search) => (
               <li key={search.id} className={search.state === 'FAILED' ? 'is-failed' : undefined}>
                 <span>{search.product_category}</span>
-                <span className="num">{search.state === 'FAILED' ? 'failed' : plural(search.result_count ?? 0, 'tender')}</span>
+                <span className="num">{search.state === 'FAILED' ? 'could not be searched' : plural(search.result_count ?? 0, 'tender')}</span>
               </li>
             ))}
           </ul>
@@ -164,11 +167,12 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
         <summary>For support: step-by-step record</summary>
         <ol className="support-log">
           {[...detail.jobTransitions, ...detail.authTransitions]
+            .filter((transition) => transition.reason)
             .sort((a, b) => a.occurred_at.localeCompare(b.occurred_at))
             .map((transition) => (
               <li key={transition.id}>
                 <time>{new Date(transition.occurred_at).toLocaleTimeString('en-IN')}</time>
-                <span>{transition.reason ?? `${transition.from_state ?? 'start'} → ${transition.to_state}`}</span>
+                <span>{transition.reason}</span>
               </li>
             ))}
         </ol>

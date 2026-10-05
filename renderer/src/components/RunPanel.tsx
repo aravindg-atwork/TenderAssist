@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AuthJobUpdate } from '../../../src/electron/ipcTypes';
 import { AlertIcon, KeyIcon, RefreshIcon, StopIcon } from './icons';
+import { plainError } from '../words';
 
 const OPENWEBSTART_DOWNLOAD_URL = 'https://openwebstart.com/download/';
 // How long the DSC signer may take before help is offered.
@@ -53,7 +54,7 @@ function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, porta
       case 'AUTH_ERROR':
         return { title: 'The portal needs your attention', body: update.recoveryAction ?? 'Read the message in the portal, then try again.', needsYou: true };
       case 'AUTHENTICATED':
-        return { title: 'Signed in', body: 'Starting the search.', needsYou: false };
+        return { title: 'Signed in', body: 'Getting started.', needsYou: false };
       default:
         return { title: `Opening ${portalName}`, body: update.statusMessage ?? 'Preparing the sign-in page.', needsYou: false };
     }
@@ -63,7 +64,7 @@ function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, porta
   }
   if (update.phase === 'SEARCH') return { title: 'Searching the portal', body: update.statusMessage ?? 'Reading titles and ticking possible tenders into My Tenders.', needsYou: false };
   if (update.phase === 'CLASSIFICATION') return { title: 'Reading each tender', body: update.statusMessage ?? 'Opening each favourite in My Tenders and deciding from its full details.', needsYou: false };
-  return { title: 'Saving files', body: 'Writing each kept tender’s documents, zip and eligibility sheet to your folder.', needsYou: false };
+  return { title: 'Saving files', body: update.statusMessage ?? 'Writing each kept tender’s documents, zip and eligibility sheet to your folder.', needsYou: false };
 }
 
 export interface RunPanelProps {
@@ -94,7 +95,7 @@ export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
     setBusy(true);
     setError(null);
     try { await work(); }
-    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    catch (err) { setError(plainError(err)); }
     finally { setBusy(false); }
   };
 
@@ -113,7 +114,6 @@ export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
       </header>
 
       <section className={instruction.needsYou ? 'now now--you' : 'now'} aria-live="polite">
-        <p className="now__who">{instruction.needsYou ? 'Your turn' : 'TenderAssist is working'}</p>
         <h2 className="now__title">{instruction.title}</h2>
         <p className="now__body">{instruction.body}</p>
         {update?.authStep === 'DSC_READY' && (

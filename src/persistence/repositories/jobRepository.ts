@@ -28,7 +28,13 @@ export interface JobRow {
   updated_at: string;
   /** When the operator acknowledged the run; its auto-rejects then leave the Inbox. */
   reviewed_at: string | null;
+  /** SEARCH searches a published date; DOCUMENTS only collects approved tenders' documents. */
+  purpose?: JobPurpose;
+  /** For a documents run: the tender rows (from earlier searches) it collects for. */
+  document_tender_ids_json?: string | null;
 }
+
+export type JobPurpose = 'SEARCH' | 'DOCUMENTS';
 
 const TERMINAL_STATES: JobState[] = ['COMPLETE', 'CANCELLED', 'FAILED_MANUAL'];
 
@@ -37,11 +43,25 @@ export class JobRepository {
 
   create(): JobRow {
     const now = new Date().toISOString();
-    const row: JobRow = { id: randomUUID(), state: 'SCHEDULED', created_at: now, updated_at: now, reviewed_at: null };
+    const row: JobRow = { id: randomUUID(), state: 'SCHEDULED', created_at: now, updated_at: now, reviewed_at: null, purpose: 'SEARCH', document_tender_ids_json: null };
     this.db
       .prepare('INSERT INTO jobs (id, state, created_at, updated_at) VALUES (?, ?, ?, ?)')
       .run(row.id, row.state, row.created_at, row.updated_at);
     return row;
+  }
+
+  /** Marks a run as one that only collects documents for these tender rows. */
+  markDocumentRun(id: string, tenderIds: string[]): void {
+    this.db.prepare("UPDATE jobs SET purpose = 'DOCUMENTS', document_tender_ids_json = ? WHERE id = ?").run(JSON.stringify(tenderIds), id);
+  }
+
+  /** The tender rows a documents run collects for; empty for a search. */
+  documentTenderIds(row: JobRow | undefined): string[] {
+    if (row?.purpose !== 'DOCUMENTS' || !row.document_tender_ids_json) return [];
+    try {
+      const ids = JSON.parse(row.document_tender_ids_json) as unknown;
+      return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+    } catch { return []; }
   }
 
   /** Marks runs as reviewed; their automatic rejects then leave the Inbox. */

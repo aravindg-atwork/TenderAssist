@@ -42,7 +42,7 @@ describe('explainScreening', () => {
 
   it('explains a failed detail read and a run that never screened', () => {
     expect(explainScreening('UNCERTAIN', [gate('G3', 'UNCERTAIN', 'DETAIL_REVIEW_FAILED', { error: 'timeout' })]).sentence)
-      .toBe('Uncertain: the tender detail page could not be read.');
+      .toBe('Not decided yet: TenderAssist could not open its details page. The next search opens it again from My Tenders.');
     expect(explainScreening(null, []).sentence).toBe('Not screened yet: the run stopped before its checks finished.');
   });
 });
