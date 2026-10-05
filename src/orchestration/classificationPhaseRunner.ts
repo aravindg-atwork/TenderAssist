@@ -187,7 +187,7 @@ export async function runClassificationPhase(
       // A failed file is recorded by saveDocuments; the decision stands.
       await deps.saveDocuments(tender, detailPage).catch(() => {});
     }
-  });
+  }, deps.portalHomeUrl);
   if (isCancellationRequested(deps.signal)) return cancelled();
   for (const tender of currentJobTenders) {
     if (isCancellationRequested(deps.signal)) return cancelled();

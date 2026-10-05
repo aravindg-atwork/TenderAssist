@@ -33,7 +33,7 @@ const MY_TENDERS_PAGE_2_HTML = `<html><body>
     <tr><td>Tender ID</td><td>Tender Title</td><td>Favorite</td></tr>
     <tr>
       <td>2026_TEST_1</td><td>Development of Citizen Services Portal</td>
-      <td><a href="/detail" target="_blank"><img title="View Tender Information"></a></td>
+      <td><a href="/detail" target="_blank"><img src="images/view.png" title="View Tender Information"></a></td>
     </tr>
   </table>
 </body></html>`;

@@ -155,7 +155,9 @@ async function reviewTenderAtRow(
   tender: TenderRow,
   row: Awaited<ReturnType<Page['locator']>>,
   paceAction: PaceAction = noPacing,
-  whileOpen?: WhileDetailOpen
+  whileOpen?: WhileDetailOpen,
+  /** Returns to the list after details opened in the same page; defaults to the browser's Back. */
+  returnToList?: () => Promise<void>
 ): Promise<TenderDetailSnapshot> {
   let detailLink = row.locator('a:has(img[title*="View Tender Information" i]), a[title*="View Tender Information" i]').first();
   if ((await detailLink.count()) === 0) {
@@ -207,8 +209,12 @@ async function reviewTenderAtRow(
   }
 
   if (!popup && page.url() !== beforeUrl) {
-    await paceAction();
-    await page.goBack({ waitUntil: 'load' }).catch(() => {});
+    if (returnToList) {
+      await returnToList();
+    } else {
+      await paceAction();
+      await page.goBack({ waitUntil: 'load' }).catch(() => {});
+    }
   }
 
   return details;
@@ -253,7 +259,8 @@ export async function reviewTendersFromMyTenders(
   tenders: TenderRow[],
   maxPages = 100,
   paceAction: PaceAction = noPacing,
-  whileOpen?: WhileDetailOpen
+  whileOpen?: WhileDetailOpen,
+  portalHomeUrl?: string
 ): Promise<TenderReviewBatch> {
   const pending = new Map(tenders.map((tender) => [tender.id, tender]));
   const reviewed = new Map<string, TenderDetailSnapshot>();
@@ -272,7 +279,10 @@ export async function reviewTendersFromMyTenders(
       const row = await findTenderRow(page, tender);
       if (!row) continue;
       try {
-        reviewed.set(tenderId, await reviewTenderAtRow(page, tender, row, paceAction, whileOpen));
+        // In My Tenders the details open in the same page. The browser's Back
+        // did not reliably return to the list, which left every later tender
+        // "not found"; the portal's own My Tenders link always does.
+        reviewed.set(tenderId, await reviewTenderAtRow(page, tender, row, paceAction, whileOpen, () => navigateToMyTenders(page, paceAction, portalHomeUrl)));
       } catch (error) {
         errors.set(tenderId, error instanceof Error ? error : new Error(String(error)));
       }
