@@ -211,4 +211,19 @@ describe.skipIf(!CHROME_PATH)('AuthFlow', { timeout: 30_000 }, () => {
     expect(await flow.startDscLoginIfAvailable()).toBe(true);
     expect(dscClicks).toBe(2);
   });
+
+  it('opening the login form never clicks DSC Login, and parallel attempts share one', async () => {
+    const flow = new AuthFlow({ sessions, machine });
+    await flow.start(jobId, `http://127.0.0.1:${cdpPort}`);
+    await flow.getPage().goto(`http://127.0.0.1:${serverPort}/dsc-page`);
+
+    const [first, second] = await Promise.all([
+      flow.prepareLogin({ loginId: 'operator', password: 'secret' }),
+      flow.prepareLogin({ loginId: 'operator', password: 'secret' }),
+    ]);
+
+    expect(first).toBe('LOGIN_FORM_NOT_FOUND');
+    expect(second).toBe('LOGIN_FORM_NOT_FOUND');
+    expect(dscClicks).toBe(0);
+  });
 });

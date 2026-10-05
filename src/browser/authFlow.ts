@@ -27,6 +27,7 @@ export class AuthFlow {
   // A click still in progress (it pauses first): a second click would make
   // the portal issue a newer signer file and reject the first one.
   private dscLoginInProgress = false;
+  private preparingLogin: Promise<AssistedLoginStep> | undefined;
 
   constructor(private deps: AuthFlowDeps) {}
 
@@ -69,9 +70,14 @@ export class AuthFlow {
     return true;
   }
 
-  async prepareLogin(credentials?: PortalCredentials): Promise<AssistedLoginStep> {
-    if (!this.controller) throw new Error('AuthFlow.start() must be called before prepareLogin()');
-    return preparePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction);
+  /** Opens and fills the login form. A call made while one is still running shares it. */
+  prepareLogin(credentials?: PortalCredentials): Promise<AssistedLoginStep> {
+    if (!this.controller) return Promise.reject(new Error('AuthFlow.start() must be called before prepareLogin()'));
+    if (!this.preparingLogin) {
+      this.preparingLogin = preparePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction)
+        .finally(() => { this.preparingLogin = undefined; });
+    }
+    return this.preparingLogin;
   }
 
   async refillVisibleLogin(credentials: PortalCredentials): Promise<boolean> {

@@ -36,10 +36,11 @@ async function findPassword(page: Page): Promise<Locator | null> {
 
 async function openLoginForm(page: Page, paceAction: PaceAction): Promise<void> {
   if (await findPassword(page)) return;
+  // Never a "DSC Login" control: that starts the signer, not the login form.
   const loginControl = await firstVisible([
     page.getByText(/click here to login/i, { exact: false }),
-    page.getByRole('link', { name: /login/i }),
-    page.locator('a:has(img[title*="login" i]), input[title*="login" i]'),
+    page.getByRole('link', { name: /^(?!.*\bdsc\b).*\blogin\b/i }),
+    page.locator('a:has(img[title*="login" i]):not(:has(img[title*="dsc" i])), input[title*="login" i]:not([title*="dsc" i])'),
   ]);
   if (!loginControl) return;
   await paceAction();

@@ -283,6 +283,9 @@ export async function runAuthJob(
   // A local reference is retained only during the bounded authentication
   // phase so a portal-returned login form can be restored automatically.
   deps.portalCredentials = undefined;
+  // Until the login form has been opened and filled, keep trying: a slow
+  // portal can outlast the first attempt, leaving an unopened form.
+  let loginFormFilled = prepared.kind === 'ok' && (prepared.value === 'CAPTCHA_REQUIRED' || prepared.value === 'ALREADY_AUTHENTICATED');
   if (prepared.kind === 'ok') {
     const step: AssistedLoginStep = prepared.value;
     authStep =
@@ -375,7 +378,18 @@ export async function runAuthJob(
     lastFailure = null;
 
     if (!check.authenticated) {
-      if (activeCredentials) {
+      if (activeCredentials && !loginFormFilled && !dscFlowStarted) {
+        const again = await bounded(flow.prepareLogin(activeCredentials), LOGIN_FILL_TIMEOUT_MS);
+        if (again.kind === 'ok' && (again.value === 'CAPTCHA_REQUIRED' || again.value === 'ALREADY_AUTHENTICATED')) {
+          loginFormFilled = true;
+          if (again.value === 'CAPTCHA_REQUIRED') {
+            authStep = 'CAPTCHA_REQUIRED';
+            authErrorCode = undefined;
+            recoveryAction = undefined;
+            onUpdate(snapshot());
+          }
+        }
+      } else if (activeCredentials) {
         const refill = await bounded(flow.refillVisibleLogin(activeCredentials), LOGIN_FILL_TIMEOUT_MS);
         if (refill.kind === 'ok' && refill.value) {
           authStep = 'CAPTCHA_REQUIRED';
