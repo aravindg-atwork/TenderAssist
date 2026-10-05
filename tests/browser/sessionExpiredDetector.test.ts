@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isSessionExpiredPage } from '../../src/browser/sessionExpiredDetector.js';
+import { isSessionExpiredPage, isSignInPage } from '../../src/browser/sessionExpiredDetector.js';
 
 describe('isSessionExpiredPage', () => {
   it('returns true when the URL contains page=CommonErrorPage', () => {
@@ -39,5 +39,17 @@ describe('isSessionExpiredPage', () => {
     const url = 'https://tntenders.gov.in/nicgep/app?page=NoAuthorizationPage&service=page';
     const text = 'Unauthorized Page\n \nYou are attempting to access an unauthorized area..\n \n« Click here to Re-Login »';
     expect(isSessionExpiredPage(url, text)).toBe(true);
+  });
+});
+
+describe('isSignInPage', () => {
+  it('recognises the portal sign-in form shown after the session is lost', () => {
+    const text = 'Tenders Tamil Nadu\nUser Login\nLogin ID*\nPassword*\nCaptcha\nCaptcha Text*\nCancel Proceed\nGenerate / Forgot Password?';
+    expect(isSignInPage(text)).toBe(true);
+  });
+
+  it('ignores signed-in pages and pages that only mention some of the fields', () => {
+    expect(isSignInPage('Welcome : operator\nSearch Active Tenders\nMy Tenders\nLogout')).toBe(false);
+    expect(isSignInPage('Generate / Forgot Password?')).toBe(false);
   });
 });

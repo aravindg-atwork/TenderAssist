@@ -23,6 +23,13 @@ function isTrustedPortalUrl(rawUrl: string, portal: PortalDefinition): boolean {
 
 // A portal page that stops responding for this long is treated as crashed.
 const UNRESPONSIVE_LIMIT_MS = 20_000;
+// Health check: the page must answer a trivial script this often...
+const HEALTH_CHECK_INTERVAL_MS = 15_000;
+const HEALTH_CHECK_TIMEOUT_MS = 10_000;
+// ...and is treated as dead after this many misses in a row (about a minute).
+const HEALTH_CHECK_MISSES = 4;
+// Automatic reloads after a page fails to load, before leaving it to the operator.
+const MAX_LOAD_RETRIES = 3;
 
 export class EmbeddedPortalHost {
   private view: WebContentsView | undefined;
@@ -105,7 +112,47 @@ export class EmbeddedPortalHost {
       }, UNRESPONSIVE_LIMIT_MS);
     });
     view.webContents.on('responsive', () => clearTimeout(unresponsiveTimer));
-    view.webContents.once('destroyed', () => clearTimeout(unresponsiveTimer));
+
+    // A dead page that is neither crashed nor reported unresponsive (blank,
+    // frozen) is found by checking that it still runs a trivial script.
+    let misses = 0;
+    let checking = false;
+    const healthTimer = setInterval(() => {
+      if (checking || this.view !== view || this.crashed || view.webContents.isDestroyed()) return;
+      checking = true;
+      let timeout: NodeJS.Timeout | undefined;
+      const answered = Promise.race([
+        view.webContents.executeJavaScript('1', true).then(() => true, () => false),
+        new Promise<boolean>((resolve) => { timeout = setTimeout(() => resolve(false), HEALTH_CHECK_TIMEOUT_MS); }),
+      ]);
+      void answered.then((ok) => {
+        clearTimeout(timeout);
+        checking = false;
+        misses = ok ? 0 : misses + 1;
+        if (misses >= HEALTH_CHECK_MISSES && this.view === view && !this.crashed) {
+          this.crashed = true;
+          for (const listener of this.crashListeners) listener('not responding');
+        }
+      });
+    }, HEALTH_CHECK_INTERVAL_MS);
+
+    // A page that fails to load (network blip, portal timeout) is reloaded,
+    // a few times, instead of leaving an error page behind.
+    let loadRetries = 0;
+    view.webContents.on('did-finish-load', () => { loadRetries = 0; });
+    view.webContents.on('did-fail-load', (_event, errorCode, _description, _url, isMainFrame) => {
+      // -3 is an aborted load, such as a navigation replaced by another.
+      if (!isMainFrame || errorCode === -3 || this.view !== view || loadRetries >= MAX_LOAD_RETRIES) return;
+      loadRetries += 1;
+      setTimeout(() => {
+        if (this.view === view && !view.webContents.isDestroyed()) view.webContents.reload();
+      }, 2_000 * loadRetries);
+    });
+
+    view.webContents.once('destroyed', () => {
+      clearTimeout(unresponsiveTimer);
+      clearInterval(healthTimer);
+    });
 
     await view.webContents.loadURL(url);
   }

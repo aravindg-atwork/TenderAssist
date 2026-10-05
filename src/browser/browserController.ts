@@ -2,7 +2,7 @@
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { isSessionExpiredPage } from './sessionExpiredDetector.js';
+import { isSessionExpiredPage, isSignInPage } from './sessionExpiredDetector.js';
 import {
   finalizeDscDownload,
   isTrustedDscDownload,
@@ -10,7 +10,7 @@ import {
   type DscJnlpArtifact,
 } from './dscDownloadSecurity.js';
 
-export type SessionLossReason = 'TAB_CLOSED' | 'TARGET_DESTROYED' | 'SESSION_EXPIRED_PAGE' | 'PAGE_CRASHED';
+export type SessionLossReason = 'TAB_CLOSED' | 'TARGET_DESTROYED' | 'SESSION_EXPIRED_PAGE' | 'PAGE_CRASHED' | 'SIGNED_OUT';
 
 export interface BrowserControllerOptions {
   cdpEndpoint: string;
@@ -25,6 +25,7 @@ export class BrowserController {
   private page: Page | undefined;
   private targetId: string | undefined;
   private lost = false;
+  private signedIn = false;
 
   constructor(private options: BrowserControllerOptions) {}
 
@@ -115,7 +116,16 @@ export class BrowserController {
     }
     if (isSessionExpiredPage(url, text)) {
       this.reportLoss('SESSION_EXPIRED_PAGE');
+    } else if (this.signedIn && isSignInPage(text)) {
+      // Signed-in pages carry a Logout control, an image, so read image titles too.
+      const fullText = await this.extractPageText().catch(() => text);
+      if (!/logout/i.test(fullText)) this.reportLoss('SIGNED_OUT');
     }
+  }
+
+  /** From now on, the portal's sign-in form means the session was lost. */
+  markSignedIn(): void {
+    this.signedIn = true;
   }
 
   private reportLoss(reason: SessionLossReason): void {

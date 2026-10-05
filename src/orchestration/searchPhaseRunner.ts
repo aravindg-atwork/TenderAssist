@@ -27,6 +27,8 @@ export interface SearchPhaseDeps {
   paceAction?: PaceAction;
   /** Pauses between retries of a timed-out search or detail page. */
   retryDelaysMs?: readonly number[];
+  /** The portal's entry page, opened again if a step leaves the page blank. */
+  portalHomeUrl?: string;
 }
 
 const PREFAVORITE_CLASSIFIER_VERSION = 'prefavorite-title-detail-v1';
@@ -94,7 +96,7 @@ export async function runSearchPhase(
     onUpdate(snapshot());
 
     try {
-      const rows = await retryTransient(() => searchCategory(page, config.productCategory, targetDate, deps.paceAction), {
+      const rows = await retryTransient(() => searchCategory(page, config.productCategory, targetDate, deps.paceAction, deps.portalHomeUrl), {
         delaysMs: retryDelaysMs,
         canRetry: sessionUsable,
         signal: deps.signal,
@@ -215,7 +217,7 @@ export async function runSearchPhase(
       }
 
       if (favoriteReferences.length > 0) {
-        const favoritedReferences = await favoriteVisibleRows(page, favoriteReferences, deps.paceAction);
+        const favoritedReferences = await favoriteVisibleRows(page, favoriteReferences, deps.paceAction, deps.portalHomeUrl);
         if (isCancellationRequested(deps.signal)) return cancelled();
         const favoritedAt = new Date().toISOString();
         for (const reference of favoritedReferences) {

@@ -85,16 +85,20 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
   let cdpPort: number;
   let currentRows: Array<{ id: string; title: string; ref: string; category: string; value: string }> = [];
   let lastFavoriteBody = '';
+  let blankAfterFavorite = false;
 
   beforeEach(async () => {
     currentRows = [];
     lastFavoriteBody = '';
+    blankAfterFavorite = false;
     server = http.createServer((req, res) => {
       if (req.url?.startsWith('/results')) {
         res.end(resultsHtml(currentRows));
       } else if (req.url?.startsWith('/favorited')) {
         req.on('data', (chunk) => { lastFavoriteBody += chunk.toString(); });
-        req.on('end', () => res.end('<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>'));
+        req.on('end', () => res.end(blankAfterFavorite ? '' : '<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>'));
+      } else if (req.url?.startsWith('/blank')) {
+        res.end('');
       } else {
         res.end(SEARCH_FORM_HTML);
       }
@@ -199,5 +203,35 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
     expect(selected).toEqual(['ref-keep']);
     expect(lastFavoriteBody).toContain('ref-keep');
     expect(lastFavoriteBody).not.toContain('ref-reject');
+  });
+
+  it('searchCategory reopens the portal home when the page was left blank', async () => {
+    currentRows = [
+      { id: '2026_EB_705493_1', title: 'AMC for Energy Software', ref: 'CE/IT-11/2026-27', category: 'Information Technology', value: 'NA' },
+    ];
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/blank`);
+
+    const rows = await searchCategory(page, 'Information Technology', '21/09/2026', undefined, `http://127.0.0.1:${serverPort}/`);
+
+    expect(rows).toHaveLength(1);
+    await browser.close();
+  });
+
+  it('favoriteVisibleRows recovers from a favourite submit that leaves a blank page', async () => {
+    currentRows = [
+      { id: '2026_A', title: 'Video film', ref: 'REF/A', category: 'Information Technology', value: 'NA' },
+    ];
+    blankAfterFavorite = true;
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/results`);
+
+    const favorited = await favoriteVisibleRows(page, ['REF/A'], undefined, `http://127.0.0.1:${serverPort}/`);
+
+    expect(favorited).toEqual(['REF/A']);
+    expect(await page.locator('text=Search Active Tenders').first().isVisible()).toBe(true);
+    await browser.close();
   });
 });

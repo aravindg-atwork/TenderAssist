@@ -2,6 +2,7 @@
 import type { Page } from 'playwright-core';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { PaceAction } from '../orchestration/actionPacer.js';
+import { ensurePortalMenu } from './searchFormController.js';
 
 const noPacing: PaceAction = async () => {};
 
@@ -23,7 +24,8 @@ function compact(value: string): string {
 }
 
 /** Navigate by clicking the portal's own menu item; never invent a direct URL. */
-export async function navigateToMyTenders(page: Page, paceAction: PaceAction = noPacing): Promise<void> {
+export async function navigateToMyTenders(page: Page, paceAction: PaceAction = noPacing, portalHomeUrl?: string): Promise<void> {
+  await ensurePortalMenu(page, 'My Tenders', portalHomeUrl, paceAction);
   const link = page.getByText('My Tenders', { exact: true }).first();
   await link.waitFor({ state: 'visible', timeout: 10_000 });
   await paceAction();

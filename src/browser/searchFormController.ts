@@ -6,6 +6,27 @@ import type { PaceAction } from '../orchestration/actionPacer.js';
 
 const noPacing: PaceAction = async () => {};
 
+// The portal can take a while to answer a submit; wait this long before
+// deciding the page was left blank.
+const SUBMIT_LOAD_TIMEOUT_MS = 45_000;
+
+/**
+ * Makes sure a portal menu item is on screen before using it. A submit the
+ * portal never answers (seen after "Set Open Tender as Favorite") leaves a
+ * blank page with no menu, and every later step would fail on it. Opening
+ * the portal's home page again brings the menu back; the session stays
+ * signed in. If the portal signed out instead, its sign-in page appears and
+ * the run signs in again.
+ */
+export async function ensurePortalMenu(page: Page, menuText: string, portalHomeUrl?: string, paceAction: PaceAction = noPacing): Promise<void> {
+  const visible = await page.locator(`text=${menuText}`).first()
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true, () => false);
+  if (visible || !portalHomeUrl) return;
+  await paceAction();
+  await page.goto(portalHomeUrl, { waitUntil: 'load', timeout: SUBMIT_LOAD_TIMEOUT_MS }).catch(() => {});
+}
+
 /**
  * Runs one category's search: clicks back to Search Active Tenders (a real
  * click -- consistent with never navigating directly to a portal URL),
@@ -19,8 +40,10 @@ export async function searchCategory(
   page: Page,
   productCategory: string,
   fromToDateDdMmYyyy: string,
-  paceAction: PaceAction = noPacing
+  paceAction: PaceAction = noPacing,
+  portalHomeUrl?: string
 ): Promise<ParsedActiveTenderRow[]> {
+  await ensurePortalMenu(page, 'Search Active Tenders', portalHomeUrl, paceAction);
   await paceAction();
   await page.click('text=Search Active Tenders');
   await page.waitForSelector('#ProductCategory');
@@ -122,7 +145,8 @@ export async function favoriteAllVisibleRows(page: Page, paceAction: PaceAction 
 export async function favoriteVisibleRows(
   page: Page,
   tenderReferences: string[],
-  paceAction: PaceAction = noPacing
+  paceAction: PaceAction = noPacing,
+  portalHomeUrl?: string
 ): Promise<string[]> {
   const checkedReferences: string[] = [];
   for (const reference of tenderReferences) {
@@ -145,7 +169,10 @@ export async function favoriteVisibleRows(
   page.on('dialog', onDialog);
   await paceAction();
   await page.click('#save');
-  await page.waitForLoadState('load').catch(() => {});
+  await page.waitForLoadState('load', { timeout: SUBMIT_LOAD_TIMEOUT_MS }).catch(() => {});
   page.off('dialog', onDialog);
+  // A favourite submit the portal never answers leaves a blank page; recover
+  // now so the next category does not fail on it.
+  await ensurePortalMenu(page, 'Search Active Tenders', portalHomeUrl, paceAction);
   return checkedReferences;
 }

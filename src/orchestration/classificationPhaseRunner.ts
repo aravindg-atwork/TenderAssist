@@ -26,6 +26,8 @@ export interface ClassificationPhaseDeps {
   paceAction?: PaceAction;
   /** Pauses between retries of a timed-out My Tenders page. */
   retryDelaysMs?: readonly number[];
+  /** The portal's entry page, opened again if a step leaves the page blank. */
+  portalHomeUrl?: string;
 }
 
 function sameCategory(actual: string, configured: string): boolean {
@@ -71,7 +73,7 @@ export async function runClassificationPhase(
   }
 
   try {
-    await retryTransient(() => navigateToMyTenders(page, deps.paceAction), {
+    await retryTransient(() => navigateToMyTenders(page, deps.paceAction, deps.portalHomeUrl), {
       delaysMs: deps.retryDelaysMs,
       signal: deps.signal,
       canRetry: () => {

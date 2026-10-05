@@ -801,6 +801,9 @@ function handlePortalCrash(reason: string): void {
   if (!session || (session.state !== 'AUTH_PENDING' && session.state !== 'AUTHENTICATED')) return;
   authMachine.transition(session.id, 'TAB_LOST', `portal page crashed: ${reason}`);
   if (activeJobId && activeJobId !== 'pending') reactToAuthSessionLoss(jobMachine, activeJobId)('PAGE_CRASHED', 'TAB_LOST');
+  // Closing the dead page makes any portal step still waiting on it fail at
+  // once, so the run can reopen the portal instead of waiting forever.
+  portalHost?.close();
 }
 
 async function openPortal(portal: PortalDefinition): Promise<void> {
@@ -982,7 +985,7 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
   // Shared, not copied: a sign-in again during downloads updates ctx.page for later dates.
   ctx.config = config;
   const { portal, abortController, paceAction } = ctx;
-  const deps = { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction };
+  const deps = { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction, portalHomeUrl: portal.url };
   const page = ctx.page!;
   const searchResult = await runSearchPhase(
     { ...deps, searches },

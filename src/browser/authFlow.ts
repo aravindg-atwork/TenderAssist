@@ -62,6 +62,7 @@ export class AuthFlow {
     if (!isAuthenticatedDashboard(text)) return false;
 
     this.deps.machine.transition(this.authSessionId, 'AUTHENTICATED', 'dashboard indicators detected');
+    this.controller.markSignedIn();
     return true;
   }
 
@@ -112,7 +113,7 @@ export class AuthFlow {
     if (!current) return;
     if (current.state !== 'AUTH_PENDING' && current.state !== 'AUTHENTICATED') return;
 
-    const target = reason === 'SESSION_EXPIRED_PAGE' ? 'SESSION_EXPIRED' : 'TAB_LOST';
+    const target = reason === 'SESSION_EXPIRED_PAGE' || reason === 'SIGNED_OUT' ? 'SESSION_EXPIRED' : 'TAB_LOST';
     this.deps.machine.transition(this.authSessionId, target, `browser controller reported ${reason}`);
     this.deps.onAuthSessionLost?.(reason, target);
   }

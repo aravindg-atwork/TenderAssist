@@ -343,7 +343,16 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
               <div className="more-dates__range">
                 <label>
                   <span>From</span>
-                  <input type="date" value={moreFrom} max={todayIso()} onChange={(event) => setMoreFrom(event.target.value)} disabled={moreBusy} />
+                  <input
+                    type="date"
+                    value={moreFrom}
+                    max={todayIso()}
+                    onChange={(event) => {
+                      setMoreFrom(event.target.value);
+                      setMoreTo(event.target.value);
+                    }}
+                    disabled={moreBusy}
+                  />
                 </label>
                 <label>
                   <span>To</span>
@@ -394,8 +403,9 @@ export function JobList({ onSelectJob, activeJobId, activeJobUpdate, onActiveJob
               value={searchDate}
               max={todayIso()}
               onChange={(event) => {
+                // "To" follows "from" so one date is the default; change "to" for a range.
                 setSearchDate(event.target.value);
-                if (untilDate < event.target.value) setUntilDate(event.target.value);
+                setUntilDate(event.target.value);
               }}
               disabled={starting || activeJobId !== null}
             />
