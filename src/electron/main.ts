@@ -1705,12 +1705,6 @@ ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown, options?: 
   return plan;
 });
 
-ipcMain.handle('answer-run-question', (_event, questionId: unknown, answer: unknown) => {
-  if (!activeQuestion || !pendingAnswer || questionId !== activeQuestion.id) throw new Error('That question has already closed.');
-  if (answer !== 'KEEP' && answer !== 'SKIP') throw new Error('Answer keep or skip.');
-  pendingAnswer(answer);
-});
-
 ipcMain.handle('answer-run-question', (_event, questionId: unknown, answer: unknown): void => {
   if (!activeQuestion || !pendingAnswer || questionId !== activeQuestion.id) throw new Error('That question has already closed.');
   if (answer !== 'KEEP' && answer !== 'SKIP') throw new Error('Answer keep or skip.');
