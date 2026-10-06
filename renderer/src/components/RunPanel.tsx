@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AuthJobUpdate } from '../../../src/electron/ipcTypes';
+import type { AuthJobUpdate, RunQuestion } from '../../../src/electron/ipcTypes';
 import { AlertIcon, KeyIcon, RefreshIcon, StopIcon } from './icons';
 import { plainError } from '../words';
 
@@ -36,6 +36,7 @@ interface Instruction { title: string; body: string; needsYou: boolean }
 /** One plain instruction for the moment: what is happening, and whether the operator is needed. */
 function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, portalName: string): Instruction {
   if (!update) return { title: `Opening ${portalName}`, body: 'Preparing the portal. This can take a minute when the portal is slow.', needsYou: false };
+  if (update.question) return { title: 'TenderAssist is unsure about a tender', body: 'Look at the tender in the portal, then keep or skip it below.', needsYou: true };
   if (update.awaitingMoreDates) return { title: 'All dates are done', body: update.statusMessage ?? 'Every chosen date has been searched.', needsYou: true };
   if (update.phase === 'AUTH') {
     switch (update.authStep) {
@@ -65,6 +66,52 @@ function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, porta
   if (update.phase === 'SEARCH') return { title: 'Searching the portal', body: update.statusMessage ?? 'Reading titles and ticking possible tenders into My Tenders.', needsYou: false };
   if (update.phase === 'CLASSIFICATION') return { title: 'Reading each tender', body: update.statusMessage ?? 'Opening each favourite in My Tenders and deciding from its full details.', needsYou: false };
   return { title: 'Saving files', body: update.statusMessage ?? 'Writing each kept tender’s documents, zip and eligibility sheet to your folder.', needsYou: false };
+}
+
+/** Seconds left before the run stops waiting, ticking once a second. */
+function useSecondsLeft(answerBy: string | undefined): number {
+  const left = () => (answerBy ? Math.max(0, Math.ceil((Date.parse(answerBy) - Date.now()) / 1_000)) : 0);
+  const [seconds, setSeconds] = useState(left);
+  useEffect(() => {
+    setSeconds(left());
+    if (!answerBy) return;
+    const timer = setInterval(() => setSeconds(left()), 1_000);
+    return () => clearInterval(timer);
+  }, [answerBy]);
+  return seconds;
+}
+
+/** "Keep or skip?" for one unsure tender, answered while its page is still open. */
+function QuestionCard({ question, busy, onAnswer }: { question: RunQuestion; busy: boolean; onAnswer: (answer: 'KEEP' | 'SKIP') => void }) {
+  const seconds = useSecondsLeft(question.answerBy);
+  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const facts = [
+    ['Tender ID', question.tenderId],
+    ['Reference', question.reference],
+    ['Organisation', question.organisation],
+    ['Category', question.category],
+    ['Closes', question.closingDate],
+    ['Value', question.value],
+  ].filter((fact): fact is [string, string] => Boolean(fact[1]) && fact[1] !== 'NA');
+  return (
+    <section className="ask" aria-labelledby="ask-title">
+      <h3 id="ask-title">Keep or skip?</h3>
+      <p className="ask__title">{question.tenderTitle}</p>
+      <p className="ask__reason">{question.reason}</p>
+      {facts.length > 0 && (
+        <dl className="ask__facts">
+          {facts.map(([label, value]) => (<div key={label}><dt>{label}</dt><dd>{value}</dd></div>))}
+        </dl>
+      )}
+      <div className="ask__actions">
+        <button type="button" className="btn btn--approve" disabled={busy} onClick={() => onAnswer('KEEP')}>Keep</button>
+        <button type="button" className="btn btn--reject" disabled={busy} onClick={() => onAnswer('SKIP')}>Skip it</button>
+      </div>
+      <p className="ask__clock" aria-live="off">
+        Keep saves its documents now. Skip rejects it. With no answer in <strong>{clock}</strong>, it waits in Needs a look.
+      </p>
+    </section>
+  );
 }
 
 export interface RunPanelProps {
@@ -135,6 +182,11 @@ export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
         )}
         {update?.dscFileName && update.phase === 'AUTH' && <p className="now__file">Signer file: {update.dscFileName}</p>}
       </section>
+
+      {update?.question && (
+        <QuestionCard key={update.question.id} question={update.question} busy={busy}
+          onAnswer={(answer) => act(() => window.tenderAssist.answerRunQuestion(update.question!.id, answer))} />
+      )}
 
       {update?.awaitingMoreDates && (
         <section className="more" aria-labelledby="more-title">

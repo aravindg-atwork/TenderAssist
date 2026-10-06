@@ -3,6 +3,7 @@ import type { JobState } from '../persistence/repositories/jobRepository.js';
 import type { AuthState } from '../persistence/repositories/authSessionRepository.js';
 import type { StateTransitionRow } from '../persistence/repositories/stateTransitionRepository.js';
 import type { AuthJobUpdate } from '../orchestration/authJobRunner.js';
+import type { RunQuestion, RunQuestionAnswer } from '../orchestration/runQuestion.js';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { SearchRow } from '../persistence/repositories/searchRepository.js';
 import type { RunConfiguration, RunDefaults } from '../config/runConfiguration.js';
@@ -10,6 +11,8 @@ import type {
   ClassificationGateRow,
   FinalClassification,
 } from '../persistence/repositories/classificationRepository.js';
+import type { WordSuggestions } from '../review/wordSuggestions.js';
+import type { PortalCategoryList } from '../persistence/repositories/portalCategoryRepository.js';
 import type { PublishingSettings } from '../persistence/repositories/publishingSettingsRepository.js';
 import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow, ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
 import type { UpdateStatus } from './updateService.js';
@@ -28,6 +31,8 @@ export type { TendersView } from '../review/tenders.js';
 export type { TimelineEntry } from '../review/timeline.js';
 export type { TenderField, TenderFileView } from '../review/tenderFile.js';
 export type { OperatorDecision } from '../state/opportunityLifecycle.js';
+export type { PortalCategoryList, RunQuestion, RunQuestionAnswer, WordSuggestions };
+export type { WordSuggestion } from '../review/wordSuggestions.js';
 
 export interface RunSettingsState {
   defaults: RunDefaults;
@@ -127,6 +132,10 @@ export interface TenderAssistApi {
   listJobs(): Promise<JobListItem[]>;
   getRunSettings(): Promise<RunSettingsState>;
   saveRunSettings(defaults: RunDefaults): Promise<RunSettingsState>;
+  /** The website's own Product Category list, as the last search read it. */
+  getPortalCategories(portalId: string): Promise<PortalCategoryList>;
+  /** Words to consider adding, learnt from tenders the operator approved and rejected. */
+  getWordSuggestions(): Promise<WordSuggestions>;
   getPortalCredentialSettings(portalId: string): Promise<PortalCredentialSettings>;
   savePortalCredentials(portalId: string, input: SavePortalCredentialInput): Promise<PortalCredentialSettings>;
   getPublishingSettings(portalId: string): Promise<PublishingSettings>;
@@ -173,6 +182,8 @@ export interface TenderAssistApi {
   getDocumentsWaiting(portalId: string): Promise<DocumentsWaiting>;
   /** Signs in and collects only the documents of approved tenders in My Tenders. */
   startDocumentRun(portalId: string): Promise<{ jobId: string; count: number }>;
+  /** Answers the run's "Keep or skip?" question about an unsure tender. */
+  answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
   /** While the run waits after its last date: sign out and finish. */
   finishRun(): Promise<void>;
   getJobDetail(jobId: string): Promise<JobDetail>;

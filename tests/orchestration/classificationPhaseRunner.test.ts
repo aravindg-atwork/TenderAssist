@@ -206,4 +206,68 @@ describe.skipIf(!CHROME_PATH)('runClassificationPhase', { timeout: 30_000 }, () 
     expect(classifications.getFinalForTender(tenderId)).toBe('REJECT');
     expect(saved).toBe(0);
   });
+  // "software development" is in the details only; the title has "development" alone.
+  const detailsOnlyConfig = {
+    searchDate: '2026-09-21',
+    productCategories: ['Information Technology'],
+    keywords: ['software development'],
+    excludedKeywords: [],
+  };
+
+  it('asks about a tender kept only by its details, and saves documents when the operator keeps it', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    const asked: string[] = [];
+    let saved = 0;
+
+    await runClassificationPhase(
+      {
+        jobs, sessions, jobMachine, tenders, classifications,
+        saveDocuments: async () => { saved += 1; },
+        wantsDocuments: () => false,
+        askOperator: async (_tender, _detail, reason) => { asked.push(reason); return 'KEEP'; },
+      },
+      page, jobId, authSessionId, detailsOnlyConfig, () => {}
+    );
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain('“software development”');
+    expect(saved).toBe(1);
+  });
+
+  it('leaves an unanswered tender for the operator without saving documents', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    let saved = 0;
+
+    await runClassificationPhase(
+      {
+        jobs, sessions, jobMachine, tenders, classifications,
+        saveDocuments: async () => { saved += 1; },
+        askOperator: async () => null,
+      },
+      page, jobId, authSessionId, detailsOnlyConfig, () => {}
+    );
+
+    expect(classifications.getFinalForTender(tenderId)).toBe('UNCERTAIN');
+    expect(classifications.listForTender(tenderId).find((gate) => gate.gate === 'G3')?.reason_code).toBe('INTENT_ONLY_IN_DETAILS');
+    expect(saved).toBe(0);
+  });
+
+  it('does not ask when the title itself has an intent word', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    let asked = 0;
+
+    await runClassificationPhase(
+      { jobs, sessions, jobMachine, tenders, classifications, askOperator: async () => { asked += 1; return null; } },
+      page, jobId, authSessionId, { ...detailsOnlyConfig, keywords: ['citizen services'] }, () => {}
+    );
+
+    expect(asked).toBe(0);
+    expect(classifications.getFinalForTender(tenderId)).toBe('KEEP');
+  });
 });

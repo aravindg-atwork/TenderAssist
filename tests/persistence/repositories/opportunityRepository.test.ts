@@ -37,6 +37,14 @@ describe('OpportunityRepository', () => {
     repo = new OpportunityRepository(db);
   });
 
+  it('adds a dated automatic note without changing the decision', () => {
+    const opportunity = repo.recordSighting(sighting(), 'tamil-nadu');
+    repo.addNote(opportunity.id, 'Skipped during the run because nobody answered.');
+    const note = repo.listEvents(opportunity.id).find((event) => event.kind === 'NOTE');
+    expect(note).toMatchObject({ actor: 'automation', note: 'Skipped during the run because nobody answered.' });
+    expect(repo.getById(opportunity.id)?.lifecycle).toBe('NEW');
+  });
+
   it('normalises identity from the Tender ID, falling back to the reference number', () => {
     expect(OpportunityRepository.identityKey(' 2026_elco_674849_1 ', 'REF')).toBe('2026_ELCO_674849_1');
     expect(OpportunityRepository.identityKey(null, ' elcot / it   12 ')).toBe('ELCOT / IT 12');

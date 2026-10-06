@@ -1,62 +1,36 @@
 # TenderAssist backlog
 
-Last updated: 5 Oct 2026. Pick up from **Next up**.
+Last updated: 6 Oct 2026. Pick up from **Next up**.
 
-## Done (built and tested, not yet committed or packaged)
+## Done in 0.4.6 (6 Oct 2026; built and unit-tested, not yet tried on the real website)
 
-- **New look:** maroon and cream. Green means kept/approved, red means reject, amber means later, dark brown means needs a look.
-- **"Needs a look" tenders show more:**
-  - facts from the search list (reference, category, organisation, published date);
-  - "What happens next" in plain words;
-  - a "Search <date> again" button when the tender never reached My Tenders.
-- **Every search session re-checks every undecided favourite in My Tenders, whatever its date.** Tenders the operator already decided are never re-checked.
-- **Session report** opens when a search session ends:
-  - totals;
-  - a line for each date;
-  - kept tenders with their files;
-  - anything that did not finish;
-  - a "Decide them now" button.
-- **Collect documents for approved tenders:**
-  - **On Today:** a "Collect their documents" button appears once tenders are approved but have no files.
-  - **What the run does:** it signs in, opens only those tenders in My Tenders, saves their documents and zip into each tender's existing folder, and copies them to Drive.
-  - **How it is labelled:** it shows as "Documents for approved tenders" in Runs and has its own report.
-  - **Code:** stored in `jobs.purpose` / `jobs.document_tender_ids_json` (migration `014_document_runs.sql`). The run is `collectApprovedDocuments` and `start-document-run` in `src/electron/main.ts`.
-- **Finish reviewer's fixes:**
-  - tray as one line per tender;
-  - dated notes on the noting sheet;
-  - Published date on the cover;
-  - plain error wording;
-  - no uppercase headings;
-  - Runs: delete button only on hover.
-- Tests: 350 of 350 pass.
+- **Categories picked from the website's own list.**
+  - Each search reads the website's Product Category dropdown and saves it per website (`portal_categories:<portal>` in `app_settings`).
+  - Settings → "Categories to search" is a searchable pick list from it. Before the first search it shows the 7 starting categories and says the full list appears after one search; typing a name is only allowed then.
+  - A chosen category that is not on the website's list is shown in red.
+- **The run asks "Keep or skip?" when a tender is unsure.**
+  - "Unsure" means: no check could decide it, **or** it would be kept only because an intent word appears in its details while its title has none. (With word matching alone the first case is rare, so the second is what will usually trigger the question.)
+  - The run panel shows the tender's facts and a 2-minute countdown. Keep = approved, documents saved while the page is open. Skip = rejected.
+  - No answer: it goes to "Needs a look" with a dated TenderAssist note on its sheet saying nobody answered. Its documents can be fetched later with "Collect their documents" after approving.
+  - Code: `src/orchestration/runQuestion.ts`, `askOperator` in `classificationPhaseRunner.ts`, `askOperatorDuringRun` + `answer-run-question` in `main.ts`, `QuestionCard` in `RunPanel.tsx`.
+- **Suggested intent and excluded words** in Settings, learnt from approved vs rejected tenders (title + Work Description; excluded words from titles only).
+  - A phrase needs 3+ tenders on its side and at most one in four on the other; words already in the lists are not suggested. Nothing is added until the operator selects Add and saves.
+  - Code: `src/review/wordSuggestions.ts`.
+- Tests: 369 of 369 pass.
 
 ## To test on the real website
 
-- [ ] Approve 1–2 tenders on Today, click **Collect their documents**, sign in, and check:
-  - the files land in the tender's folder;
-  - the tender moves to "documents collected";
-  - the report is right.
-- [ ] Run a normal search and check the **session report** appears at the end.
-- [ ] Check that "Needs a look" shrinks after a search: every undecided favourite should be re-checked.
+- [ ] Run a search, then open Settings: "Categories to search" should list all the website's categories (about 94 on Tamil Nadu).
+- [ ] During a run, check the "Keep or skip?" card appears for a tender whose title has no intent word, and that:
+  - Keep saves its documents and approves it;
+  - Skip rejects it;
+  - no answer for 2 minutes leaves it in "Needs a look" with the note on its sheet.
+- [ ] After a few approvals/rejections, check the suggested words make sense.
+- [ ] Still open from 0.4.5: **Collect their documents**, the session report, and "Needs a look" shrinking after a search.
 
-## Next up (order agreed)
+## Next up
 
-1. **Categories picked from the website's own list.**
-   - Today Settings takes free text. The TN website's "Product Category" dropdown (`#ProductCategory`) has 94 options, and the project only stored our 7.
-   - Plan:
-     - read the full dropdown list from the website's search page on every search and save it per website;
-     - Settings shows a searchable pick list from it, instead of typing;
-     - before the first search, show the current 7 and say the full list appears after one search.
-   - Code: `src/browser/searchFormController.ts` (`searchCategory` selects `#ProductCategory`), `renderer/src/components/SettingsPage.tsx` ("Categories to search").
-2. **Ask the operator during a run when a tender is unsure.**
-   - During a run, the run panel asks "Keep or skip?" with the tender's facts and a **2-minute** countdown.
-   - With no answer, it skips: the tender goes to "Needs a look", with a note on its sheet that it was skipped because nobody answered.
-   - The operator's answer counts as their decision. Keep → its documents are saved on the spot, while the page is still open.
-   - Code: `src/orchestration/classificationPhaseRunner.ts` (decision is made in `recordDecision`; documents are saved while the details page is open). It needs a main↔renderer "question" channel, like `pendingMoreDates`.
-3. **Suggest intent words from what the operator approves.**
-   - Compare words and phrases that keep appearing in approved tenders (title + work description) with ones in rejected tenders.
-   - Settings shows "Suggested intent words" with an Add button and the reason (e.g. "in 6 approved, 0 rejected"). Same idea for excluded words, from rejected tenders.
-   - Nothing is added automatically.
+- Nothing agreed yet. Candidates are under **Later**.
 
 ## Later
 
@@ -69,4 +43,4 @@ Last updated: 5 Oct 2026. Pick up from **Next up**.
   - final reviewer pass on the maroon/cream look;
   - write `DESIGN.md` and `.impeccable/design.json`;
   - don't commit `.impeccable/review` screenshots (real data).
-- **Release:** commit, then build installer **0.4.6** (local build only; no push, no release upload).
+- **Release:** next local installer after 0.4.6 (local build only; no push, no release upload).

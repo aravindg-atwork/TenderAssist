@@ -329,6 +329,13 @@ export class OpportunityRepository {
     }));
   }
 
+  /** A dated note on the tender's file; the lifecycle does not change. */
+  addNote(opportunityId: string, note: string, actor: OpportunityActor = 'automation', context: EventContext = {}): void {
+    this.require(opportunityId);
+    if (!cleanNote(note)) return;
+    this.insertEvent(opportunityId, 'NOTE', actor, { ...context, note }, {});
+  }
+
   markDocumentsCollected(opportunityId: string, context: EventContext = {}, data: Record<string, unknown> = {}): OpportunityRow {
     return this.transition(opportunityId, 'DOCUMENTS_COLLECTED', 'DOCUMENTS_COLLECTED', 'automation', context, data);
   }

@@ -593,6 +593,16 @@ kbd {
 .more > p { color: var(--ink-2); font-size: 0.9375rem; }
 .more__dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .more__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.ask { padding: 18px; border-radius: var(--radius-file); background: var(--sheet); border: 1px solid var(--line); border-left: 4px solid var(--file); display: flex; flex-direction: column; gap: 10px; }
+.ask h3 { font-size: 1.125rem; }
+.ask__title { margin: 0; font-weight: 600; color: var(--ink); }
+.ask__reason { margin: 0; color: var(--ink-2); font-size: 0.9375rem; }
+.ask__facts { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; font-size: 0.875rem; }
+.ask__facts dt { color: var(--ink-3); }
+.ask__facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.ask__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.ask__clock { margin: 0; color: var(--ink-3); font-size: 0.875rem; }
+.ask__clock strong { color: var(--ink); font-variant-numeric: tabular-nums; }
 
 /* Every date at one size on one line, so a range reads as a sequence. */
 .dates__strip { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
@@ -828,6 +838,41 @@ kbd {
 .chip__remove:hover { background: rgba(60, 33, 20, 0.1); }
 .chip-entry { display: flex; gap: 8px; max-width: 520px; }
 .chip-entry input { flex: 1; min-width: 0; }
+.chip--missing { background: var(--tag-red-wash); border-color: #e3b8b2; color: var(--tag-red-deep); }
+.pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-width: 520px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--sheet);
+}
+.pick-list__item {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  text-align: left;
+  cursor: pointer;
+}
+.pick-list__item span { color: var(--file); font-weight: 700; }
+.pick-list__item:hover { background: var(--file-wash); }
+.pick-list__empty { padding: 8px 10px; color: var(--ink-3); font-size: 0.875rem; }
+.suggest { max-width: 620px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--sheet); }
+.suggest__title { margin: 0 0 6px; color: var(--ink-2); font-size: 0.875rem; font-weight: 600; }
+.suggest__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.suggest__item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
+.suggest__phrase { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.suggest__reason { color: var(--ink-3); font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
 
 .savebar {
   position: fixed;

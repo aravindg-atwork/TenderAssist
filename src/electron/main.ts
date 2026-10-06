@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type Men
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReadStream, existsSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { homedir, arch, release } from 'node:os';
 import { createDatabase, withTransaction } from '../persistence/db.js';
 import { runMigrations } from '../persistence/migrate.js';
@@ -16,6 +16,7 @@ import { RunConfigurationRepository } from '../persistence/repositories/runConfi
 import { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import { PortalCredentialRepository } from '../persistence/repositories/portalCredentialRepository.js';
 import { PublishingSettingsRepository, type PublishingSettings } from '../persistence/repositories/publishingSettingsRepository.js';
+import { PortalCategoryRepository } from '../persistence/repositories/portalCategoryRepository.js';
 import { AutomationSettingsRepository } from '../persistence/repositories/automationSettingsRepository.js';
 import { DisplaySettingsRepository, type TextSize } from '../persistence/repositories/displaySettingsRepository.js';
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
@@ -29,13 +30,15 @@ import { keyFactsFrom, parseDetailFields, type TenderFileView } from '../review/
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
 import { collectAuditHistory, writeAuditWorkbook } from '../review/auditHistory.js';
-import type { OperatorDecision } from '../state/opportunityLifecycle.js';
+import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
 import { waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
+import { suggestWords, workDescriptionFrom, type DecidedTenderText, type WordSuggestions } from '../review/wordSuggestions.js';
+import { RUN_QUESTION_TIMEOUT_MS, waitForAnswer, type RunQuestion, type RunQuestionAnswer } from '../orchestration/runQuestion.js';
 import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
 import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing } from '../orchestration/postProcessingRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
@@ -55,7 +58,7 @@ import { normalizeRunConfiguration, type RunConfiguration } from '../config/runC
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
-import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
+import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { retryTransient } from '../orchestration/transientRetry.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
@@ -107,6 +110,7 @@ const portalCredentials = new PortalCredentialRepository(db);
 const workflow = new TenderWorkflowRepository(db);
 const publishingSettings = new PublishingSettingsRepository(db, join(homedir(), 'Documents', 'TenderAssist'));
 const automationSettings = new AutomationSettingsRepository(db);
+const portalCategories = new PortalCategoryRepository(db);
 const displaySettings = new DisplaySettingsRepository(db);
 const jobOutputs = new JobOutputRepository(db);
 const opportunities = new OpportunityRepository(db);
@@ -137,13 +141,16 @@ let activeBatch: AuthJobUpdate['batch'];
 let activeRunPortalId: string | undefined;
 // Resolves the "run other dates?" question: dates to run next, or null to finish.
 let pendingMoreDates: ((choice: DateBatchPlan | null) => void) | undefined;
+// The "Keep or skip?" question on screen, and how to deliver its answer.
+let activeQuestion: RunQuestion | undefined;
+let pendingAnswer: ((answer: RunQuestionAnswer) => void) | undefined;
 const dscDownloadDirectory = join(getAppDataDir(), 'dsc-downloads');
 const dscArtifacts = new Map<string, DscJnlpArtifact>();
 // Fresh sign-ins allowed while collecting documents before the run stops.
 const MAX_ACQUISITION_SIGN_INS = 3;
 
 function emitJobUpdate(raw: AuthJobUpdate): void {
-  const update: AuthJobUpdate = { searchDate: activeSearchDate, batch: activeBatch, ...raw };
+  const update: AuthJobUpdate = { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion, ...raw };
   lastActiveJobUpdate = update;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
 }
@@ -540,6 +547,23 @@ ipcMain.handle('save-run-settings', (_event, defaults): RunSettingsState => ({
   configured: true,
 }));
 
+ipcMain.handle('get-word-suggestions', (): WordSuggestions => {
+  const textOf = (opportunityId: string, title: string): DecidedTenderText => {
+    const withDetails = tenders.listForOpportunity(opportunityId).filter((tender) => tender.detail_text).at(-1);
+    return { title, description: workDescriptionFrom(withDetails?.detail_text ?? null) };
+  };
+  const decided = (lifecycles: OpportunityLifecycle[]) => opportunities.list({ lifecycles }).map((row) => textOf(row.id, row.title));
+  const defaults = runConfigurations.getDefaults();
+  return suggestWords({
+    approved: decided(['APPROVED', 'DOCUMENTS_COLLECTED']),
+    rejected: decided(['REJECTED']),
+    keywords: defaults.keywords,
+    excludedKeywords: defaults.excludedKeywords,
+  });
+});
+
+ipcMain.handle('get-portal-categories', (_event, portalId: string) => portalCategories.get(getPortalDefinition(portalId).id));
+
 ipcMain.handle('get-portal-credential-settings', async (_event, portalId: string): Promise<PortalCredentialSettings> => {
   return credentialSettings(getPortalDefinition(portalId).id);
 });
@@ -876,6 +900,8 @@ function releaseRun(abortController: AbortController): void {
   activeBatch = undefined;
   activeRunPortalId = undefined;
   pendingMoreDates = undefined;
+  activeQuestion = undefined;
+  pendingAnswer = undefined;
 }
 
 async function checkReadiness(portal: PortalDefinition, outputSettings: PublishingSettings): Promise<void> {
@@ -1167,6 +1193,53 @@ function carryOverUndecidedFavourites(jobId: string, portalId: string, searchDat
   }
 }
 
+/**
+ * Asks the operator to keep or skip one unsure tender while its details page
+ * is open. Their answer is their decision on the tender; with no answer the
+ * tender waits in "Needs a look" with a note saying why.
+ */
+async function askOperatorDuringRun(ctx: RunContext, jobId: string, tender: TenderRow, detail: TenderDetailSnapshot, reason: string): Promise<RunQuestionAnswer | null> {
+  const signal = ctx.abortController.signal;
+  const fresh = tenders.getById(tender.id) ?? tender;
+  activeQuestion = {
+    id: randomUUID(),
+    tenderTitle: fresh.title,
+    tenderId: fresh.tender_portal_id,
+    reference: fresh.tender_ref,
+    organisation: fresh.department ?? fresh.organisation_chain,
+    category: fresh.detail_product_category ?? fresh.product_category,
+    closingDate: fresh.closing_date,
+    value: fresh.value_in_rupees,
+    reason,
+    answerBy: new Date(Date.now() + RUN_QUESTION_TIMEOUT_MS).toISOString(),
+  };
+  if (lastActiveJobUpdate) emitJobUpdate({ ...lastActiveJobUpdate, outcome: undefined, statusMessage: `Waiting for your answer on ${fresh.title}.` });
+  const answer = await waitForAnswer((deliver) => { pendingAnswer = deliver; }, RUN_QUESTION_TIMEOUT_MS, signal);
+  activeQuestion = undefined;
+  if (lastActiveJobUpdate) {
+    emitJobUpdate({
+      ...lastActiveJobUpdate,
+      question: undefined,
+      statusMessage: answer === 'KEEP' ? `Kept ${fresh.title}. Saving its documents.`
+        : answer === 'SKIP' ? `Skipped ${fresh.title}.`
+          : `No answer, so ${fresh.title} waits in Needs a look.`,
+    });
+  }
+  if (signal.aborted) return null;
+  let opportunityId = fresh.opportunity_id ?? null;
+  syncOpportunities('question', () => { opportunityId = opportunities.recordSighting(fresh, ctx.portal.id, { jobId }).id; });
+  if (answer) {
+    const note = 'Answered during the run.';
+    workflow.saveReview(tender.id, answer === 'KEEP' ? 'KEEP' : 'REJECT', note);
+    syncOpportunities('question', () => applyTenderDecision(opportunitySync, opportunityId, answer === 'KEEP' ? 'APPROVE' : 'REJECT', { jobId, note }));
+  } else if (opportunityId) {
+    const id = opportunityId;
+    const minutes = Math.round(RUN_QUESTION_TIMEOUT_MS / 60_000);
+    syncOpportunities('question', () => opportunities.addNote(id, `Skipped during the run because nobody answered within ${minutes} minutes. ${reason}`, 'automation', { jobId }));
+  }
+  return answer;
+}
+
 /** Search, screen, and collect documents for one published date. */
 async function runDate(ctx: RunContext, jobId: string, authSessionId: string): Promise<{ result: AuthJobUpdate; selected: CollectedCounts }> {
   const config = runConfigurations.getForJob(jobId)!;
@@ -1176,7 +1249,7 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
   const deps = { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction, portalHomeUrl: portal.url };
   const page = ctx.page!;
   const searchResult = await runSearchPhase(
-    { ...deps, searches },
+    { ...deps, searches, onCategoryList: (categories) => portalCategories.save(portal.id, categories) },
     page,
     jobId,
     authSessionId,
@@ -1199,6 +1272,7 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
     {
       ...deps,
       saveDocuments: (tender, detailPage) => saveTenderDocuments(ctx, jobId, config, tender, detailPage),
+      askOperator: (tender, detail, reason) => askOperatorDuringRun(ctx, jobId, tender, detail, reason),
       // The same rule that picks the tenders this run collects.
       wantsDocuments: (tenderId) => selectionFor(jobId).includes(tenderId),
     },
@@ -1629,6 +1703,18 @@ ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown, options?: 
   }
   pendingMoreDates(plan);
   return plan;
+});
+
+ipcMain.handle('answer-run-question', (_event, questionId: unknown, answer: unknown) => {
+  if (!activeQuestion || !pendingAnswer || questionId !== activeQuestion.id) throw new Error('That question has already closed.');
+  if (answer !== 'KEEP' && answer !== 'SKIP') throw new Error('Answer keep or skip.');
+  pendingAnswer(answer);
+});
+
+ipcMain.handle('answer-run-question', (_event, questionId: unknown, answer: unknown): void => {
+  if (!activeQuestion || !pendingAnswer || questionId !== activeQuestion.id) throw new Error('That question has already closed.');
+  if (answer !== 'KEEP' && answer !== 'SKIP') throw new Error('Answer keep or skip.');
+  pendingAnswer(answer);
 });
 
 ipcMain.handle('finish-run', (): void => {

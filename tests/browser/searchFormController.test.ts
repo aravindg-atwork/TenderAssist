@@ -156,6 +156,17 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
     });
   });
 
+  it('searchCategory hands over the website category list, without the placeholder', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    let read: string[] = [];
+    await searchCategory(page, 'Information Technology', '21/09/2026', undefined, undefined, (categories) => { read = categories; });
+
+    expect(read).toEqual(['Information Technology', 'Computer- S/W']);
+  });
+
   it('searchCategory returns an empty array when there are zero results', async () => {
     currentRows = [];
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);

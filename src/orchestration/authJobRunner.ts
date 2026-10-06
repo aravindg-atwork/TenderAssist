@@ -10,6 +10,7 @@ import type { DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
 import { shouldSurfacePortalAuthIssue } from '../browser/portalAuthIssueDetector.js';
 import type { PaceAction } from './actionPacer.js';
+import type { RunQuestion } from './runQuestion.js';
 
 export interface AuthJobRunnerDeps {
   jobs: JobRepository;
@@ -70,6 +71,8 @@ export interface AuthJobUpdate {
   batch?: { dates: string[]; done: string[]; skipped: string[] };
   /** Every date has run; the portal stays signed in while the operator picks more dates or finishes. */
   awaitingMoreDates?: boolean;
+  /** The run is waiting for the operator to keep or skip an unsure tender. */
+  question?: RunQuestion;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 3000;

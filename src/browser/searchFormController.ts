@@ -71,17 +71,33 @@ export async function submitAndWaitForNewPage(page: Page, submit: () => Promise<
   }
 }
 
+/** The names in the website's own Product Category list, without the "-Select-" placeholder. */
+export async function readProductCategoryOptions(page: Page): Promise<string[]> {
+  const labels = await page.$$eval('#ProductCategory option', (options) =>
+    options.map((option) => ({ value: (option as HTMLOptionElement).value, label: (option.textContent ?? '').trim() }))
+  );
+  return labels
+    .filter((option) => option.label && option.value.trim() !== '' && !/^-+\s*select\s*-+$/i.test(option.label))
+    .map((option) => option.label);
+}
+
 export async function searchCategory(
   page: Page,
   productCategory: string,
   fromToDateDdMmYyyy: string,
   paceAction: PaceAction = noPacing,
-  portalHomeUrl?: string
+  portalHomeUrl?: string,
+  onCategoryList?: (categories: string[]) => void
 ): Promise<ParsedActiveTenderRow[]> {
   await ensurePortalMenu(page, 'Search Active Tenders', portalHomeUrl, paceAction);
   await paceAction();
   await submitAndWaitForNewPage(page, () => page.click('text=Search Active Tenders'));
   await page.waitForSelector('#ProductCategory');
+  if (onCategoryList) {
+    // Reading the list is a bonus; a surprise here must not stop the search.
+    const categories = await readProductCategoryOptions(page).catch(() => []);
+    if (categories.length > 0) onCategoryList(categories);
+  }
   await paceAction();
   await page.selectOption('#ProductCategory', { label: productCategory });
   await paceAction();

@@ -28,6 +28,8 @@ export interface SearchPhaseDeps {
   retryDelaysMs?: readonly number[];
   /** The portal's entry page, opened again if a step leaves the page blank. */
   portalHomeUrl?: string;
+  /** Receives the website's own Product Category list, read once per search phase. */
+  onCategoryList?: (categories: string[]) => void;
 }
 
 const PREFAVORITE_CLASSIFIER_VERSION = 'prefavorite-title-detail-v1';
@@ -83,6 +85,11 @@ export async function runSearchPhase(
     return state !== 'TAB_LOST' && state !== 'SESSION_EXPIRED' && !isCancellationRequested(deps.signal);
   };
   const failedCategories: string[] = [];
+  let categoryListRead = !deps.onCategoryList;
+  const readCategoryList = (categories: string[]) => {
+    categoryListRead = true;
+    deps.onCategoryList?.(categories);
+  };
 
   for (const config of configuredSearches) {
     if (isCancellationRequested(deps.signal)) return cancelled();
@@ -95,7 +102,7 @@ export async function runSearchPhase(
     onUpdate(snapshot());
 
     try {
-      const rows = await retryTransient(() => searchCategory(page, config.productCategory, targetDate, deps.paceAction, deps.portalHomeUrl), {
+      const rows = await retryTransient(() => searchCategory(page, config.productCategory, targetDate, deps.paceAction, deps.portalHomeUrl, categoryListRead ? undefined : readCategoryList), {
         delaysMs: retryDelaysMs,
         canRetry: sessionUsable,
         signal: deps.signal,

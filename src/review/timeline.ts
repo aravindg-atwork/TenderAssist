@@ -7,6 +7,8 @@ export interface TimelineEntry {
   actor: 'automation' | 'operator';
   title: string;
   detail: string | null;
+  /** A note TenderAssist wrote on the file itself, shown on the noting sheet. */
+  automaticNote?: true;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -120,7 +122,7 @@ export function describeTimeline(events: OpportunityEventRow[]): TimelineEntry[]
         return { ...base, title: `You marked it not related to ${other}`, detail: event.note };
       }
       case 'NOTE':
-        return { ...base, title: 'Note', detail: event.note };
+        return { ...base, title: 'Note', detail: event.note, ...(event.actor === 'automation' ? { automaticNote: true as const } : {}) };
     }
   });
 }

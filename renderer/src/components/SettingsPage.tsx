@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import type { RunDefaults } from '../../../src/config/runConfiguration';
-import type { PortalCredentialSettings, RunSettingsState } from '../../../src/electron/ipcTypes';
+import type { PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
 import type { UpdateStatus } from '../../../src/electron/updateService';
 import { DEFAULT_AUTOMATION_PACING, type AutomationPacingSettings, type AutomationPacingMode } from '../../../src/persistence/repositories/automationSettingsRepository';
 import { EditableChips } from './EditableChips';
+import { CategoryPicker } from './CategoryPicker';
+import { WordSuggestionList } from './WordSuggestionList';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { PortalSelect } from './PortalSelect';
 import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from '../../../src/publishing/outputStructure';
@@ -23,6 +25,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const [productCategories, setProductCategories] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [excludedKeywords, setExcludedKeywords] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<WordSuggestions | null>(null);
+  const [websiteCategories, setWebsiteCategories] = useState<PortalCategoryList | null>(null);
   const [credentialSettings, setCredentialSettings] = useState<PortalCredentialSettings | null>(null);
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
@@ -42,6 +46,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     setProductCategories(settings.defaults.productCategories);
     setKeywords(settings.defaults.keywords);
     setExcludedKeywords(settings.defaults.excludedKeywords);
+    // Suggestions leave out the saved words, so ask again whenever they change.
+    window.tenderAssist.getWordSuggestions().then(setSuggestions).catch(() => setSuggestions(null));
   }, [settings]);
 
   const selectedPortal = getPortalDefinition(selectedPortalId);
@@ -50,6 +56,10 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     let current = true;
     setCredentialSettings(null);
     setPublishing(null);
+    setWebsiteCategories(null);
+    window.tenderAssist.getPortalCategories(selectedPortalId)
+      .then((list) => { if (current) setWebsiteCategories(list); })
+      .catch(() => {});
     setPassword('');
     setSaved(false);
     Promise.all([
@@ -194,15 +204,21 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         <section id="settings-look" className="block" ref={relevanceSectionRef} tabIndex={-1}>
           <h2>What to look for</h2>
           <p className="block__lede">TenderAssist searches each category for the published date, then keeps a tender only when its full details mention one of your intent words and its title has none of the excluded words.</p>
-          <EditableChips id="product-category-entry" label="Categories to search"
-            helper={`Use the exact names in the ${selectedPortal.name} product category list.`}
-            values={productCategories} onChange={setProductCategories} placeholder="Add a category" />
+          <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories}
+            values={productCategories} onChange={setProductCategories} />
           <EditableChips id="intent-keyword-entry" label="Intent words"
             helper="Be specific, like “web application development”, not broad words like “service”."
             values={keywords} onChange={setKeywords} placeholder="Add an intent word or phrase" />
+          <WordSuggestionList title="Suggested intent words, from tenders you approved" suggestions={suggestions?.intent ?? []}
+            current={keywords} onAdd={(phrase) => setKeywords([...keywords, phrase])} />
           <EditableChips id="excluded-keyword-entry" label="Excluded words"
             helper="A tender whose title or category has one of these is rejected without opening it."
             values={excludedKeywords} onChange={setExcludedKeywords} placeholder="Add an excluded word" />
+          <WordSuggestionList title="Suggested excluded words, from tenders you rejected" suggestions={suggestions?.excluded ?? []}
+            current={excludedKeywords} onAdd={(phrase) => setExcludedKeywords([...excludedKeywords, phrase])} />
+          {suggestions && suggestions.intent.length + suggestions.excluded.length > 0 && (
+            <p className="hint">Suggestions are only added when you select Add, then Save changes.</p>
+          )}
         </section>
 
         <section id="settings-login" className="block">

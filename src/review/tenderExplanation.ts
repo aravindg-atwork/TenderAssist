@@ -76,6 +76,10 @@ function uncertainSentence(gate: ScreenedGate | undefined): string {
   if (gate.reasonCode === 'DETAIL_REVIEW_FAILED' || gate.reasonCode === 'PREFAVORITE_DETAIL_REVIEW_FAILED' || gate.reasonCode === 'DETAIL_TEXT_MISSING') {
     return 'Not decided yet: TenderAssist could not open its details page. The next search opens it again from My Tenders.';
   }
+  if (gate.reasonCode === 'INTENT_ONLY_IN_DETAILS') {
+    const words = list(gate.evidence.matchedKeywords);
+    return `Needs your judgement: ${words.length ? quoted(words) : 'an intent word'} appears only in its details, not its title, and nobody answered during the run.`;
+  }
   if (gate.gate === 'G3') return 'Needs your judgement: the title hints at your intent, but its details page did not confirm it.';
   if (gate.gate === 'G4') return 'Needs your judgement: the work may include something you exclude.';
   return 'Needs your judgement.';

@@ -96,8 +96,8 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
     ? { text: LIFECYCLE_LABELS[tender.lifecycle] ?? tender.lifecycle, tone: LIFECYCLE_TONE[tender.lifecycle] ?? 'plain' }
     : tender.recommendation ? RECOMMENDATION_TAG[tender.recommendation] : null;
   const savedDocuments = file?.documents.filter((document) => document.state === 'DOWNLOADED').length ?? 0;
-  // The operator's own entries on the file, oldest first, as the sheet's record.
-  const operatorNotes = (timeline ?? []).filter((entry) => entry.actor === 'operator').reverse();
+  // The operator's entries and TenderAssist's own notes on the file, oldest first, as the sheet's record.
+  const operatorNotes = (timeline ?? []).filter((entry) => entry.actor === 'operator' || entry.automaticNote).reverse();
 
   const openFolder = async () => {
     setOpeningFolder(true);
@@ -220,7 +220,12 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
             <time className="note__date" dateTime={tender.screenedAt} title={absoluteDateTime(tender.screenedAt)}>{dayMonth(tender.screenedAt)}</time>
             <span className="note__text"><strong className="note__who">TenderAssist.</strong> {tender.explanation}</span>
           </li>
-          {operatorNotes.map((entry) => (
+          {operatorNotes.map((entry) => entry.automaticNote ? (
+            <li key={entry.id} className="note">
+              <time className="note__date" dateTime={entry.at} title={absoluteDateTime(entry.at)}>{dayMonth(entry.at)}</time>
+              <span className="note__text"><strong className="note__who">TenderAssist.</strong> {entry.detail}</span>
+            </li>
+          ) : (
             <li key={entry.id} className="note note--you">
               <time className="note__date" dateTime={entry.at} title={absoluteDateTime(entry.at)}>{dayMonth(entry.at)}</time>
               <span className="note__text"><strong className="note__who">You.</strong> {entry.title}{entry.detail ? `: ${entry.detail}` : '.'}</span>

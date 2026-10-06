@@ -2,17 +2,18 @@ import type { Page } from 'playwright-core';
 import type { JobRepository } from '../persistence/repositories/jobRepository.js';
 import type { AuthSessionRepository } from '../persistence/repositories/authSessionRepository.js';
 import type { TenderRepository, TenderRow } from '../persistence/repositories/tenderRepository.js';
-import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
+import type { ClassificationRepository, FinalClassification } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
 import { detailTextFor, navigateToMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
-import { evaluateIntentKeywords, evaluateExcludedScope } from '../classification/intentGates.js';
+import { evaluateIntentKeywords, evaluateExcludedScope, type TextGateResult } from '../classification/intentGates.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
 import type { PaceAction } from './actionPacer.js';
 import { retryTransient } from './transientRetry.js';
+import type { RunQuestionAnswer } from './runQuestion.js';
 
 const CLASSIFIER_VERSION = 'deterministic-detail-v2';
 
@@ -35,6 +36,26 @@ export interface ClassificationPhaseDeps {
   wantsDocuments?: (tenderId: string) => boolean;
   /** The portal's entry page, opened again if a step leaves the page blank. */
   portalHomeUrl?: string;
+  /**
+   * Asks the operator to keep or skip an unsure tender while its details
+   * page is open, and records their answer as their decision. Null means
+   * nobody answered in time.
+   */
+  askOperator?: (tender: TenderRow, detail: TenderDetailSnapshot, reason: string) => Promise<RunQuestionAnswer | null>;
+}
+
+/**
+ * Why a decided tender is still unsure, or null when it is not: no check
+ * could decide it, or it is kept only because an intent word appears
+ * somewhere in its details while its title has none.
+ */
+export function unsureReason(final: FinalClassification, titleIntent: TextGateResult, matchedKeywords: string[]): string | null {
+  if (final === 'UNCERTAIN') return 'TenderAssist could not decide it from its details page.';
+  if (final === 'KEEP' && titleIntent.result !== 'PASS') {
+    const words = matchedKeywords.map((word) => `“${word}”`).join(', ');
+    return `Its title has none of your intent words; ${words || 'an intent word'} appears only in its details.`;
+  }
+  return null;
 }
 
 function sameCategory(actual: string, configured: string): boolean {
@@ -100,6 +121,7 @@ export async function runClassificationPhase(
   }
 
   const evaluatedAgainst = `${config.searchDate}T23:59:59+05:30`;
+  const matchedIntent = new Map<string, string[]>();
   // Each tender is decided from its full details page, and a kept tender's
   // documents are downloaded before that page closes.
   const recordDecision = (tender: TenderRow, detail: TenderDetailSnapshot) => {
@@ -154,6 +176,7 @@ export async function runClassificationPhase(
     });
 
     const g3 = evaluateIntentKeywords(`${tender.title} ${detail.bodyText}`, config.keywords);
+    matchedIntent.set(tender.id, g3.matchedTerms);
     classifications.saveGate({
       tenderId: tender.id,
       gate: 'G3',
@@ -181,7 +204,27 @@ export async function runClassificationPhase(
     recordDecision(tender, detail);
     decided.add(tender.id);
     onUpdate(snapshot());
-    const wanted = deps.wantsDocuments?.(tender.id) ?? classifications.getFinalForTender(tender.id) === 'KEEP';
+    let answer: RunQuestionAnswer | null = null;
+    const final = classifications.getFinalForTender(tender.id);
+    const matched = matchedIntent.get(tender.id) ?? [];
+    const reason = deps.askOperator ? unsureReason(final, evaluateIntentKeywords(tender.title, config.keywords), matched) : null;
+    if (deps.askOperator && reason) {
+      answer = await deps.askOperator(tender, detail, reason);
+      if (isCancellationRequested(deps.signal)) return;
+      if (answer === null && final === 'KEEP') {
+        // Nobody answered: a keep resting only on its details is left for the operator.
+        classifications.saveGate({
+          tenderId: tender.id,
+          gate: 'G3',
+          result: 'UNCERTAIN',
+          reasonCode: 'INTENT_ONLY_IN_DETAILS',
+          evidence: { matchedKeywords: matched, configuredKeywords: config.keywords, unanswered: true },
+          classifierVersion: CLASSIFIER_VERSION,
+        });
+      }
+    }
+    const wanted = answer === 'KEEP'
+      || (answer === null && (deps.wantsDocuments?.(tender.id) ?? classifications.getFinalForTender(tender.id) === 'KEEP'));
     if (deps.saveDocuments && wanted) {
       onUpdate({ ...snapshot(), statusMessage: `Downloading the documents and zip file for ${tender.title}.` });
       // A failed file is recorded by saveDocuments; the decision stands.
