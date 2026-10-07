@@ -18,7 +18,13 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - Code: `src/review/wordSuggestions.ts`.
 - Tests: 369 of 369 pass.
 
-## Done in 0.4.7 (7 Oct 2026; local installer built, not yet tried on the real websites)
+## Done in 0.4.8 (7 Oct 2026; local installer built)
+
+- **"Keep or skip?" card now shows.** Every run update copied an earlier one whose empty question hid the open one, so runs waited for an answer nobody could see (since 0.4.6, every website). After one unanswered question the run stops asking; the taskbar flashes when a question appears.
+- **First-time-user test fixes** (a tester drove a fresh copy through a GeM search): day-first dates, AMC no longer excluded by default, clearer question card with the answers listed, GeM category names follow GeM's rewording, chosen categories shown while searching, truthful Drive/Inbox/count messages, one rupee sign, quiet closing times on rejected tenders, "opened" note for the tender folder.
+- A development copy can run beside the installed app: set `TENDERASSIST_USER_DATA` (ignored in the installed app).
+
+## Done in 0.4.7 (7 Oct 2026)
 
 - **GeM (bidplus.gem.gov.in) as a website**, searched with no sign-in.
   - How it works and why: `docs/gem-portal.md`.
@@ -59,7 +65,7 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- Install `release/TenderAssist-Setup-0.4.7.exe` and work through **To test on the real website** (GeM, and the 4 old Tamil Nadu tenders).
+- Install `release/TenderAssist-Setup-0.4.8.exe` and work through **To test on the real website**. In your own Settings, remove "AMC" and "annual maintenance contract" from the excluded words if AMC work is wanted.
 
 ## Later
 
@@ -72,4 +78,4 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - final reviewer pass on the maroon/cream look;
   - write `DESIGN.md` and `.impeccable/design.json`;
   - don't commit `.impeccable/review` screenshots (real data).
-- **Release:** next local installer after 0.4.7 (local build only; no push, no release upload).
+- **Release:** next local installer after 0.4.8 (local build only; no push, no release upload).
