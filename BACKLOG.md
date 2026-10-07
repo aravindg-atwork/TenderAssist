@@ -65,7 +65,26 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- Install `release/TenderAssist-Setup-0.4.8.exe` and work through **To test on the real website**. In your own Settings, remove "AMC" and "annual maintenance contract" from the excluded words if AMC work is wanted.
+Findings from 7 Oct 2026 (operator's "Tenders Interested- 2026 - 2027.xlsx", 341 titles, 54 from GeM; replayed on real runs):
+
+1. **Training from the operator's tender list (GeM relevance).**
+   - Today's GeM run kept 4 junk bids, all because the single intent word "AMC" matched any maintenance contract (furnaces, RO plants, IT hardware).
+   - It rejected the one bid that was truly theirs, "Hiring of Agency for IT Projects - Milestone basis". That category appears 28 times in their list, but the run also demanded an intent word in the bid document.
+   - Plan:
+     - (a) Chosen GeM categories other than "Custom Bid For Services" count as the intent by themselves; custom bids still need an intent word.
+     - (b) Intent phrases must appear with their words together (`wholePhrase`), in titles too.
+     - (c) Single words (website, portal, software, LMS, ERP, …) count only in titles, never in PDF text.
+     - (d) A "Learn from your tender list" button in Settings that reads an .xlsx, suggests phrases with how many of the operator's tenders each covers, and flags broad words such as "AMC".
+   - Measured on their titles: current words recognise 134/341; the workbook vocabulary with (b)+(c) recognises 304/341, and today's kept bids become relevant ones.
+   - The vocabulary is in the session scratch `evalwords2.mjs` (PHRASES / TITLE_WORDS). Rebuild it from the workbook if needed.
+2. **Report sheet columns.** The day workbook must have exactly: SI No | TDR Number | Department | Location | Tender Title (short) | Project Nature | Tender Value | Bid Start Date | Bid End Date | EMD | Pre-bid Meeting Date | Eligibility | Eligibility Notes | View Tender Link | Tender Document Link.
+   - Today's sheet (`publishJobWorkbook` in `src/publishing/jobPublisher.ts`) has 23 technical columns instead.
+   - Project Nature: Application Dev / Website / Software / E-learning / Mobile App / Other, as in their sheet.
+   - Pre-bid date: GeM PDF "Pre-Bid Date and Time"; GePNIC "Pre Bid Meeting Date".
+3. **Drive copy.** `driveOutputRoot` is empty for both websites, so nothing has ever been copied.
+   - Only approved tender folders are copied (`mirrorTenderFolderToDrive`). The day report sheet is never copied: `mirrorJobOutputToDrive` exists but nothing calls it.
+   - Plan: ask the operator for their Google Drive for desktop folder, copy the report sheet too, and test the copy end to end.
+4. **Folder structure.** Today: `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_TITLE / Documents + Eligibility.xlsx` plus `Approved-Tenders-DD-MM-YYYY.xlsx`. Confirm with the operator that this is the structure they want before changing it.
 
 ## Later
 
