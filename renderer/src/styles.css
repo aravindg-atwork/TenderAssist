@@ -606,6 +606,13 @@ kbd {
 .ask__actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .ask__clock { margin: 0; color: var(--ink-3); font-size: 0.875rem; }
 .ask__clock strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.ask__read { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ink-3); font-size: 0.875rem; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.pick-list__chosen { padding: 6px 10px; color: var(--ink-3); font-size: 0.875rem; }
+.pick-list__chosen small { margin-left: 6px; font-weight: 600; color: var(--ink-2); }
+.folder-open { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ink-3); font-size: 0.875rem; }
+.answered { padding: 12px 16px; border-radius: var(--radius-file); background: var(--sheet); border: 1px solid var(--line); }
+.answered h3 { margin: 0 0 6px; font-size: 0.9375rem; }
+.answered ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.875rem; color: var(--ink-2); }
 
 /* Every date at one size on one line, so a range reads as a sequence. */
 .dates__strip { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }

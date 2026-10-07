@@ -73,6 +73,7 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
   const [fileError, setFileError] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [openingFolder, setOpeningFolder] = useState(false);
+  const [folderOpened, setFolderOpened] = useState(false);
 
   useEffect(() => {
     let current = true;
@@ -101,7 +102,8 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
 
   const openFolder = async () => {
     setOpeningFolder(true);
-    try { await window.tenderAssist.openTenderFolder(tender.id); }
+    setFolderOpened(false);
+    try { await window.tenderAssist.openTenderFolder(tender.id); setFolderOpened(true); }
     catch (err) { setFileError(plainError(err)); }
     finally { setOpeningFolder(false); }
   };
@@ -188,14 +190,17 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
             <>
               <ul className="docs">{file.documents.map((document) => <DocumentRow key={document.id} {...document} />)}</ul>
               {file.hasFolder && (
-                <button className="btn btn--quiet" type="button" onClick={openFolder} disabled={openingFolder}>
-                  <FolderIcon /> {openingFolder ? 'Opening…' : 'Open the tender folder'}
-                </button>
+                <p className="folder-open">
+                  <button className="btn btn--quiet" type="button" onClick={openFolder} disabled={openingFolder}>
+                    <FolderIcon /> {openingFolder ? 'Opening…' : 'Open the tender folder'}
+                  </button>
+                  {folderOpened && <span role="status">Opened in a File Explorer window.</span>}
+                </p>
               )}
             </>
           ) : (
             <p className="file-empty">
-              No documents yet. TenderAssist downloads the documents and the zip file of a tender it keeps, while it reads the tender.
+              No documents yet. TenderAssist saves the documents of a tender it keeps, while it reads the tender.
             </p>
           )
         )}

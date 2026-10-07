@@ -80,6 +80,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const EMBEDDED_CDP_PORT = 18_000 + Math.floor(Math.random() * 10_000);
 app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
 app.commandLine.appendSwitch('remote-debugging-port', String(EMBEDDED_CDP_PORT));
+// Indian English: date boxes read day/month/year (06/10/2026), not month first.
+app.commandLine.appendSwitch('lang', 'en-IN');
+
+// A development copy can run beside the installed app with its own folder
+// (for example a first-time-user test): Electron finds its folder through
+// Windows, not APPDATA, so the one-copy lock below would close it at once.
+// Ignored in the installed app.
+if (!app.isPackaged && process.env.TENDERASSIST_USER_DATA) {
+  app.setPath('userData', process.env.TENDERASSIST_USER_DATA);
+}
 
 // Claim the process lock before opening SQLite. A fast double-click can start
 // two Electron main processes concurrently; the losing process must exit
@@ -1177,13 +1187,20 @@ function afterApproval(tenderRows: TenderRow[]): void {
 
 interface CollectedCounts { shortlisted: number; needsReview: number }
 
-/** How many of the collected tenders were shortlisted, and how many need a look. */
-function countCollected(tenderIds: string[]): CollectedCounts {
+/**
+ * What a search found: tenders kept (by TenderAssist, or by the operator
+ * during the run) and tenders left for a look. Counted from the run itself,
+ * so a date searched again reports what it found, not only new downloads.
+ */
+function countFound(jobId: string): CollectedCounts {
   let shortlisted = 0;
-  for (const id of tenderIds) {
-    if ((workflow.getReview(id)?.decision ?? classifications.getFinalForTender(id)) === 'KEEP') shortlisted += 1;
+  let needsReview = 0;
+  for (const tender of tenders.listForJob(jobId)) {
+    const decision = workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id);
+    if (decision === 'KEEP') shortlisted += 1;
+    else if (decision === 'UNCERTAIN') needsReview += 1;
   }
-  return { shortlisted, needsReview: tenderIds.length - shortlisted };
+  return { shortlisted, needsReview };
 }
 
 function runFinishedMessage(counts: CollectedCounts, dateCount = 1): string {
@@ -1193,7 +1210,7 @@ function runFinishedMessage(counts: CollectedCounts, dateCount = 1): string {
     counts.shortlisted > 0 && `${counts.shortlisted} shortlisted`,
     counts.needsReview > 0 && `${counts.needsReview} need${counts.needsReview === 1 ? 's' : ''} your review`,
   ].filter(Boolean).join(' and ');
-  return `${parts}${dates}. Their documents are saved locally. Decide in the Inbox; approved tenders are copied to Drive.`;
+  return `${parts}${dates}. Kept tenders' documents are saved in your folder. Decide them on the Today page.`;
 }
 
 /** A new job for the next published date, signed in through the session already open. */
@@ -1380,7 +1397,7 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
   // downloaded in this signed-in session, and decided later in the Inbox.
   const selected = selectAutomatically(jobId);
   const result = await collectDocuments(ctx, jobId, authSessionId, selected);
-  return { result, selected: countCollected(selected) };
+  return { result, selected: countFound(jobId) };
 }
 
 // Times one date may sign in again after the portal crashes or signs out.
@@ -1617,7 +1634,7 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
     if (decided.outcome === 'SUCCESS') {
       const selection = selectAutomatically(jobId);
       result = await collectDocuments(ctx, jobId, '', selection);
-      selected = countCollected(selection);
+      selected = countFound(jobId);
     }
     if (result.outcome !== 'SUCCESS') {
       const remaining = plan.toRun.slice(index + 1);
@@ -2034,7 +2051,7 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
       // GeM files are public: no sign-in before saving them.
       const selected = selectAutomatically(jobId);
       const collected = await collectDocuments(ctx, jobId, '', selected);
-      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, phase: 'PUBLISHING', statusMessage: runFinishedMessage(countCollected(selected)) });
+      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, phase: 'PUBLISHING', statusMessage: runFinishedMessage(countFound(jobId)) });
       return;
     }
     if (plan.kind === 'SELECT_TENDERS') {
@@ -2045,14 +2062,14 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
       if (signedIn.outcome !== 'SUCCESS') return;
       const selected = selectAutomatically(jobId);
       const collected = await collectDocuments(ctx, jobId, signedIn.authSessionId, selected);
-      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(countCollected(selected)) });
+      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(countFound(jobId)) });
       return;
     }
     // Documents already chosen: saved files need no portal, and collection
     // asks for sign-in as soon as something still has to be downloaded.
     prepareForDocumentCollection(jobs, jobMachine, jobId);
     const collected = await collectDocuments(ctx, jobId, latestSession?.id ?? '', plan.selectedTenderIds);
-    if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(countCollected(plan.selectedTenderIds)) });
+    if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, statusMessage: runFinishedMessage(countFound(jobId)) });
   })();
   activeJobCompletion = finishRun(ctx, run, () => {});
   return { jobId, plan: plan.kind };

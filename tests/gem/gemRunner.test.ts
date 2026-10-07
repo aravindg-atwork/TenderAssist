@@ -97,8 +97,8 @@ describe('a GeM run for one date', () => {
     await runGemDate(deps([bid(1, 'Custom Bid for Services - Development of web application')], { 1: BID_TEXT }), jobId, CONFIG, () => {});
     const tender = tenders.findByJobAndRef(jobId, 'GEM/2026/B/1')!;
     expect(tender.closing_date).toBe('07-Oct-2026 12:00 PM');
-    expect(tender.value_in_rupees).toBe('₹1,06,25,689.63');
-    expect(tender.detail_text).toContain('EMD Amount in ₹: ₹3,18,771');
+    expect(tender.value_in_rupees).toBe('1,06,25,689.63');
+    expect(tender.detail_text).toContain('EMD Amount in ₹: 3,18,771');
     expect(tender.detail_text).toContain('Bid Submission End Date: 07-10-2026 12:00:00');
     expect(tender.detail_text).toContain('Pre-Qualification: minimum average annual turnover 212.51 Lakh (s); 3 Year (s) of past experience');
     expect(JSON.parse(tender.document_links_json)).toEqual([

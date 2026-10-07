@@ -66,7 +66,13 @@ export function SessionReport({ jobIds, message, onDecide, onOpenRun }: SessionR
       .map((search) => `${publishedLabel(line.detail.runConfiguration?.searchDate ?? null)}: ${search.product_category} could not be searched.`),
     ...(line.detail.jobState !== 'COMPLETE' ? [`${publishedLabel(line.detail.runConfiguration?.searchDate ?? null)}: ${runStatus(line.detail.jobState, false).text.toLowerCase()}.`] : []),
   ]);
-  const waiting = total('kept') + total('look');
+  // Waiting means not yet decided: a tender answered during the run, or decided
+  // before, is not counted again, and one tender found on two dates counts once.
+  const undecided = new Set(lines.flatMap((line) => line.detail.tenders
+    .filter((tender) => (tender.effectiveClassification === 'KEEP' || tender.effectiveClassification === 'UNCERTAIN')
+      && (tender.opportunityLifecycle === null || tender.opportunityLifecycle === 'NEW' || tender.opportunityLifecycle === 'SCREENED'))
+    .map((tender) => tender.opportunity_id ?? tender.id)));
+  const waiting = undecided.size;
   const documentRun = lines.length > 0 && lines.every((line) => line.detail.purpose === 'DOCUMENTS');
   if (documentRun) {
     const collected = lines.flatMap((line) => line.detail.tenders);
@@ -96,7 +102,7 @@ export function SessionReport({ jobIds, message, onDecide, onOpenRun }: SessionR
                 <li key={tender.id} className="verdict">
                   <span className={saved > 0 ? 'mark mark--keep' : 'mark mark--look'}>{saved > 0 ? 'Saved' : 'Not yet'}</span>
                   <span className="verdict__title">{tender.title}</span>
-                  <span className="verdict__reason">{tender.documents.length === 0 ? 'No files listed on its page, or it was not found in My Tenders.' : `${saved} of ${plural(tender.documents.length, 'file')} saved${failed ? `, ${failed} not saved` : ''}.`}</span>
+                  <span className="verdict__reason">{tender.documents.length === 0 ? 'No files found for it.' : `${saved} of ${plural(tender.documents.length, 'file')} saved${failed ? `, ${failed} not saved` : ''}.`}</span>
                 </li>
               );
             })}
@@ -185,7 +191,8 @@ export function SessionReport({ jobIds, message, onDecide, onOpenRun }: SessionR
                   <span className="mark mark--keep">Kept</span>
                   <span className="verdict__title">{tender.title}</span>
                   <span className="verdict__reason">Published {publishedLabel(date)}</span>
-                  <span className="verdict__files">{tender.documents.length > 0 ? `${saved} of ${plural(tender.documents.length, 'file')} saved` : 'No files listed on its page'}</span>
+                  <span className="verdict__files">{tender.documents.length > 0 ? `${saved} of ${plural(tender.documents.length, 'file')} saved`
+                    : tender.opportunityLifecycle && !['NEW', 'SCREENED'].includes(tender.opportunityLifecycle) ? 'Files saved in an earlier search' : 'No files saved'}</span>
                 </li>
               );
             })}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bidDocumentUrl, bidKindLabel, categoryOf, istWallClock, parseGemBid, portalStyleDate, sameCategory } from '../../src/gem/gemBid.js';
+import { bidDocumentUrl, bidKindLabel, categoryOf, istWallClock, parseGemBid, portalStyleDate, refreshCategoryNames, sameCategory } from '../../src/gem/gemBid.js';
 
 const DOC = {
   id: '9843119',
@@ -61,5 +61,23 @@ describe('GeM bid records', () => {
     expect(portalStyleDate('2026-10-07T00:05:00')).toBe('07-Oct-2026 12:05 AM');
     expect(portalStyleDate('2026-10-07T15:30:00')).toBe('07-Oct-2026 03:30 PM');
     expect(portalStyleDate(null)).toBeNull();
+  });
+});
+
+describe('keeping chosen GeM categories in step with GeM’s list', () => {
+  it('swaps a name whose example GeM changed for the current one, and keeps the rest', () => {
+    const list = ['Custom Bid For Services', 'Software Support Services 2.0 - Sap; Application Software', 'Annual Maintenance Service - Desktop', 'Annual Maintenance Service - Cctv System'];
+    expect(refreshCategoryNames([
+      'Custom Bid For Services',
+      'Software Support Services 2.0 - Microsoft; Operating System Software',
+      'Software Support Services 2.0 - Sap; Application Software',
+      'Annual Maintenance Service - Photocopier', // two entries share this category: left alone
+      'Something Gone',
+    ], list)).toEqual([
+      'Custom Bid For Services',
+      'Software Support Services 2.0 - Sap; Application Software',
+      'Annual Maintenance Service - Photocopier',
+      'Something Gone',
+    ]);
   });
 });

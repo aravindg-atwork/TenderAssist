@@ -112,12 +112,12 @@ export function factsFromBidText(text: string): GemDocumentFacts {
   };
 }
 
-/** Rupees in the Indian way of writing them: 10625689.63 → ₹1,06,25,689.63. */
+/** Rupees in the Indian way of writing them, without the sign (the screens add it): 10625689.63 → 1,06,25,689.63. */
 export function rupees(raw: string | null): string | null {
   if (!raw) return null;
   const value = Number(raw.replace(/,/g, ''));
   if (!Number.isFinite(value)) return raw;
-  return `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+  return value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
 
 /**

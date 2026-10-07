@@ -64,8 +64,8 @@ describe('reading a GeM bid PDF', () => {
   });
 
   it('writes rupees the Indian way', () => {
-    expect(rupees('10625689.63')).toBe('₹1,06,25,689.63');
-    expect(rupees('318771')).toBe('₹3,18,771');
+    expect(rupees('10625689.63')).toBe('1,06,25,689.63');
+    expect(rupees('318771')).toBe('3,18,771');
     expect(rupees(null)).toBeNull();
   });
 });

@@ -9,6 +9,8 @@ export interface TrayGroup {
   items: TenderSummary[];
   /** An action for the whole group, such as clearing reviewed rejects. */
   footer?: ReactNode;
+  /** Closing times shown without urgency colour, for tenders not being pursued. */
+  quietClosing?: boolean;
 }
 
 export interface TenderTrayProps {
@@ -56,7 +58,7 @@ export function TenderTray({ label, groups, selectedId, onSelect, emptyText }: T
                     onClick={() => onSelect(item.id)} title={item.title}>
                     <span className={`edge__tag edge__tag--${state.tone}`} aria-hidden="true" />
                     <span className="edge__title">{item.title}</span>
-                    <span className={`edge__closing closing closing--${closing.urgency}`}>{closing.urgency === 'unknown' ? '' : closing.text}</span>
+                    <span className={`edge__closing closing closing--${group.quietClosing ? 'normal' : closing.urgency}`}>{closing.urgency === 'unknown' ? '' : closing.text}</span>
                     <span className="visually-hidden">{state.words}. {closing.text}.</span>
                   </button>
                 </li>

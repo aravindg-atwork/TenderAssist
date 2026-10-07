@@ -36,6 +36,8 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
   const query = filter.trim().toLocaleLowerCase();
   const choices = options.filter((option) =>
     !values.some((value) => sameName(value, option)) && (!query || option.toLocaleLowerCase().includes(query)));
+  // While searching, show matching categories already chosen too, so a search never looks empty for them.
+  const chosenMatches = query ? values.filter((value) => value.toLocaleLowerCase().includes(query)) : [];
   const typed = filter.trim().replace(/\s+/g, ' ');
   // Typing a name is only offered until the website's list is known.
   const canAddTyped = !known && typed !== '' && !options.some((option) => sameName(option, typed));
@@ -81,6 +83,11 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
           }} />
       </div>
       <ul className="pick-list" id="category-picker-options" aria-label="Categories you can add">
+        {chosenMatches.map((value) => (
+          <li key={`chosen-${value}`} className="pick-list__chosen">
+            <span aria-hidden="true">✓</span> {value} <small>chosen</small>
+          </li>
+        ))}
         {choices.slice(0, MAX_SHOWN).map((option) => (
           <li key={option}>
             <button type="button" className="pick-list__item" onClick={() => add(option)}>
@@ -98,7 +105,7 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
         {choices.length > MAX_SHOWN && (
           <li className="pick-list__empty">{choices.length - MAX_SHOWN} more. Type part of a name to find them.</li>
         )}
-        {choices.length === 0 && !canAddTyped && (
+        {choices.length === 0 && !canAddTyped && chosenMatches.length === 0 && (
           <li className="pick-list__empty">{query ? 'No category matches that.' : 'Every category is already chosen.'}</li>
         )}
       </ul>

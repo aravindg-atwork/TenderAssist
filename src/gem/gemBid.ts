@@ -147,3 +147,28 @@ export function portalStyleDate(wallClock: string | null): string | null {
 export function istIso(wallClock: string | null): string | null {
   return wallClock ? `${wallClock}+05:30` : null;
 }
+
+/**
+ * GeM changes the example it adds to a category's name ("Software Support
+ * Services 2.0 - Microsoft; …" becomes "… - Sap; …"). A chosen name no longer
+ * on GeM's list is replaced by the one entry of the same category that is,
+ * so choices do not go stale. Names with no single match are kept as they are.
+ */
+export function refreshCategoryNames(chosen: readonly string[], list: readonly string[]): string[] {
+  const key = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  const onList = new Set(list.map(key));
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const name of chosen) {
+    let next = name;
+    if (!onList.has(key(name))) {
+      const family = key(categoryOf(name));
+      const same = list.filter((entry) => key(categoryOf(entry)) === family);
+      if (same.length === 1) next = same[0];
+    }
+    if (seen.has(key(next))) continue;
+    seen.add(key(next));
+    result.push(next);
+  }
+  return result;
+}

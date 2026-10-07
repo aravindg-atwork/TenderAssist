@@ -57,9 +57,8 @@ export const DEFAULT_RUN_DEFAULTS: RunDefaults = {
     'documentary film',
     'video production',
   ],
+  // AMC work is wanted (software AMC), so it is not excluded.
   excludedKeywords: [
-    'annual maintenance contract',
-    'AMC',
     'computer hardware',
     'laptop',
     'desktop computer',

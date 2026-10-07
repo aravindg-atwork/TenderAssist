@@ -35,7 +35,7 @@ function daysBetween(from: string, to: string): number {
 const shortDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
 const DONE_MESSAGES: Record<OperatorDecision, string> = {
-  APPROVE: 'Approved. Its folder is copied to Drive.',
+  APPROVE: 'Approved.',
   REJECT: 'Rejected.',
   DEFER: 'Moved to Later.',
   REOPEN: 'Moved back to review.',
@@ -71,6 +71,13 @@ export function TodayPage({
   const [decideError, setDecideError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [documentsWaiting, setDocumentsWaiting] = useState<DocumentsWaiting | null>(null);
+  // Whether approved tenders are copied to a Drive folder, so the message after approving is true.
+  const [driveSet, setDriveSet] = useState(false);
+  useEffect(() => {
+    window.tenderAssist.getPublishingSettings(selectedPortalId)
+      .then((settings) => setDriveSet(Boolean(settings.driveOutputRoot.trim())))
+      .catch(() => setDriveSet(false));
+  }, [selectedPortalId]);
   const portal = getPortalDefinition(selectedPortalId);
   const gem = isGemPortal(portal);
 
@@ -111,7 +118,7 @@ export function TodayPage({
     { id: 'uncertain', title: 'Needs a look', hint: 'TenderAssist could not decide.', items: inbox.uncertain },
     { id: 'changed', title: 'Changed since you decided', hint: 'Dates, value or a corrigendum changed.', items: inbox.changed },
     {
-      id: 'rejected', title: 'Rejected by TenderAssist', hint: 'Check the rules caught the right ones.', items: inbox.autoRejected,
+      id: 'rejected', title: 'Rejected by TenderAssist', hint: 'Check the rules caught the right ones.', items: inbox.autoRejected, quietClosing: true,
       footer: (
         <button type="button" className="btn btn--quiet btn--small" onClick={async () => {
           const runIds = [...new Set(inbox.autoRejected.map((item) => item.screeningJobId).filter((id): id is string => Boolean(id)))];
@@ -133,7 +140,8 @@ export function TodayPage({
       const next = await window.tenderAssist.decideTenders([item.id], decision, note);
       applyInbox(next);
       if (decision === 'APPROVE') loadDocumentsWaiting();
-      setDone(`${DONE_MESSAGES[decision]} ${item.title.length > 60 ? `${item.title.slice(0, 60)}…` : item.title}`);
+      const message = decision === 'APPROVE' && driveSet ? 'Approved. Its folder is copied to Drive.' : DONE_MESSAGES[decision];
+      setDone(`${message} ${item.title.length > 60 ? `${item.title.slice(0, 60)}…` : item.title}`);
       // Open whatever now sits where the decided file was.
       const nextOrdered = [...next.recommended, ...next.uncertain, ...next.changed, ...next.autoRejected];
       setSelectedId(nextOrdered[Math.min(index, nextOrdered.length - 1)]?.id ?? null);
@@ -142,7 +150,7 @@ export function TodayPage({
     } finally {
       setBusyId(null);
     }
-  }, [applyInbox, ordered]);
+  }, [applyInbox, ordered, driveSet]);
 
   const keepDecision = useCallback(async (item: InboxItem) => {
     setBusyId(item.id);

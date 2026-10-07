@@ -10,6 +10,7 @@ import { EditableChips } from './EditableChips';
 import { CategoryPicker } from './CategoryPicker';
 import { WordSuggestionList } from './WordSuggestionList';
 import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
+import { refreshCategoryNames } from '../../../src/gem/gemBid';
 import { PortalSelect } from './PortalSelect';
 import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from '../../../src/publishing/outputStructure';
 
@@ -61,6 +62,15 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const chosenCategories = categoriesByPortal[selectedPortal.id]
     ?? categoriesForPortal({ productCategories, keywords, excludedKeywords, categoriesByPortal: {}, gemIncludeProducts }, selectedPortal);
   const setChosenCategories = (values: string[]) => setCategoriesByPortal({ ...categoriesByPortal, [selectedPortal.id]: values });
+
+  // GeM rewords the example after a category's name now and then; follow its current wording.
+  useEffect(() => {
+    if (!gem || !websiteCategories || websiteCategories.categories.length === 0) return;
+    const refreshed = refreshCategoryNames(chosenCategories, websiteCategories.categories);
+    const changed = refreshed.length !== chosenCategories.length || refreshed.some((name, index) => name !== chosenCategories[index]);
+    if (changed) setCategoriesByPortal((current) => ({ ...current, [selectedPortal.id]: refreshed }));
+    // Only when the list arrives, not on every pick.
+  }, [gem, websiteCategories, selectedPortal.id]);
 
   // GeM's list comes from GeM itself, with product categories only when product bids are searched.
   useEffect(() => {
@@ -214,12 +224,11 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
       </nav>
 
       <div className="settings__body">
-        {!settings.configured && (
-          <div className="notice notice--attention">Check the starting values below, then save once before your first search.</div>
-        )}
-
         <section id="settings-look" className="block" ref={relevanceSectionRef} tabIndex={-1}>
           <h2>What to look for</h2>
+          {!settings.configured && (
+            <div className="notice notice--attention">Check the starting values below, then select Save changes at the bottom once before your first search.</div>
+          )}
           <label className="field field--wide" htmlFor="settings-look-portal">
             <span>Website</span>
             <PortalSelect id="settings-look-portal" value={selectedPortalId} onChange={onPortalChange} disabled={saving} />
@@ -301,7 +310,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
 
         <section id="settings-folders" className="block" ref={foldersSectionRef} tabIndex={-1}>
           <h2>Folders</h2>
-          <p className="block__lede">Each published date gets a folder, and each kept tender a folder inside it with its documents, zip and eligibility sheet. Approved tenders are copied to the Drive folder.</p>
+          <p className="block__lede">Each date gets a folder, and each kept tender a folder inside it with its documents (and the zip, where the website offers one) and eligibility sheet. Approved tenders are copied to the Drive folder.</p>
           <label className="field field--wide" htmlFor="local-output-root"><span>Save tenders in</span></label>
           <div className="picker">
             <input id="local-output-root" type="text" value={publishing?.localOutputRoot ?? ''}

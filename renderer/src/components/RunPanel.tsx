@@ -79,7 +79,7 @@ function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, porta
       ? { title: 'Reading each bid', body: update.statusMessage ?? 'Reading the bid document of each bid in your categories and deciding from it.', needsYou: false }
       : { title: 'Reading each tender', body: update.statusMessage ?? 'Opening each favourite in My Tenders and deciding from its full details.', needsYou: false };
   }
-  return { title: 'Saving files', body: update.statusMessage ?? 'Writing each kept tender’s documents, zip and eligibility sheet to your folder.', needsYou: false };
+  return { title: 'Saving files', body: update.statusMessage ?? (noSignIn ? 'Writing each kept tender’s documents and eligibility sheet to your folder.' : 'Writing each kept tender’s documents, zip and eligibility sheet to your folder.'), needsYou: false };
 }
 
 /** Seconds left before the run stops waiting, ticking once a second. */
@@ -121,15 +121,19 @@ function QuestionCard({ question, busy, onAnswer, onOpenDocument }: {
           {facts.map(([label, value]) => (<div key={label}><dt>{label}</dt><dd>{value}</dd></div>))}
         </dl>
       )}
+      {question.documentUrl && (
+        // On its own line, apart from the two answers, so reading never answers.
+        <p className="ask__read">
+          <button type="button" className="btn btn--quiet btn--small" onClick={onOpenDocument}>Open the bid document</button>
+          <span>It opens in your web browser.</span>
+        </p>
+      )}
       <div className="ask__actions">
-        {question.documentUrl && (
-          <button type="button" className="btn btn--quiet" onClick={onOpenDocument}>Open the bid document</button>
-        )}
         <button type="button" className="btn btn--approve" disabled={busy} onClick={() => onAnswer('KEEP')}>Keep</button>
         <button type="button" className="btn btn--reject" disabled={busy} onClick={() => onAnswer('SKIP')}>Skip it</button>
       </div>
       <p className="ask__clock" aria-live="off">
-        Keep saves its documents now. Skip rejects it. With no answer in <strong>{clock}</strong>, it waits in Needs a look.
+        Keep approves it and saves its documents. Skip it rejects it. You can change either later under Tenders. With no answer in <strong>{clock}</strong>, it waits in Needs a look.
       </p>
     </section>
   );
@@ -152,6 +156,8 @@ export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPan
   const [moreTo, setMoreTo] = useState(todayIso());
   const [moreAgain, setMoreAgain] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
+  // Answers given in this run stay on screen, so a click is never in doubt.
+  const [answers, setAnswers] = useState<Array<{ title: string; answer: 'KEEP' | 'SKIP' }>>([]);
 
   const signerLaunched = update?.authStep === 'DSC_LAUNCHED';
   useEffect(() => {
@@ -209,8 +215,27 @@ export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPan
 
       {update?.question && (
         <QuestionCard key={update.question.id} question={update.question} busy={busy}
-          onAnswer={(answer) => act(() => window.tenderAssist.answerRunQuestion(update.question!.id, answer))}
+          onAnswer={(answer) => {
+            const asked = update.question!;
+            void act(async () => {
+              await window.tenderAssist.answerRunQuestion(asked.id, answer);
+              setAnswers((done) => [...done, { title: asked.tenderTitle, answer }]);
+            });
+          }}
           onOpenDocument={() => act(() => window.tenderAssist.openQuestionDocument(update.question!.id))} />
+      )}
+
+      {answers.length > 0 && (
+        <section className="answered" aria-label="Your answers in this run">
+          <h3>Your answers in this run</h3>
+          <ul>
+            {answers.map((item, index) => (
+              <li key={index}>
+                <strong>{item.answer === 'KEEP' ? 'Kept (approved)' : 'Skipped (rejected)'}:</strong> {item.title}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {update?.awaitingMoreDates && (
