@@ -18,6 +18,22 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - Code: `src/review/wordSuggestions.ts`.
 - Tests: 369 of 369 pass.
 
+## Done after 0.4.8 (7 Oct 2026; built and tested, not yet in an installer)
+
+- **Report sheet in the office's 15 columns** (`src/publishing/reportSheet.ts`): SI No, TDR Number, Department, Location, Tender Title (short), Project Nature, Tender Value, Bid Start/End Date, EMD, Pre-bid Meeting Date, Eligibility ("To check"), Eligibility Notes, and links to the tender and to its Documents folder.
+  - The folder link is relative, so it works in the Drive copy too.
+  - GeM PDFs now give the pre-bid date and a location (buyer state and delivery PIN).
+- **Drive copy includes the day's report sheet** (`mirrorReportSheetsToDrive`), tested on disk.
+- **Shorter folder names**: no "Custom Bid for Services -", at most 80 characters, to stay within Windows path limits. Folders saved under the old full names are still found.
+- **Matching learned from the operator's 341 pursued tenders.** No upload feature: the workbook was for analysis only.
+  - Single words count only in titles; phrases count anywhere, with their words together (all websites).
+  - Chosen GeM categories other than custom bids are kept on their own.
+  - New starting intent phrases, with an "Add N recommended words" button in Settings.
+  - A warning for words that are too broad, such as "AMC".
+  - Replayed on real data: 304/341 of their tenders recognised (was 134). Today's GeM junk (AMC furnaces, RO plants) is gone, and "Hiring of Agency for IT Projects" is kept.
+  - On Tamil Nadu, the recommended words would have matched 50/65 junk tenders under the old rule; the new rule matches 1.
+- Tests: 415 of 415 pass.
+
 ## Done in 0.4.8 (7 Oct 2026; local installer built)
 
 - **"Keep or skip?" card now shows.** Every run update copied an earlier one whose empty question hid the open one, so runs waited for an answer nobody could see (since 0.4.6, every website). After one unanswered question the run stops asking; the taskbar flashes when a question appears.
@@ -65,26 +81,11 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-Findings from 7 Oct 2026 (operator's "Tenders Interested- 2026 - 2027.xlsx", 341 titles, 54 from GeM; replayed on real runs):
-
-1. **Training from the operator's tender list (GeM relevance).**
-   - Today's GeM run kept 4 junk bids, all because the single intent word "AMC" matched any maintenance contract (furnaces, RO plants, IT hardware).
-   - It rejected the one bid that was truly theirs, "Hiring of Agency for IT Projects - Milestone basis". That category appears 28 times in their list, but the run also demanded an intent word in the bid document.
-   - Plan:
-     - (a) Chosen GeM categories other than "Custom Bid For Services" count as the intent by themselves; custom bids still need an intent word.
-     - (b) Intent phrases must appear with their words together (`wholePhrase`), in titles too.
-     - (c) Single words (website, portal, software, LMS, ERP, …) count only in titles, never in PDF text.
-     - (d) A "Learn from your tender list" button in Settings that reads an .xlsx, suggests phrases with how many of the operator's tenders each covers, and flags broad words such as "AMC".
-   - Measured on their titles: current words recognise 134/341; the workbook vocabulary with (b)+(c) recognises 304/341, and today's kept bids become relevant ones.
-   - The vocabulary is in the session scratch `evalwords2.mjs` (PHRASES / TITLE_WORDS). Rebuild it from the workbook if needed.
-2. **Report sheet columns.** The day workbook must have exactly: SI No | TDR Number | Department | Location | Tender Title (short) | Project Nature | Tender Value | Bid Start Date | Bid End Date | EMD | Pre-bid Meeting Date | Eligibility | Eligibility Notes | View Tender Link | Tender Document Link.
-   - Today's sheet (`publishJobWorkbook` in `src/publishing/jobPublisher.ts`) has 23 technical columns instead.
-   - Project Nature: Application Dev / Website / Software / E-learning / Mobile App / Other, as in their sheet.
-   - Pre-bid date: GeM PDF "Pre-Bid Date and Time"; GePNIC "Pre Bid Meeting Date".
-3. **Drive copy.** `driveOutputRoot` is empty for both websites, so nothing has ever been copied.
-   - Only approved tender folders are copied (`mirrorTenderFolderToDrive`). The day report sheet is never copied: `mirrorJobOutputToDrive` exists but nothing calls it.
-   - Plan: ask the operator for their Google Drive for desktop folder, copy the report sheet too, and test the copy end to end.
-4. **Folder structure.** Today: `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_TITLE / Documents + Eligibility.xlsx` plus `Approved-Tenders-DD-MM-YYYY.xlsx`. Confirm with the operator that this is the structure they want before changing it.
+- **Drive copy on this PC.** Google Drive for desktop is not installed, so there is no Drive folder to copy into. The operator's folder is https://drive.google.com/drive/folders/1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2.
+  - Once Drive for desktop shows `G:\`, set that folder in Settings → Folders (both websites).
+  - Then approve one tender and check that its folder and the day's report sheet appear in Drive.
+- Build 0.4.9 after that check.
+- **Folder layout today:** `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx`, with `Approved-Tenders-DD-MM-YYYY.xlsx` (the report sheet) in the day folder. Confirm with the operator that this is what they want.
 
 ## Later
 
