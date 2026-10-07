@@ -18,7 +18,7 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - Code: `src/review/wordSuggestions.ts`.
 - Tests: 369 of 369 pass.
 
-## Done on 7 Oct 2026 (not released; built and unit-tested)
+## Done in 0.4.7 (7 Oct 2026; local installer built, not yet tried on the real websites)
 
 - **GeM (bidplus.gem.gov.in) as a website**, searched with no sign-in.
   - How it works and why: `docs/gem-portal.md`.
@@ -59,7 +59,7 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- Try GeM on the real app (see **To test on the real website → GeM**), then build the next local installer.
+- Install `release/TenderAssist-Setup-0.4.7.exe` and work through **To test on the real website** (GeM, and the 4 old Tamil Nadu tenders).
 
 ## Later
 
@@ -72,4 +72,4 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - final reviewer pass on the maroon/cream look;
   - write `DESIGN.md` and `.impeccable/design.json`;
   - don't commit `.impeccable/review` screenshots (real data).
-- **Release:** next local installer after 0.4.6 (local build only; no push, no release upload).
+- **Release:** next local installer after 0.4.7 (local build only; no push, no release upload).
