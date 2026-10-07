@@ -119,6 +119,9 @@ export interface GoogleDriveStatus {
   accountEmail: string;
   signedIn: boolean;
   encryptionAvailable: boolean;
+  uploadMode: 'SAVED' | 'APPROVED';
+  /** An upload is running now. */
+  uploading: boolean;
   /** The last upload in this session, if any. */
   lastUpload: { at: string; uploaded: number; failed: number; problem: string | null } | null;
 }
@@ -204,7 +207,9 @@ export interface TenderAssistApi {
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
   getGoogleDrive(): Promise<GoogleDriveStatus>;
   /** Saves the Drive folder link (checked straight away when signed in). */
-  saveGoogleDrive(input: { folderLink: string }): Promise<GoogleDriveStatus>;
+  saveGoogleDrive(input: { folderLink?: string; uploadMode?: 'SAVED' | 'APPROVED' }): Promise<GoogleDriveStatus>;
+  /** Uploads every tender folder and report sheet saved on this computer; unchanged files are skipped. Resolves when done. */
+  uploadEverythingToGoogleDrive(): Promise<GoogleDriveStatus>;
   /** Opens Google sign-in in the browser and waits for it to finish. */
   connectGoogleDrive(): Promise<GoogleDriveStatus>;
   checkGoogleDrive(): Promise<GoogleDriveStatus>;

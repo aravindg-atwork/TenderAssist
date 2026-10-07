@@ -18,6 +18,17 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - Code: `src/review/wordSuggestions.ts`.
 - Tests: 369 of 369 pass.
 
+## Done in 0.4.11 (7 Oct 2026; local installer built)
+
+- **Drive keeps the same files as this computer.** After every search, each saved tender's folder (documents, eligibility sheet) and the day's report sheet are uploaded; approval no longer matters.
+  - Uploads also run after "Collect their documents" and when a report sheet is rewritten.
+  - **"Upload everything saved so far"** in Settings sends what was saved before (earlier days included); unchanged files are skipped.
+  - Results: a note on each tender's history, a Windows notification when an upload finishes, a message naming what failed, and the last upload shown in Settings.
+  - Why nothing reached Drive in 0.4.10: uploads only happened on approval, and nothing had been approved since signing in.
+- **Google sign-in is built into the app** (0.4.10): the credential is packed from the git-ignored `google-oauth-client.json`. The operator only pastes the folder link and signs in, and a "Copy the sign-in link" fallback covers a browser that will not open it.
+- **Report sheet:** the office's 15 columns first, then the earlier columns. Duplicates are left out: Tender ID = TDR Number, Department, Estimated value = Tender Value, EMD, Eligibility = Eligibility Notes, Closing date / Submission deadline = Bid End Date.
+- Tests: 422 of 422 pass.
+
 ## Done in 0.4.9 (7 Oct 2026; local installer built)
 
 - **Report sheet in the office's 15 columns** (`src/publishing/reportSheet.ts`): SI No, TDR Number, Department, Location, Tender Title (short), Project Nature, Tender Value, Bid Start/End Date, EMD, Pre-bid Meeting Date, Eligibility ("To check"), Eligibility Notes, and links to the tender and to its Documents folder.
@@ -83,11 +94,8 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- Install `release/TenderAssist-Setup-0.4.9.exe`.
-  - In Settings → Folders → Upload to Google Drive: paste the folder link, Client ID and secret, Save, then Sign in to Google as tenders@bowandbaan.com.
-    - The Desktop sign-in opens Chrome; if Chrome shows a 400 error, use an Incognito window.
-  - Approve one tender and check its folder and the report sheet in "Claude TN Tenders- 2026-27".
-  - In Settings → What to look for: Add the recommended words, remove "AMC", and remove "annual maintenance contract" from the excluded words if AMC work is wanted.
+- Install `release/TenderAssist-Setup-0.4.11.exe`, then in Settings → Upload to Google Drive choose "Upload everything saved so far" and check "Claude TN Tenders- 2026-27" in Drive.
+  - In Settings → What to look for: add the recommended words and remove "AMC".
 - The Google consent screen is External / Testing with tenders@bowandbaan.com as a test user, so Google ends the sign-in every 7 days (Settings then says to sign in again). Making the project Internal under the bowandbaan.com Workspace would remove that.
 - **Folder layout:** confirm `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx` + the day report sheet is what the operator wants.
 
@@ -102,4 +110,4 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - final reviewer pass on the maroon/cream look;
   - write `DESIGN.md` and `.impeccable/design.json`;
   - don't commit `.impeccable/review` screenshots (real data).
-- **Release:** next local installer after 0.4.9 (local build only; no push, no release upload).
+- **Release:** next local installer after 0.4.11 (local build only; no push, no release upload).

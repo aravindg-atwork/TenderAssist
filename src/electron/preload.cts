@@ -53,6 +53,7 @@ const api: TenderAssistApi = {
   connectGoogleDrive: () => ipcRenderer.invoke('connect-google-drive'),
   checkGoogleDrive: () => ipcRenderer.invoke('check-google-drive'),
   disconnectGoogleDrive: () => ipcRenderer.invoke('disconnect-google-drive'),
+  uploadEverythingToGoogleDrive: () => ipcRenderer.invoke('upload-everything-to-google-drive'),
   openQuestionDocument: (questionId) => ipcRenderer.invoke('open-question-document', questionId),
   finishRun: () => ipcRenderer.invoke('finish-run'),
   getJobDetail: (jobId) => ipcRenderer.invoke('get-job-detail', jobId),

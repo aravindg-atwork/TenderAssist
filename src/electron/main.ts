@@ -1,5 +1,5 @@
 // src/electron/main.ts
-import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReadStream, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -661,12 +661,16 @@ ipcMain.handle('save-publishing-settings', (_event, portalId: string, settings) 
 ipcMain.handle('get-google-drive', () => googleDriveStatus());
 
 ipcMain.handle('save-google-drive', async (_event, input: unknown): Promise<GoogleDriveStatus> => {
-  const value = (input ?? {}) as { folderLink?: unknown };
+  const value = (input ?? {}) as { folderLink?: unknown; uploadMode?: unknown };
+  const current = googleDriveSettings.get();
+  if (value.uploadMode === 'SAVED' || value.uploadMode === 'APPROVED') {
+    googleDriveSettings.save({ ...current, uploadMode: value.uploadMode });
+    if (typeof value.folderLink !== 'string') return googleDriveStatus();
+  }
   const folderLink = typeof value.folderLink === 'string' ? value.folderLink.trim() : '';
   const folderId = folderLink ? parseDriveFolderId(folderLink) : '';
   if (folderLink && !folderId) throw new Error('That does not look like a Google Drive folder link. Open the folder in Drive and copy the address from the browser.');
-  const current = googleDriveSettings.get();
-  googleDriveSettings.save({ ...current, folderId: folderId ?? '', folderName: folderId === current.folderId ? current.folderName : '' });
+  googleDriveSettings.save({ ...googleDriveSettings.get(), folderId: folderId ?? '', folderName: folderId === current.folderId ? current.folderName : '' });
   // Check a new folder straight away when already signed in.
   const drive = await googleDriveClient();
   if (drive && folderId && folderId !== current.folderId) {
@@ -706,6 +710,12 @@ ipcMain.handle('check-google-drive', async (): Promise<GoogleDriveStatus> => {
   if (!drive) throw new Error('Google Drive is not signed in yet.');
   const [account, folder] = await Promise.all([drive.client.account(), drive.client.folder(drive.folderId)]);
   googleDriveSettings.save({ ...googleDriveSettings.get(), accountEmail: account.email, folderName: folder.name });
+  return googleDriveStatus();
+});
+
+ipcMain.handle('upload-everything-to-google-drive', async (): Promise<GoogleDriveStatus> => {
+  if (!(await googleDriveClient())) throw new Error('Sign in to Google first.');
+  await uploadEverythingToGoogleDrive();
   return googleDriveStatus();
 });
 
@@ -810,7 +820,10 @@ ipcMain.handle('save-tender-review', async (_event, tenderId: string, decision: 
   const opportunityId = (db.prepare('SELECT opportunity_id FROM tenders WHERE id = ?').get(tenderId) as { opportunity_id: string | null }).opportunity_id;
   syncOpportunities('review', () => applyTenderDecision(opportunitySync, opportunityId, decision === 'KEEP' ? 'APPROVE' : 'REJECT', { jobId: tender.job_id, note: reason }));
   const job = jobs.getById(tender.job_id);
-  if (job?.state === 'COMPLETE' || job?.state === 'REPORTING') await publishStoredJob(tender.job_id);
+  if (job?.state === 'COMPLETE' || job?.state === 'REPORTING') {
+    await publishStoredJob(tender.job_id);
+    uploadRunToGoogleDrive(tender.job_id);
+  }
   if (decision === 'KEEP' && opportunityId) afterApproval(tenders.listForOpportunity(opportunityId));
   return review;
 });
@@ -1153,6 +1166,8 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
       // Tenders approved in the Inbox before this run had their documents
       // collected just now, so they go to Drive straight away.
       reportDriveProblems(copyApprovedTendersToDrive(tenders.listForJob(jobId)));
+      // Drive gets what this computer got, when the operator chose that.
+      uploadRunToGoogleDrive(jobId);
       // The caller reports success, since more dates may follow in this sign-in.
       return result;
     }
@@ -1230,8 +1245,6 @@ function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
       problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  // Also uploaded straight to Google Drive when it is signed in (in the background).
-  uploadApprovedTendersToGoogleDrive(tenderRows);
   return problems;
 }
 
@@ -1287,64 +1300,103 @@ async function googleDriveStatus(): Promise<GoogleDriveStatus> {
     accountEmail: settings.accountEmail,
     signedIn: Boolean(settings.refreshTokenEncrypted),
     encryptionAvailable: await safeStorage.isAsyncEncryptionAvailable(),
+    uploadMode: settings.uploadMode,
+    uploading: driveUploading,
     lastUpload: lastDriveUpload,
   };
 }
 
 let lastDriveUpload: GoogleDriveStatus['lastUpload'] = null;
+let driveUploading = false;
 // Uploads run one after another in the background; approving never waits on Drive.
 let driveUploads: Promise<void> = Promise.resolve();
 
+interface DriveUploadSummary { tenders: number; files: number; problems: string[] }
+
 /**
- * Uploads approved tenders' folders, and their day's report sheet, to the
- * Google Drive folder in the same layout as the local output folder. Notes the
- * result on each tender's history; problems are shown once at the end.
+ * Uploads tenders' saved folders, and the report sheets of their day folders,
+ * to the Google Drive folder in the same layout as the local output folder.
+ * Queued one batch after another in the background; nothing waits on Drive.
  */
-function uploadApprovedTendersToGoogleDrive(tenderRows: TenderRow[]): void {
-  const targets = tenderRows.filter((tender) => {
-    const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
-    return lifecycle && APPROVED_LIFECYCLES.includes(lifecycle);
-  });
-  if (targets.length === 0) return;
-  driveUploads = driveUploads.then(async () => {
+function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array<{ jobId: string }> = [], label = 'Google Drive upload'): Promise<DriveUploadSummary | null> {
+  const run = driveUploads.then(async (): Promise<DriveUploadSummary | null> => {
     const drive = await googleDriveClient();
-    if (!drive) return;
-    const problems: string[] = [];
-    const sheetsDone = new Set<string>();
-    let uploaded = 0;
-    for (const tender of targets) {
-      const plan = jobOutputs.getPlan(tender.job_id);
-      const serialNumber = jobOutputs.findSerialNumber(tender.id);
-      if (!plan || serialNumber === undefined) continue;
-      const folder = tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate);
-      if (!existsSync(folder)) continue;
-      try {
-        const segments = relative(resolve(plan.outputRoot), resolve(folder)).split(/[\\/]+/).filter(Boolean);
-        const dayId = await drive.client.ensurePath(drive.folderId, segments.slice(0, -1));
-        const tenderId = await drive.client.ensureFolder(dayId, segments[segments.length - 1]);
-        const report = await drive.client.putFolder(tenderId, folder);
-        if (!sheetsDone.has(plan.jobDirectory)) {
-          sheetsDone.add(plan.jobDirectory);
+    if (!drive) return null;
+    driveUploading = true;
+    const summary: DriveUploadSummary = { tenders: 0, files: 0, problems: [] };
+    const days = new Map<string, { plan: NonNullable<ReturnType<typeof jobOutputs.getPlan>> }>();
+    for (const { jobId } of extraDayDirectories) {
+      const plan = jobOutputs.getPlan(jobId);
+      if (plan && existsSync(plan.jobDirectory)) days.set(plan.jobDirectory, { plan });
+    }
+    try {
+      for (const tender of tenderRows) {
+        const plan = jobOutputs.getPlan(tender.job_id);
+        const serialNumber = jobOutputs.findSerialNumber(tender.id);
+        if (!plan || serialNumber === undefined) continue;
+        const folder = tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate);
+        if (!existsSync(folder)) continue;
+        days.set(plan.jobDirectory, { plan });
+        try {
+          const segments = relative(resolve(plan.outputRoot), resolve(folder)).split(/[\/]+/).filter(Boolean);
+          const dayId = await drive.client.ensurePath(drive.folderId, segments.slice(0, -1));
+          const report = await drive.client.putFolder(await drive.client.ensureFolder(dayId, segments[segments.length - 1]), folder);
+          summary.tenders += 1;
+          summary.files += report.uploaded;
+          if (tender.opportunity_id && report.uploaded > 0) {
+            const id = tender.opportunity_id;
+            syncOpportunities('drive', () => opportunities.addNote(id, `Uploaded to Google Drive: ${[googleDriveSettings.get().folderName, ...segments].join(' / ')} (${report.uploaded} new or changed ${report.uploaded === 1 ? 'file' : 'files'}).`, 'automation', { jobId: tender.job_id }));
+          }
+        } catch (error) {
+          summary.problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      // Each day's report sheet(s), next to its tender folders.
+      for (const { plan } of days.values()) {
+        try {
+          const segments = relative(resolve(plan.outputRoot), resolve(plan.jobDirectory)).split(/[\/]+/).filter(Boolean);
+          const dayId = await drive.client.ensurePath(drive.folderId, segments);
           const sheetName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook.replace(/\.xlsx$/i, '').toLocaleLowerCase();
           for (const name of readdirSync(plan.jobDirectory)) {
-            if (/\.xlsx$/i.test(name) && name.toLocaleLowerCase().startsWith(sheetName)) await drive.client.putFile(dayId, join(plan.jobDirectory, name), name);
+            if (/\.xlsx$/i.test(name) && name.toLocaleLowerCase().startsWith(sheetName)) {
+              if (await drive.client.putFile(dayId, join(plan.jobDirectory, name), name) === 'uploaded') summary.files += 1;
+            }
           }
+        } catch (error) {
+          summary.problems.push(`Report sheet for ${plan.outputDate}: ${error instanceof Error ? error.message : String(error)}`);
         }
-        uploaded += 1;
-        if (tender.opportunity_id) {
-          const id = tender.opportunity_id;
-          syncOpportunities('drive', () => opportunities.addNote(id, `Uploaded to Google Drive: ${[googleDriveSettings.get().folderName, ...segments].join(' / ')} (${report.uploaded} new or changed ${report.uploaded === 1 ? 'file' : 'files'}).`, 'automation', { jobId: tender.job_id }));
-        }
-      } catch (error) {
-        problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    } finally {
+      driveUploading = false;
     }
-    lastDriveUpload = { at: new Date().toISOString(), uploaded, failed: problems.length, problem: problems[0] ?? null };
-    if (problems.length > 0) {
+    lastDriveUpload = { at: new Date().toISOString(), uploaded: summary.tenders, failed: summary.problems.length, problem: summary.problems[0] ?? null };
+    if (summary.problems.length > 0) {
       dialog.showErrorBox('Not uploaded to Google Drive',
-        `The approval is saved, and the files are safe in the local output folder, but these could not be uploaded to Google Drive:\n\n${problems.join('\n')}\n\nCheck the internet connection and the Google Drive settings, then approve again (files already uploaded are not sent twice).`);
+        `The files are safe in the local output folder, but these could not be uploaded to Google Drive:\n\n${summary.problems.join('\n')}\n\nCheck the internet connection, then use Settings → Upload to Google Drive → "Upload everything saved so far" (files already on Drive are not sent again).`);
+    } else if (summary.files > 0 && Notification.isSupported()) {
+      new Notification({ title: 'Uploaded to Google Drive', body: `${summary.tenders} ${summary.tenders === 1 ? 'tender' : 'tenders'} and report sheets are in “${googleDriveSettings.get().folderName}”.` }).show();
     }
-  }).catch((error) => console.error('[TenderAssist] Google Drive upload failed:', error));
+    return summary;
+  });
+  driveUploads = run.then(() => undefined, (error) => { console.error(`[TenderAssist] ${label} failed:`, error); });
+  return run.catch(() => null);
+}
+
+/** Tenders whose files were just saved (for example by "Collect their documents"): their folders and report sheets. */
+function uploadSavedTendersToGoogleDrive(tenderRows: TenderRow[]): void {
+  if (tenderRows.length > 0) void uploadToGoogleDrive(tenderRows, tenderRows.map((tender) => ({ jobId: tender.job_id })), 'saved tenders upload');
+}
+
+/** Drive mirrors this computer: after a run, everything it saved (tender folders with documents, and the report sheet). */
+function uploadRunToGoogleDrive(jobId: string): void {
+  void uploadToGoogleDrive(tenders.listForJob(jobId), [{ jobId }], 'run upload');
+}
+
+/** Everything saved on this computer so far: every run's tender folders and report sheets. */
+function uploadEverythingToGoogleDrive(): Promise<DriveUploadSummary | null> {
+  const jobIds = jobs.listAll().map((job) => job.id).filter((id) => jobOutputs.getPlan(id));
+  const rows = jobIds.flatMap((id) => tenders.listForJob(id));
+  return uploadToGoogleDrive(rows, jobIds.map((jobId) => ({ jobId })), 'upload of everything saved');
 }
 
 function approvedTenderRowsFor(opportunityIds: string[]): TenderRow[] {
@@ -1377,14 +1429,21 @@ function countFound(jobId: string): CollectedCounts {
   return { shortlisted, needsReview };
 }
 
+/** Whether runs copy what they save to Google Drive. */
+function runsUploadToDrive(): boolean {
+  const settings = googleDriveSettings.get();
+  return Boolean(settings.refreshTokenEncrypted && settings.folderId) && builtInGoogleClient() !== null;
+}
+
 function runFinishedMessage(counts: CollectedCounts, dateCount = 1): string {
   const dates = dateCount > 1 ? ` across ${dateCount} published dates` : '';
-  if (counts.shortlisted + counts.needsReview === 0) return `No tender matched your filters${dates}. Open a run to see what was checked.`;
+  const drive = runsUploadToDrive() ? ` The report sheet${counts.shortlisted > 0 ? ' and kept tenders are' : ' is'} being uploaded to Google Drive.` : '';
+  if (counts.shortlisted + counts.needsReview === 0) return `No tender matched your filters${dates}. Open a run to see what was checked.${drive}`;
   const parts = [
     counts.shortlisted > 0 && `${counts.shortlisted} shortlisted`,
     counts.needsReview > 0 && `${counts.needsReview} need${counts.needsReview === 1 ? 's' : ''} your review`,
   ].filter(Boolean).join(' and ');
-  return `${parts}${dates}. Kept tenders' documents are saved in your folder. Decide them on the Today page.`;
+  return `${parts}${dates}. Kept tenders' documents are saved in your folder.${drive} Decide them on the Today page.`;
 }
 
 /** A new job for the next published date, signed in through the session already open. */
@@ -1882,6 +1941,8 @@ async function collectGemApprovedDocuments(ctx: RunContext, jobId: string, targe
       syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, sourceJob));
     }
     reportDriveProblems(copyApprovedTendersToDrive(targets.map((tender) => tenders.getById(tender.id) ?? tender)));
+    // Their files are saved now, so Drive gets them too.
+    uploadSavedTendersToGoogleDrive(targets.map((tender) => tenders.getById(tender.id) ?? tender));
     for (const [state, reason] of [
       ['DOCUMENTS_LOCAL', 'approved GeM tenders\' files saved locally'],
       ['PROCESSING_DOCUMENTS', 'documents run finishing'],
@@ -1964,6 +2025,8 @@ async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSess
     }
     // Approved tenders go to Drive once their files are saved.
     reportDriveProblems(copyApprovedTendersToDrive(targets));
+    // Their files are saved now, so Drive gets them too.
+    uploadSavedTendersToGoogleDrive(targets);
     if (sessionWasLost(authSessionId)) {
       endJob(jobId, 'portal signed out while collecting approved tenders\' documents');
       emitJobUpdate(update({

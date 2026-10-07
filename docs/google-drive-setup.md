@@ -56,7 +56,7 @@ The signed-in account must be able to add files to the folder, which means Edito
 
 ## What happens next
 
-- **When a tender is approved,** its folder (`Documents`, `Eligibility.xlsx`) and that day's report sheet are uploaded into the Drive folder, in the same layout as on the computer:
+- **Drive keeps the same files as this computer.** After every search, each saved tender's folder (`Documents`, `Eligibility.xlsx`) and that day's report sheet are uploaded into the Drive folder, in the same layout:
 
   ```
   <Drive folder> / 10-2026 / 06-10-2026 / Approved-Tenders-06-10-2026.xlsx
@@ -64,6 +64,11 @@ The signed-in account must be able to add files to the folder, which means Edito
                                                                       / Eligibility.xlsx
   ```
 
+- Files saved later, for example by "Collect their documents" or a rewritten report sheet, are uploaded as well.
+- **"Upload everything saved so far"** in Settings sends everything already on the computer, including earlier days.
 - **Files already on Drive and unchanged are not sent again.** A changed file replaces the old one.
-- **Each tender's history** notes when it was uploaded. If an upload fails, a message says which tenders. The files stay safe on the computer, and approving again retries.
-- **The sign-in is stored on this computer,** encrypted for the Windows account. It is never in backups or support bundles. **Sign out** in Settings stops all uploads.
+- **Results:**
+  - each tender's history notes its upload;
+  - a Windows notification says when an upload finished;
+  - if an upload fails, a message names what failed. The files stay safe on the computer, and "Upload everything saved so far" retries.
+- **The sign-in is stored on this computer,** encrypted for the Windows account. It is never in backups or support bundles. **Sign out** stops all uploads.

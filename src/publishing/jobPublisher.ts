@@ -5,7 +5,7 @@ import type { TenderRow } from '../persistence/repositories/tenderRepository.js'
 import type { FinalClassification } from '../persistence/repositories/classificationRepository.js';
 import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from './outputStructure.js';
-import { REPORT_COLUMNS, reportRow } from './reportSheet.js';
+import { REPORT_COLUMNS, reportDate, reportRow } from './reportSheet.js';
 
 export interface PublishableTender {
   tender: TenderRow;
@@ -143,6 +143,31 @@ export function approvedWorkbookName(fileName: string, runNumber: number): strin
   return runNumber > 1 ? fileName.replace(/\.xlsx$/i, ` (run ${runNumber}).xlsx`) : fileName;
 }
 
+/**
+ * The earlier sheet's columns, after the office's own. Columns the office's
+ * set already covers are left out: Tender ID (TDR Number), Department,
+ * Estimated value (Tender Value), EMD, Eligibility (Eligibility Notes), and
+ * Closing date / Submission deadline (Bid End Date).
+ */
+const EARLIER_COLUMNS = [
+  { header: 'Reference', key: 'reference', width: 22 },
+  { header: 'Full title', key: 'title', width: 52 },
+  { header: 'Decision', key: 'decision', width: 15 },
+  { header: 'Decision source', key: 'decisionSource', width: 17 },
+  { header: 'Review reason', key: 'reviewReason', width: 30 },
+  { header: 'Category', key: 'category', width: 28 },
+  { header: 'Organisation', key: 'organisation', width: 35 },
+  { header: 'State', key: 'state', width: 20 },
+  { header: 'Published date', key: 'published', width: 18 },
+  { header: 'Scope', key: 'scope', width: 45 },
+  { header: 'Tender fee', key: 'fee', width: 20 },
+  { header: 'Submission method', key: 'submission', width: 40 },
+  { header: 'Contact', key: 'contact', width: 32 },
+  { header: 'Extraction confidence', key: 'confidence', width: 21 },
+  { header: 'Documents downloaded', key: 'documents', width: 22 },
+  { header: 'Tender folder', key: 'folder', width: 55 },
+] as const;
+
 export async function publishJobWorkbook(
   outputRoot: string,
   searchDate: string,
@@ -160,7 +185,7 @@ export async function publishJobWorkbook(
   workbook.created = new Date();
   const sheet = workbook.addWorksheet('Approved Tenders', { views: [{ state: 'frozen', ySplit: 1 }] });
   // The office's own columns, as in its "Tenders Interested" workbook.
-  sheet.columns = REPORT_COLUMNS.map((column) => ({ header: column.header, key: column.key, width: column.width }));
+  sheet.columns = [...REPORT_COLUMNS, ...EARLIER_COLUMNS].map((column) => ({ header: column.header, key: column.key, width: column.width }));
 
   for (const [index, item] of items.entries()) {
     const serialNumber = item.serialNumber ?? index + 1;
@@ -183,12 +208,27 @@ export async function publishJobWorkbook(
       ...row,
       viewTenderLink: row.viewTenderLink ? { text: row.viewTenderLink.text, hyperlink: row.viewTenderLink.target } : '',
       tenderDocumentLink: row.tenderDocumentLink ? { text: row.tenderDocumentLink.text, hyperlink: row.tenderDocumentLink.target } : '',
+      reference: item.tender.tender_ref,
+      title: item.tender.title,
+      decision: item.manualReview?.decision ?? item.automaticDecision,
+      decisionSource: item.manualReview ? 'Manual review' : 'Automation',
+      reviewReason: item.manualReview?.reason ?? '',
+      category: item.tender.detail_product_category ?? item.tender.product_category,
+      organisation: (item.tender.organisation_chain ?? '').replace(/\|\|/g, ' › '),
+      state: item.tender.state_name ?? '',
+      published: reportDate(item.tender.published_date),
+      scope: req.scope ?? '',
+      fee: req.tenderFee ?? '',
+      submission: req.submissionMethod ?? '',
+      contact: req.contact ?? '',
+      confidence: item.requirements?.confidence ?? '',
+      documents: item.documents.filter((document) => document.state === 'DOWNLOADED').length,
+      folder: tenderDirectory,
     });
     await publishTenderEligibilityWorkbook(tenderDirectory, item, serialNumber, structure, searchDate);
   }
 
-  const lastColumn = String.fromCharCode('A'.charCodeAt(0) + REPORT_COLUMNS.length - 1);
-  sheet.autoFilter = { from: 'A1', to: `${lastColumn}1` };
+  sheet.autoFilter = { from: 'A1', to: `${sheet.getColumn(REPORT_COLUMNS.length + EARLIER_COLUMNS.length).letter}1` };
   sheet.getRow(1).height = 28;
   sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
   sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF263B93' } };

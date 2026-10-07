@@ -45,7 +45,7 @@ export function GoogleDriveSetting() {
     <fieldset className="settings-fieldset">
       <legend>Upload to Google Drive</legend>
       <p className="field-helper">
-        When you approve a tender, TenderAssist uploads its folder (documents and eligibility sheet) and the day’s report sheet to your
+        Drive keeps the same files as this computer: after every search, each saved tender’s folder (documents and eligibility sheet) and the day’s report sheet are uploaded to your
         Drive folder, in the same layout as on this computer. Files already uploaded are not sent again.
       </p>
       {!status.available ? (
@@ -87,6 +87,17 @@ export function GoogleDriveSetting() {
           </>
         )}
       </div>
+      {status.signedIn && (
+        <>
+          <p className="hint">
+            <button type="button" className="btn btn--quiet btn--small" disabled={busy !== null}
+              onClick={() => act('upload', () => window.tenderAssist.uploadEverythingToGoogleDrive(), 'Upload finished. Files already on Drive were not sent again.')}>
+              {busy === 'upload' ? 'Uploading… this can take a few minutes' : 'Upload everything saved so far'}
+            </button>{' '}
+            Sends every tender folder and report sheet already on this computer. Anything already on Drive and unchanged is skipped.
+          </p>
+        </>
+      )}
       {busy === 'connect' && status.signInLink && (
         <p className="hint" role="status">
           Sign in to Google in the browser window that opened. If no window opened, or it shows an error, copy the sign-in link and open it

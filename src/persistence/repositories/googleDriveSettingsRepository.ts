@@ -13,12 +13,14 @@ export interface GoogleDriveSettings {
   folderName: string;
   accountEmail: string;
   connectedAt: string | null;
+  /** SAVED: everything a search saves goes to Drive after the run. APPROVED: only tenders the operator approves. */
+  uploadMode: 'SAVED' | 'APPROVED';
 }
 
 const KEY = 'google_drive';
 
 export const EMPTY_GOOGLE_DRIVE_SETTINGS: GoogleDriveSettings = {
-  clientId: '', clientSecretEncrypted: null, refreshTokenEncrypted: null, folderId: '', folderName: '', accountEmail: '', connectedAt: null,
+  clientId: '', clientSecretEncrypted: null, refreshTokenEncrypted: null, folderId: '', folderName: '', accountEmail: '', connectedAt: null, uploadMode: 'SAVED',
 };
 
 export class GoogleDriveSettingsRepository {
@@ -39,6 +41,7 @@ export class GoogleDriveSettingsRepository {
         folderName: text(saved.folderName),
         accountEmail: text(saved.accountEmail),
         connectedAt: optional(saved.connectedAt),
+        uploadMode: saved.uploadMode === 'APPROVED' ? 'APPROVED' : 'SAVED',
       };
     } catch {
       return { ...EMPTY_GOOGLE_DRIVE_SETTINGS };
