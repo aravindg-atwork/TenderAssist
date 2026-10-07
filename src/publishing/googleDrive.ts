@@ -6,7 +6,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -44,6 +44,18 @@ export function parseGoogleClientFile(text: string): DriveCredentials | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The folders from the output root down to a saved folder, one name each, for
+ * making the same layout on Drive: "C:\…\TenderAssist" and
+ * "C:\…\TenderAssist\10-2026\07-10-2026" give ["10-2026", "07-10-2026"].
+ * Windows paths use backslashes; both kinds of slash are split.
+ */
+export function driveFolderPath(outputRoot: string, folder: string): string[] {
+  const path = relative(resolve(outputRoot), resolve(folder));
+  if (!path || path.startsWith('..') || isAbsolute(path)) throw new GoogleDriveError('The folder is outside the TenderAssist output folder.');
+  return path.split(/[\\/]+/).filter(Boolean);
 }
 
 /** The folder id from a Drive folder link (or the id itself). */

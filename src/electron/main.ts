@@ -62,7 +62,7 @@ import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
-import { GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser, type DriveCredentials } from '../publishing/googleDrive.js';
+import { driveFolderPath, GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser, type DriveCredentials } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
 import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
@@ -1338,7 +1338,7 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
         if (!existsSync(folder)) continue;
         days.set(plan.jobDirectory, { plan });
         try {
-          const segments = relative(resolve(plan.outputRoot), resolve(folder)).split(/[\/]+/).filter(Boolean);
+          const segments = driveFolderPath(plan.outputRoot, folder);
           const dayId = await drive.client.ensurePath(drive.folderId, segments.slice(0, -1));
           const report = await drive.client.putFolder(await drive.client.ensureFolder(dayId, segments[segments.length - 1]), folder);
           summary.tenders += 1;
@@ -1354,7 +1354,7 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
       // Each day's report sheet(s), next to its tender folders.
       for (const { plan } of days.values()) {
         try {
-          const segments = relative(resolve(plan.outputRoot), resolve(plan.jobDirectory)).split(/[\/]+/).filter(Boolean);
+          const segments = driveFolderPath(plan.outputRoot, plan.jobDirectory);
           const dayId = await drive.client.ensurePath(drive.folderId, segments);
           const sheetName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook.replace(/\.xlsx$/i, '').toLocaleLowerCase();
           for (const name of readdirSync(plan.jobDirectory)) {

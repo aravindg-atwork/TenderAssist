@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser } from '../../src/publishing/googleDrive.js';
+import { driveFolderPath, GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser } from '../../src/publishing/googleDrive.js';
 
 interface Item { id: string; name: string; mimeType: string; parents: string[]; content?: Buffer; md5Checksum?: string }
 
@@ -146,5 +146,36 @@ describe('the app’s own Google sign-in credential', () => {
       .toEqual({ clientId: 'abc.apps.googleusercontent.com', clientSecret: 'GOCSPX-x' });
     expect(parseGoogleClientFile('{"installed":{"client_id":"abc"}}')).toBeNull();
     expect(parseGoogleClientFile('not json')).toBeNull();
+  });
+});
+
+describe('the Drive layout matches the folders on this computer', () => {
+  it('splits a Windows path into one Drive folder per level, never one long name', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tenderassist-layout-'));
+    const day = join(root, '10-2026', '07-10-2026');
+    const tender = join(day, '07-10-2026_6_Hiring of Agency for IT Projects- Milestone basis');
+    mkdirSync(join(tender, 'Documents'), { recursive: true });
+    writeFileSync(join(tender, 'Documents', 'GeM bid.pdf'), 'pdf');
+    writeFileSync(join(tender, 'Eligibility.xlsx'), 'sheet');
+    writeFileSync(join(day, 'Approved-Tenders-07-10-2026.xlsx'), 'report');
+
+    expect(driveFolderPath(root, tender)).toEqual(['10-2026', '07-10-2026', '07-10-2026_6_Hiring of Agency for IT Projects- Milestone basis']);
+    expect(driveFolderPath(`${root}\\`, `${day}\\`)).toEqual(['10-2026', '07-10-2026']);
+    expect(() => driveFolderPath(root, tmpdir())).toThrow(/outside/);
+
+    const drive = fakeDrive();
+    const client = new GoogleDriveClient({ clientId: 'id', clientSecret: 'secret' }, 'refresh', { fetch: drive.fetchImpl, retryDelaysMs: [] });
+    const segments = driveFolderPath(root, tender);
+    const dayId = await client.ensurePath('ROOT', segments.slice(0, -1));
+    await client.putFolder(await client.ensureFolder(dayId, segments[segments.length - 1]), tender);
+    await client.putFile(await client.ensurePath('ROOT', driveFolderPath(root, day)), join(day, 'Approved-Tenders-07-10-2026.xlsx'), 'Approved-Tenders-07-10-2026.xlsx');
+    expect(drive.files()).toEqual([
+      'Tenders/10-2026/07-10-2026/07-10-2026_6_Hiring of Agency for IT Projects- Milestone basis/Documents/GeM bid.pdf = pdf',
+      'Tenders/10-2026/07-10-2026/07-10-2026_6_Hiring of Agency for IT Projects- Milestone basis/Eligibility.xlsx = sheet',
+      'Tenders/10-2026/07-10-2026/Approved-Tenders-07-10-2026.xlsx = report',
+    ]);
+    // No folder name carries a slash of either kind.
+    expect([...drive.items.values()].every((item) => !/[\\/]/.test(item.name))).toBe(true);
+    rmSync(root, { recursive: true, force: true });
   });
 });

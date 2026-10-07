@@ -18,6 +18,13 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - Code: `src/review/wordSuggestions.ts`.
 - Tests: 369 of 369 pass.
 
+## Done in 0.4.12 (7 Oct 2026; local installer built)
+
+- **Fixed: Drive folders were uploaded as one long name** ("10-2026\07-10-2026\07-10-2026_13_…") instead of nested folders.
+  - Cause: the path split lost a backslash, so it split only on "/" and Windows paths use "\".
+  - Now `driveFolderPath` splits both kinds of slash, and a test checks the nested layout on a stand-in Drive.
+  - The wrongly named folders from 0.4.11 sit at the top of "Claude TN Tenders- 2026-27" and need deleting by hand.
+
 ## Done in 0.4.11 (7 Oct 2026; local installer built)
 
 - **Drive keeps the same files as this computer.** After every search, each saved tender's folder (documents, eligibility sheet) and the day's report sheet are uploaded; approval no longer matters.
@@ -94,7 +101,7 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- Install `release/TenderAssist-Setup-0.4.11.exe`, then in Settings → Upload to Google Drive choose "Upload everything saved so far" and check "Claude TN Tenders- 2026-27" in Drive.
+- Install `release/TenderAssist-Setup-0.4.12.exe`, delete the "10-2026…" folders at the top of the Drive folder, then in Settings → Upload to Google Drive choose "Upload everything saved so far" and check "Claude TN Tenders- 2026-27" in Drive.
   - In Settings → What to look for: add the recommended words and remove "AMC".
 - The Google consent screen is External / Testing with tenders@bowandbaan.com as a test user, so Google ends the sign-in every 7 days (Settings then says to sign in again). Making the project Internal under the bowandbaan.com Workspace would remove that.
 - **Folder layout:** confirm `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx` + the day report sheet is what the operator wants.
@@ -110,4 +117,4 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - final reviewer pass on the maroon/cream look;
   - write `DESIGN.md` and `.impeccable/design.json`;
   - don't commit `.impeccable/review` screenshots (real data).
-- **Release:** next local installer after 0.4.11 (local build only; no push, no release upload).
+- **Release:** next local installer after 0.4.12 (local build only; no push, no release upload).
