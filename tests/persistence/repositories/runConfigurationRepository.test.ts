@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { runMigrations } from '../../../src/persistence/migrate.js';
 import { JobRepository } from '../../../src/persistence/repositories/jobRepository.js';
 import { RunConfigurationRepository } from '../../../src/persistence/repositories/runConfigurationRepository.js';
-import { DEFAULT_RUN_DEFAULTS } from '../../../src/config/runConfiguration.js';
+import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, DEFAULT_RUN_DEFAULTS, type RunDefaults } from '../../../src/config/runConfiguration.js';
 
 describe('RunConfigurationRepository', () => {
   let db: DatabaseSync;
@@ -66,13 +66,32 @@ describe('RunConfigurationRepository', () => {
       productCategories: [' Computer- S/W ', 'computer- s/w', 'Information Technology'],
       keywords: ['Web Application', ' web   application ', 'Digitization'],
       excludedKeywords: ['AMC', 'amc'],
+      categoriesByPortal: { gem: ['Application Development', ' application  development ', 'Custom Bid For Services'], 'tamil-nadu': ['Computer- S/W'] },
+      gemIncludeProducts: true,
     });
     expect(repo.getDefaults()).toEqual({
       productCategories: ['Computer- S/W', 'Information Technology'],
       keywords: ['Web Application', 'Digitization'],
       excludedKeywords: ['AMC'],
+      categoriesByPortal: { gem: ['Application Development', 'Custom Bid For Services'], 'tamil-nadu': ['Computer- S/W'] },
+      gemIncludeProducts: true,
     });
     expect(repo.hasSavedDefaults()).toBe(true);
+  });
+
+  it('keeps each website’s own categories, starting from the saved ones for settings from older versions', () => {
+    // Saved by an older version: one category list for every website, no GeM values.
+    repo.saveDefaults({ productCategories: ['Information Technology'], keywords: ['web application'], excludedKeywords: [] } as unknown as RunDefaults);
+    const old = repo.getDefaults();
+    expect(old).toMatchObject({ categoriesByPortal: {}, gemIncludeProducts: false });
+    expect(categoriesForPortal(old, { id: 'tamil-nadu' })).toEqual(['Information Technology']);
+    expect(categoriesForPortal(old, { id: 'gem', kind: 'GEM' })).toEqual([...DEFAULT_GEM_CATEGORIES]);
+
+    repo.saveDefaults({ ...old, categoriesByPortal: { kerala: ['Works'] } });
+    const next = repo.getDefaults();
+    expect(categoriesForPortal(next, { id: 'kerala' })).toEqual(['Works']);
+    expect(categoriesForPortal(next, { id: 'tamil-nadu' })).toEqual(['Information Technology']);
+    expect(() => repo.saveDefaults({ ...old, categoriesByPortal: { kerala: [] } })).toThrow(/at least one category/);
   });
 
   it('snapshots a job configuration independently of later default changes', () => {
@@ -86,6 +105,8 @@ describe('RunConfigurationRepository', () => {
       productCategories: ['Computer- S/W'],
       keywords: ['different'],
       excludedKeywords: [],
+      categoriesByPortal: {},
+      gemIncludeProducts: false,
     });
 
     expect(repo.getForJob(jobId)).toEqual({

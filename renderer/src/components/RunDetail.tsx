@@ -24,8 +24,14 @@ const words = (value: unknown): string[] => Array.isArray(value) ? value.filter(
 /** Why this tender was kept, rejected, or left for a look, in one plain sentence. */
 function reasonFor(tender: TenderDetailItem): string {
   const byGate = new Map(tender.classificationGates.map((gate) => [gate.gate, gate]));
+  if (tender.classificationGates.some((gate) => gate.reason_code === 'NOT_IN_MY_TENDERS')) {
+    return 'No longer in your My Tenders on the portal, so it was not read. It waits in Needs a look for you to decide.';
+  }
+  if (tender.classificationGates.some((gate) => gate.reason_code === 'GEM_BID_DOCUMENT_FAILED')) {
+    return 'GeM did not send its bid document, even after several tries. Run this date again to read it.';
+  }
   const failed = tender.classificationGates.find((gate) => /REVIEW_FAILED/.test(gate.reason_code));
-  if (failed) return `Could not read its details: ${String(evidence(failed).error ?? 'the page did not open')}`;
+  if (failed) return `Its details page did not open, even on a second try (${String(evidence(failed).error ?? 'no answer from the portal')}).`;
   const excluded = words(evidence(byGate.get('G4')).matchedExcludedKeywords);
   if (byGate.get('G4')?.result === 'REJECT') return `Its title or category has an excluded word: ${excluded.join(', ') || 'an exclusion'}.`;
   if (byGate.get('G2')?.result === 'REJECT') return 'Its product category is not one you search for.';

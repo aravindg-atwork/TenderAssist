@@ -10,21 +10,28 @@ export interface CategoryPickerProps {
   websiteList: PortalCategoryList | null;
   values: string[];
   onChange: (values: string[]) => void;
+  /** Shown until the website's list is known. Defaults to the GePNIC starting categories. */
+  startingList?: readonly string[];
+  /** Said while the website's list is not known yet. */
+  unknownListHint?: string;
 }
+
+// GeM with products has thousands of categories; draw only the first ones and let typing narrow them.
+const MAX_SHOWN = 150;
 
 const sameName = (a: string, b: string) => a.toLocaleLowerCase() === b.toLocaleLowerCase();
 
 /** Categories to search, picked from the website's own Product Category list. */
-export function CategoryPicker({ portalName, websiteList, values, onChange }: CategoryPickerProps) {
+export function CategoryPicker({ portalName, websiteList, values, onChange, startingList = DEFAULT_RUN_DEFAULTS.productCategories, unknownListHint }: CategoryPickerProps) {
   const [filter, setFilter] = useState('');
   const known = (websiteList?.categories.length ?? 0) > 0;
   const options = useMemo(() => {
     if (known) return websiteList!.categories;
     // Before the first search: the starting categories and anything already chosen.
-    const list = [...DEFAULT_RUN_DEFAULTS.productCategories];
+    const list = [...startingList];
     for (const value of values) if (!list.some((item) => sameName(item, value))) list.push(value);
     return list;
-  }, [known, websiteList, values]);
+  }, [known, websiteList, values, startingList]);
 
   const query = filter.trim().toLocaleLowerCase();
   const choices = options.filter((option) =>
@@ -45,7 +52,7 @@ export function CategoryPicker({ portalName, websiteList, values, onChange }: Ca
       <p className="field-helper" id="category-picker-helper">
         {known
           ? `Pick from the ${websiteList!.categories.length} categories on the ${portalName} website (list read ${absoluteDateTime(websiteList!.readAt!)}).`
-          : `These are the starting categories. The full ${portalName} list appears here after one search.`}
+          : unknownListHint ?? `These are the starting categories. The full ${portalName} list appears here after one search.`}
       </p>
       <div className="chip-list" aria-live="polite">
         {values.map((value) => {
@@ -74,7 +81,7 @@ export function CategoryPicker({ portalName, websiteList, values, onChange }: Ca
           }} />
       </div>
       <ul className="pick-list" id="category-picker-options" aria-label="Categories you can add">
-        {choices.map((option) => (
+        {choices.slice(0, MAX_SHOWN).map((option) => (
           <li key={option}>
             <button type="button" className="pick-list__item" onClick={() => add(option)}>
               <span aria-hidden="true">+</span> {option}
@@ -87,6 +94,9 @@ export function CategoryPicker({ portalName, websiteList, values, onChange }: Ca
               <span aria-hidden="true">+</span> Add “{typed}” as typed
             </button>
           </li>
+        )}
+        {choices.length > MAX_SHOWN && (
+          <li className="pick-list__empty">{choices.length - MAX_SHOWN} more. Type part of a name to find them.</li>
         )}
         {choices.length === 0 && !canAddTyped && (
           <li className="pick-list__empty">{query ? 'No category matches that.' : 'Every category is already chosen.'}</li>

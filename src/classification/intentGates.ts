@@ -13,23 +13,33 @@ function normalized(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
-function matchingTerms(text: string, terms: string[]): string[] {
+function matchingTerms(text: string, terms: string[], wholePhrase = false): string[] {
   const haystack = ` ${normalized(text)} `;
   return terms.filter((term) => {
     const needle = normalized(term);
     if (!needle) return false;
     if (haystack.includes(` ${needle} `)) return true;
+    if (wholePhrase) return false;
     const tokens = needle.split(' ');
     return tokens.length > 1 && tokens.every((token) => haystack.includes(` ${token} `));
   });
 }
 
 /** G3: the detail page must contain at least one explicit user intent term. */
-export function evaluateIntentKeywords(detailText: string, keywords: string[]): TextGateResult {
+export function evaluateIntentKeywords(
+  detailText: string,
+  keywords: string[],
+  /**
+   * Only the words together, in order. For long documents (GeM bid PDFs),
+   * where "mobile" in a contact line and "application" in the general terms
+   * would otherwise count as "mobile application".
+   */
+  options: { wholePhrase?: boolean } = {}
+): TextGateResult {
   if (!detailText.trim()) {
     return { result: 'UNCERTAIN', reasonCode: 'DETAIL_TEXT_MISSING', matchedTerms: [] };
   }
-  const matchedTerms = matchingTerms(detailText, keywords);
+  const matchedTerms = matchingTerms(detailText, keywords, options.wholePhrase);
   return matchedTerms.length > 0
     ? { result: 'PASS', reasonCode: 'INTENT_KEYWORD_MATCH', matchedTerms }
     : { result: 'REJECT', reasonCode: 'NO_INTENT_KEYWORD_MATCH', matchedTerms: [] };

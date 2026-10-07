@@ -30,6 +30,8 @@ export interface TenderFileView {
   foundOnDate: string | null;
   /** Whether it was ticked into My Tenders, where the next search can read it. */
   inMyTenders: boolean;
+  /** A GeM bid: read from its bid document, with no My Tenders. */
+  fromGem?: boolean;
 }
 
 /** The "Label: value" lines TenderAssist stores at the top of a tender's text. */

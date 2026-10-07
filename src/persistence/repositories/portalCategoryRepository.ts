@@ -5,6 +5,8 @@ export interface PortalCategoryList {
   categories: string[];
   /** When a search last read the list; null before the first search. */
   readAt: string | null;
+  /** The website's own code for each category, by name, where it has one (GeM). */
+  codes?: Record<string, string>;
 }
 
 interface SettingsRow { value_json: string }
@@ -20,13 +22,14 @@ export class PortalCategoryRepository {
     try {
       const parsed = JSON.parse(row.value_json) as Partial<PortalCategoryList>;
       const categories = Array.isArray(parsed.categories) ? parsed.categories.filter((c): c is string => typeof c === 'string') : [];
-      return { categories, readAt: typeof parsed.readAt === 'string' ? parsed.readAt : null };
+      const codes = parsed.codes && typeof parsed.codes === 'object' ? parsed.codes : undefined;
+      return { categories, readAt: typeof parsed.readAt === 'string' ? parsed.readAt : null, ...(codes ? { codes } : {}) };
     } catch {
       return { categories: [], readAt: null };
     }
   }
 
-  save(portalId: string, categories: string[], readAt = new Date().toISOString()): PortalCategoryList {
+  save(portalId: string, categories: string[], readAt = new Date().toISOString(), codes?: Record<string, string>): PortalCategoryList {
     const seen = new Set<string>();
     const unique: string[] = [];
     for (const raw of categories) {
@@ -36,7 +39,7 @@ export class PortalCategoryRepository {
       unique.push(value);
     }
     if (unique.length === 0) return this.get(portalId);
-    const next = { categories: unique, readAt };
+    const next: PortalCategoryList = { categories: unique, readAt, ...(codes ? { codes } : {}) };
     this.db.prepare(
       `INSERT INTO app_settings (key, value_json, updated_at) VALUES (?, ?, ?)
        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`

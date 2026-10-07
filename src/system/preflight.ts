@@ -17,10 +17,13 @@ export async function runPreflight(
   portalUrl: string,
   portalLabel = 'Selected portal',
   driveOutputRoot = '',
-  detectSigner: () => JnlpLauncher = detectJnlpLauncher
+  /** Null for websites searched without signing in (GeM): no browser sign-in, no DSC signer. */
+  detectSigner: (() => JnlpLauncher) | null = detectJnlpLauncher
 ): Promise<PreflightReport> {
   const checks: PreflightCheck[] = [];
-  checks.push({ id: 'browser', label: 'Embedded browser', level: 'PASS', message: `The secure ${portalLabel} browser is included with TenderAssist.` });
+  if (detectSigner) {
+    checks.push({ id: 'browser', label: 'Embedded browser', level: 'PASS', message: `The secure ${portalLabel} browser is included with TenderAssist.` });
+  }
 
   try {
     mkdirSync(outputRoot, { recursive: true });
@@ -47,8 +50,10 @@ export async function runPreflight(
     checks.push({ id: 'portal', label: portalLabel, level: 'WARNING', message: 'The website could not be reached. Check the internet connection, or try again in a few minutes.' });
   }
 
-  const signer = detectSigner();
-  if (signer.status === 'READY') {
+  const signer = detectSigner?.() ?? null;
+  if (!signer) {
+    // Nothing to sign in with.
+  } else if (signer.status === 'READY') {
     checks.push({ id: 'jnlp', label: 'DSC signer (OpenWebStart)', level: 'PASS', message: 'Java Web Start is installed for the DSC signer.' });
   } else if (signer.status === 'MISSING') {
     // Sign-in cannot finish without the signer, so the run must not start.

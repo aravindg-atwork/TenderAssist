@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DocumentsWaiting, InboxItem, InboxView, OperatorDecision, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
 import type { PreflightReport } from '../../../src/system/preflight';
-import { getPortalDefinition } from '../../../src/config/portalRegistry';
+import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
 import { LIFECYCLE_LABELS } from '../format';
 import { PortalSelect } from './PortalSelect';
 import { TenderFile, type FileAction } from './TenderFile';
@@ -72,6 +72,7 @@ export function TodayPage({
   const [done, setDone] = useState<string | null>(null);
   const [documentsWaiting, setDocumentsWaiting] = useState<DocumentsWaiting | null>(null);
   const portal = getPortalDefinition(selectedPortalId);
+  const gem = isGemPortal(portal);
 
   const loadDocumentsWaiting = useCallback(() => {
     window.tenderAssist.getDocumentsWaiting(selectedPortalId).then(setDocumentsWaiting).catch(() => {});
@@ -273,7 +274,7 @@ export function TodayPage({
           <PortalSelect id="find-portal" value={selectedPortalId} onChange={onPortalChange} disabled={starting} />
         </label>
         <label className="field">
-          <span>Published from</span>
+          <span>{gem ? 'Bids started from' : 'Published from'}</span>
           <input type="date" value={from} max={todayIso()} disabled={starting} onChange={(event) => {
             const next = event.target.value;
             if (to === from || to < next) setTo(next);
@@ -289,7 +290,7 @@ export function TodayPage({
           Search already-run dates again
         </label>
         <button className="btn btn--primary btn--large" type="submit" disabled={starting || !settings || Boolean(blocker)}>
-          {starting ? 'Opening the portal…' : dateCount > 1 ? `Find tenders for ${dateCount} dates` : 'Find tenders'}
+          {starting ? (gem ? 'Starting…' : 'Opening the portal…') : dateCount > 1 ? `Find tenders for ${dateCount} dates` : 'Find tenders'}
           {!starting && <ArrowRightIcon />}
         </button>
       </form>
@@ -341,7 +342,9 @@ export function TodayPage({
             <AlertIcon />
             <span>
               <strong>{documentsWaiting.ready} approved {documentsWaiting.ready === 1 ? 'tender is' : 'tenders are'} waiting for {documentsWaiting.ready === 1 ? 'its' : 'their'} documents.</strong>{' '}
-              TenderAssist signs in, opens only {documentsWaiting.ready === 1 ? 'that tender' : 'those tenders'} in My Tenders, and saves the documents and zip file. Nothing is searched again.
+              {gem
+                ? `TenderAssist saves the bid document and the buyer’s attachments straight from GeM. No sign-in, and nothing is searched again.`
+                : <>TenderAssist signs in, opens only {documentsWaiting.ready === 1 ? 'that tender' : 'those tenders'} in My Tenders, and saves the documents and zip file. Nothing is searched again.</>}
             </span>
             <button type="button" className="btn btn--primary btn--small" disabled={starting || Boolean(blocker)} onClick={() => void collectDocuments()}>
               Collect their documents

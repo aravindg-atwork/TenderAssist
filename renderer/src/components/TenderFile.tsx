@@ -159,13 +159,15 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
                 )}
                 <h3 className="unread__title">What happens next</h3>
                 <p className="unread__next">
-                  {file.inMyTenders
+                  {file.fromGem
+                    ? 'Its bid document was not read, because its GeM category is not one of yours. To keep it, approve it, then use Collect their documents: TenderAssist reads its bid document and saves its files.'
+                    : file.inMyTenders
                     ? 'It is in your My Tenders. The next search, for any date, opens its details page and keeps or rejects it. You can also decide it yourself now.'
                     : file.detailsRead
                       ? 'It was read before TenderAssist kept each portal field. Search its date again to fill in its details.'
                       : 'It never reached My Tenders, so its details page has not been read. Search its date again to read it.'}
                 </p>
-                {!file.inMyTenders && file.foundOnDate && onSearchDate && (
+                {!file.inMyTenders && !file.fromGem && file.foundOnDate && onSearchDate && (
                   <button type="button" className="btn btn--quiet btn--small" onClick={() => onSearchDate(file.foundOnDate!)}>
                     Search {new Date(`${file.foundOnDate}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} again
                   </button>

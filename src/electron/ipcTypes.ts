@@ -133,7 +133,8 @@ export interface TenderAssistApi {
   getRunSettings(): Promise<RunSettingsState>;
   saveRunSettings(defaults: RunDefaults): Promise<RunSettingsState>;
   /** The website's own Product Category list, as the last search read it. */
-  getPortalCategories(portalId: string): Promise<PortalCategoryList>;
+  /** For GeM, read from GeM itself; product categories are added only when asked. */
+  getPortalCategories(portalId: string, options?: { includeProducts?: boolean }): Promise<PortalCategoryList>;
   /** Words to consider adding, learnt from tenders the operator approved and rejected. */
   getWordSuggestions(): Promise<WordSuggestions>;
   getPortalCredentialSettings(portalId: string): Promise<PortalCredentialSettings>;
@@ -184,6 +185,8 @@ export interface TenderAssistApi {
   startDocumentRun(portalId: string): Promise<{ jobId: string; count: number }>;
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
+  /** Opens the open question's own document (a GeM bid PDF) in the browser. */
+  openQuestionDocument(questionId: string): Promise<void>;
   /** While the run waits after its last date: sign out and finish. */
   finishRun(): Promise<void>;
   getJobDetail(jobId: string): Promise<JobDetail>;

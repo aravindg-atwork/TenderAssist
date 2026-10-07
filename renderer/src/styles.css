@@ -563,6 +563,9 @@ kbd {
 .workspace.is-resizing { cursor: col-resize; user-select: none; }
 
 .workspace--tabs { display: flex; flex-direction: column; gap: 10px; }
+/* A run with no portal window (GeM): the panel alone, at a readable width. */
+.workspace--alone { display: block; overflow-y: auto; }
+.workspace--alone > .run { max-width: 720px; margin: 0 auto; }
 .workspace__tabs { display: flex; gap: 6px; }
 .workspace__tab { padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--sheet); font-weight: 600; cursor: pointer; }
 .workspace__tab[aria-selected='true'] { background: var(--file); border-color: var(--file); color: var(--file-ink); }

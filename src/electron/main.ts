@@ -16,7 +16,7 @@ import { RunConfigurationRepository } from '../persistence/repositories/runConfi
 import { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import { PortalCredentialRepository } from '../persistence/repositories/portalCredentialRepository.js';
 import { PublishingSettingsRepository, type PublishingSettings } from '../persistence/repositories/publishingSettingsRepository.js';
-import { PortalCategoryRepository } from '../persistence/repositories/portalCategoryRepository.js';
+import { PortalCategoryRepository, type PortalCategoryList } from '../persistence/repositories/portalCategoryRepository.js';
 import { AutomationSettingsRepository } from '../persistence/repositories/automationSettingsRepository.js';
 import { DisplaySettingsRepository, type TextSize } from '../persistence/repositories/displaySettingsRepository.js';
 import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
@@ -40,7 +40,9 @@ import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
 import { suggestWords, workDescriptionFrom, type DecidedTenderText, type WordSuggestions } from '../review/wordSuggestions.js';
 import { RUN_QUESTION_TIMEOUT_MS, waitForAnswer, type RunQuestion, type RunQuestionAnswer } from '../orchestration/runQuestion.js';
 import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
-import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing } from '../orchestration/postProcessingRunner.js';
+import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing, saveTenderFiles, type DocumentDownloader } from '../orchestration/postProcessingRunner.js';
+import { GemClient } from '../gem/gemClient.js';
+import { bidFromTender, GEM_RETRY_DELAYS_MS, readGemBidDetails, runGemDate } from '../gem/gemRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
 import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
 import type { Page } from 'playwright-core';
@@ -54,11 +56,11 @@ import type {
   AuthJobUpdate,
   SettingsSection,
 } from './ipcTypes.js';
-import { normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
+import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
-import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
+import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { retryTransient } from '../orchestration/transientRetry.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
@@ -70,7 +72,7 @@ import { buildSupportBundle } from '../system/supportBundle.js';
 import { EmbeddedPortalHost, embeddedPortalTargetPrefix } from './embeddedPortalHost.js';
 import { markJobCancelled, USER_CANCELLED_REASON } from '../orchestration/jobCancellation.js';
 import { createActionPacer } from '../orchestration/actionPacer.js';
-import { DEFAULT_PORTAL_ID, getPortalDefinition, type PortalDefinition } from '../config/portalRegistry.js';
+import { DEFAULT_PORTAL_ID, getPortalDefinition, isGemPortal, type PortalDefinition } from '../config/portalRegistry.js';
 import { describeResumePlan, planResume, prepareForDocumentCollection } from '../orchestration/jobResume.js';
 import type { PaceAction } from '../orchestration/actionPacer.js';
 
@@ -148,6 +150,34 @@ const dscDownloadDirectory = join(getAppDataDir(), 'dsc-downloads');
 const dscArtifacts = new Map<string, DscJnlpArtifact>();
 // Fresh sign-ins allowed while collecting documents before the run stops.
 const MAX_ACQUISITION_SIGN_INS = 3;
+
+/**
+ * A gentle pace for GeM's public pages: a short random pause before each
+ * request. GeM answers "server error" when asked too quickly.
+ */
+function gemPause(signal: AbortSignal): () => Promise<void> {
+  const fast = automationSettings.get().mode === 'FAST';
+  return () => new Promise((resolvePause) => {
+    if (signal.aborted) return resolvePause();
+    const timer = setTimeout(done, fast ? 200 : 600 + Math.random() * 800);
+    function done() { clearTimeout(timer); signal.removeEventListener('abort', done); resolvePause(); }
+    signal.addEventListener('abort', done, { once: true });
+  });
+}
+
+function gemClientFor(signal: AbortSignal): GemClient {
+  return new GemClient({ signal, pause: gemPause(signal) });
+}
+
+/** GeM files are public: saved straight from GeM, retried while GeM is busy. */
+function gemDownloader(client: GemClient, signal: AbortSignal): DocumentDownloader {
+  return { get: (url) => retryTransient(() => client.fetchFile(url), { delaysMs: GEM_RETRY_DELAYS_MS, signal }) };
+}
+
+function preflightFor(portal: PortalDefinition, settings: PublishingSettings) {
+  // GeM needs no sign-in, so no DSC signer either.
+  return runPreflight(settings.localOutputRoot, portal.url, portal.name, settings.driveOutputRoot, isGemPortal(portal) ? null : undefined);
+}
 
 function emitJobUpdate(raw: AuthJobUpdate): void {
   const update: AuthJobUpdate = { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion, ...raw };
@@ -476,6 +506,7 @@ ipcMain.handle('get-tender-file', (_event, opportunityId: unknown): TenderFileVi
     listing,
     foundOnDate,
     inMyTenders: rows.some((tender) => tender.favorited === 1),
+    fromGem: isGemPortal(getPortalDefinition(opportunities.getById(opportunityId)?.portal_id)),
     opportunityId,
     keyFacts: keyFactsFrom(allFields),
     allFields,
@@ -562,7 +593,49 @@ ipcMain.handle('get-word-suggestions', (): WordSuggestions => {
   });
 });
 
-ipcMain.handle('get-portal-categories', (_event, portalId: string) => portalCategories.get(getPortalDefinition(portalId).id));
+// GeM's list is public: read it from GeM when it is missing or two weeks old.
+const GEM_CATEGORY_LIST_MAX_AGE_MS = 14 * 86_400_000;
+
+/**
+ * GeM's Category dropdown, services and products, exactly as GeM shows it
+ * with each entry's code. Read from GeM when missing or two weeks old.
+ */
+async function gemCategoryLists(portal: PortalDefinition): Promise<{ services: PortalCategoryList; products: PortalCategoryList }> {
+  const productsKey = `${portal.id}:products`;
+  let services = portalCategories.get(portal.id);
+  let products = portalCategories.get(productsKey);
+  if (!services.readAt || !services.codes || Date.now() - Date.parse(services.readAt) > GEM_CATEGORY_LIST_MAX_AGE_MS) {
+    try {
+      // GeM's random "server error" answers pass within seconds.
+      const list = await retryTransient(() => new GemClient({ timeoutMs: 60_000 }).categoryList(), { delaysMs: [2_000, 5_000] });
+      const codesOf = (entries: Array<{ name: string; code: string }>) => Object.fromEntries(entries.map((entry) => [entry.name, entry.code]));
+      const readAt = new Date().toISOString();
+      services = portalCategories.save(portal.id, list.services.map((entry) => entry.name), readAt, codesOf(list.services));
+      products = portalCategories.save(productsKey, list.products.map((entry) => entry.name), readAt, codesOf(list.products));
+    } catch (error) {
+      // The saved list (if any) still works; the picker says when it was read.
+      console.error('[TenderAssist] GeM category list not read:', error);
+    }
+  }
+  return { services, products };
+}
+
+/** GeM's code for each category name, so bids are matched the way GeM's own search matches them. */
+async function gemCategoryCodes(portal: PortalDefinition): Promise<Map<string, string>> {
+  const { services, products } = await gemCategoryLists(portal);
+  const codes = new Map<string, string>();
+  for (const [name, code] of Object.entries({ ...products.codes, ...services.codes })) codes.set(name.toLocaleLowerCase(), code);
+  return codes;
+}
+
+ipcMain.handle('get-portal-categories', async (_event, portalId: string, options?: { includeProducts?: unknown }): Promise<PortalCategoryList> => {
+  const portal = getPortalDefinition(portalId);
+  if (!isGemPortal(portal)) return portalCategories.get(portal.id);
+  const { services, products } = await gemCategoryLists(portal);
+  const shown = (list: PortalCategoryList) => ({ categories: list.categories, readAt: list.readAt });
+  if (options?.includeProducts !== true) return shown(services);
+  return { categories: [...services.categories, ...products.categories], readAt: services.readAt };
+});
 
 ipcMain.handle('get-portal-credential-settings', async (_event, portalId: string): Promise<PortalCredentialSettings> => {
   return credentialSettings(getPortalDefinition(portalId).id);
@@ -617,7 +690,7 @@ ipcMain.handle('restart-to-install-update', (): void => restartToInstall());
 ipcMain.handle('run-preflight', (_event, portalId: string) => {
   const portal = getPortalDefinition(portalId);
   const settings = publishingSettings.get(portal.id);
-  return runPreflight(settings.localOutputRoot, portal.url, portal.name, settings.driveOutputRoot);
+  return preflightFor(portal, settings);
 });
 ipcMain.handle('get-run-history', (_event, portalId: string) => {
   const portal = getPortalDefinition(portalId);
@@ -871,6 +944,9 @@ interface RunContext {
   jobId?: string;
   /** The session's first date also checks every undecided favourite, whatever its date. */
   checkAllUndecided?: boolean;
+  /** GeM runs: no portal page; files come straight from GeM. */
+  gem?: GemClient;
+  downloader?: DocumentDownloader;
 }
 
 /** Claim the single active-run slot synchronously, before any await. */
@@ -905,7 +981,7 @@ function releaseRun(abortController: AbortController): void {
 }
 
 async function checkReadiness(portal: PortalDefinition, outputSettings: PublishingSettings): Promise<void> {
-  const preflight = await runPreflight(outputSettings.localOutputRoot, portal.url, portal.name, outputSettings.driveOutputRoot);
+  const preflight = await preflightFor(portal, outputSettings);
   const blocker = preflight.checks.find((check) => check.level === 'BLOCKED');
   if (blocker) throw new Error(blocker.message);
 }
@@ -986,7 +1062,7 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
   let result: AuthJobUpdate;
   for (let signIns = 0; ; signIns += 1) {
     result = await runPostProcessing(
-      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: ctx.abortController.signal },
+      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: ctx.abortController.signal, downloader: ctx.downloader },
       ctx.page,
       jobId,
       authSessionId,
@@ -1198,7 +1274,7 @@ function carryOverUndecidedFavourites(jobId: string, portalId: string, searchDat
  * is open. Their answer is their decision on the tender; with no answer the
  * tender waits in "Needs a look" with a note saying why.
  */
-async function askOperatorDuringRun(ctx: RunContext, jobId: string, tender: TenderRow, detail: TenderDetailSnapshot, reason: string): Promise<RunQuestionAnswer | null> {
+async function askOperatorDuringRun(ctx: RunContext, jobId: string, tender: TenderRow, reason: string, documentUrl?: string): Promise<RunQuestionAnswer | null> {
   const signal = ctx.abortController.signal;
   const fresh = tenders.getById(tender.id) ?? tender;
   activeQuestion = {
@@ -1211,6 +1287,7 @@ async function askOperatorDuringRun(ctx: RunContext, jobId: string, tender: Tend
     closingDate: fresh.closing_date,
     value: fresh.value_in_rupees,
     reason,
+    documentUrl,
     answerBy: new Date(Date.now() + RUN_QUESTION_TIMEOUT_MS).toISOString(),
   };
   if (lastActiveJobUpdate) emitJobUpdate({ ...lastActiveJobUpdate, outcome: undefined, statusMessage: `Waiting for your answer on ${fresh.title}.` });
@@ -1272,7 +1349,7 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
     {
       ...deps,
       saveDocuments: (tender, detailPage) => saveTenderDocuments(ctx, jobId, config, tender, detailPage),
-      askOperator: (tender, detail, reason) => askOperatorDuringRun(ctx, jobId, tender, detail, reason),
+      askOperator: (tender, _detail, reason) => askOperatorDuringRun(ctx, jobId, tender, reason),
       // The same rule that picks the tenders this run collects.
       wantsDocuments: (tenderId) => selectionFor(jobId).includes(tenderId),
     },
@@ -1479,8 +1556,148 @@ function approvedWaitingForDocuments(portalId: string): { ready: TenderRow[]; no
   return { ready, notInMyTenders };
 }
 
+/** A job for one GeM date. GeM needs no sign-in, so the job is ready to search at once. */
+function startGemDateJob(ctx: RunContext, searchDate: string): string {
+  const job = jobs.create();
+  jobMachine.transition(job.id, 'AUTH_REQUIRED', `GeM search for ${searchDate}`);
+  jobMachine.transition(job.id, 'AUTH_PENDING', 'GeM needs no sign-in');
+  jobMachine.transition(job.id, 'AUTHENTICATED', 'GeM bid list is public');
+  runConfigurations.saveForJob(job.id, { ...ctx.config, searchDate });
+  ctx.jobId = job.id;
+  activeJobId = job.id;
+  return job.id;
+}
+
+/**
+ * Runs each GeM date as its own job: find the bids that started that day,
+ * decide them, and save the kept ones' files. With no sign-in to keep, the
+ * run simply finishes after the last date.
+ */
+async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (jobId: string) => void): Promise<void> {
+  const signal = ctx.abortController.signal;
+  const includeProducts = runConfigurations.getDefaults().gemIncludeProducts;
+  const categoryCodes = await gemCategoryCodes(ctx.portal);
+  let batch = { dates: [...plan.toRun], done: [] as string[], skipped: [...plan.skipped] };
+  activeBatch = batch;
+  const collected: CollectedCounts = { shortlisted: 0, needsReview: 0 };
+  let last: AuthJobUpdate | undefined;
+  for (let index = 0; index < plan.toRun.length; index += 1) {
+    if (signal.aborted) return;
+    const date = plan.toRun[index];
+    activeSearchDate = date;
+    const jobId = startGemDateJob(ctx, date);
+    if (index === 0) onStarted(jobId);
+    const config = runConfigurations.getForJob(jobId)!;
+    ctx.config = config;
+    const decided = await runGemDate({
+      jobs, jobMachine, searches, tenders, classifications, client: ctx.gem!, includeProducts, categoryCodes, signal,
+      askOperator: (tender, reason, documentUrl) => askOperatorDuringRun(ctx, jobId, tender, reason, documentUrl),
+    }, jobId, config, emitJobUpdate);
+    syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, jobId, ctx.portal.id, { screening: decided.outcome === 'SUCCESS' }));
+    let result = decided;
+    let selected: CollectedCounts = { shortlisted: 0, needsReview: 0 };
+    if (decided.outcome === 'SUCCESS') {
+      const selection = selectAutomatically(jobId);
+      result = await collectDocuments(ctx, jobId, '', selection);
+      selected = countCollected(selection);
+    }
+    if (result.outcome !== 'SUCCESS') {
+      const remaining = plan.toRun.slice(index + 1);
+      if (remaining.length > 0 && !signal.aborted) {
+        emitJobUpdate({
+          ...result,
+          outcome: result.outcome ?? 'ABORTED',
+          abortReason: `${result.abortReason ?? `The run for ${date} did not finish.`} These dates were not run: ${remaining.join(', ')}. Start the same range again to run them; finished dates are skipped.`,
+        });
+      }
+      return;
+    }
+    collected.shortlisted += selected.shortlisted;
+    collected.needsReview += selected.needsReview;
+    batch = { ...batch, done: [...batch.done, date] };
+    activeBatch = batch;
+    last = result;
+  }
+  if (!last) return;
+  const skippedNote = describeSkipped(batch.skipped);
+  emitJobUpdate({
+    ...last,
+    outcome: 'SUCCESS',
+    phase: 'PUBLISHING',
+    statusMessage: `${runFinishedMessage(collected, batch.done.length)}${skippedNote ? ` ${skippedNote}` : ''}`,
+  });
+}
+
+/** Approved GeM tenders whose files are not all saved yet. */
+function gemApprovedWaitingForDocuments(portalId: string): TenderRow[] {
+  const waiting: TenderRow[] = [];
+  for (const opportunity of opportunities.list({ lifecycles: ['APPROVED'], portalId })) {
+    const latest = tenders.listForOpportunity(opportunity.id).at(-1);
+    if (!latest) continue;
+    let links: unknown[] = [];
+    try { links = JSON.parse(latest.document_links_json) as unknown[]; } catch { links = []; }
+    const documents = workflow.listDocuments(latest.id);
+    const saved = documents.filter((document) => document.state === 'DOWNLOADED').length;
+    if (links.length === 0 || saved < links.length) waiting.push(latest);
+  }
+  return waiting;
+}
+
+/**
+ * Saves the files of approved GeM tenders into the folders their search gave
+ * them. A tender never read (rejected on its category, then approved) has its
+ * bid PDF read first, to find its attachments.
+ */
+async function collectGemApprovedDocuments(ctx: RunContext, jobId: string, targets: TenderRow[]): Promise<void> {
+  const signal = ctx.abortController.signal;
+  const update = (extra: Partial<AuthJobUpdate> = {}): AuthJobUpdate => ({
+    jobId, authSessionId: '', authState: 'NOT_STARTED', jobState: jobs.getById(jobId)!.state, phase: 'ACQUISITION', ...extra,
+  });
+  const count = `${targets.length} approved ${targets.length === 1 ? 'tender' : 'tenders'}`;
+  try {
+    jobMachine.transition(jobId, 'ACQUIRING_DOCUMENTS', 'collecting the documents of approved GeM tenders');
+    for (let index = 0; index < targets.length; index += 1) {
+      if (signal.aborted) throw new Error(USER_CANCELLED_REASON);
+      let tender = tenders.getById(targets[index].id) ?? targets[index];
+      emitJobUpdate(update({ statusMessage: `Saving the files of ${tender.title} (${index + 1} of ${targets.length}).` }));
+      if (tender.document_links_json === '[]' || !tender.detail_reviewed_at) {
+        await readGemBidDetails({ client: ctx.gem!, tenders, retry: (task) => retryTransient(task, { delaysMs: GEM_RETRY_DELAYS_MS, signal }) }, tender.id, bidFromTender(tender));
+        tender = tenders.getById(tender.id) ?? tender;
+      }
+      const source = runConfigurations.getForJob(tender.job_id) ?? ctx.config;
+      const plan = jobOutputs.getOrCreatePlan(tender.job_id, ctx.outputSettings.localOutputRoot, source.searchDate, ctx.outputSettings.structure);
+      const folder = tenderDocumentsDirectory(plan.jobDirectory, tender, jobOutputs.serialNumberFor(plan, tender.id), plan.structure, plan.outputDate);
+      await saveTenderFiles(workflow, tender, folder, ctx.downloader!, signal);
+    }
+    for (const sourceJob of new Set(targets.map((tender) => tender.job_id))) {
+      syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, sourceJob));
+    }
+    reportDriveProblems(copyApprovedTendersToDrive(targets.map((tender) => tenders.getById(tender.id) ?? tender)));
+    for (const [state, reason] of [
+      ['DOCUMENTS_LOCAL', 'approved GeM tenders\' files saved locally'],
+      ['PROCESSING_DOCUMENTS', 'documents run finishing'],
+      ['EXTRACTING_REQUIREMENTS', 'no requirement extraction in a documents run'],
+      ['UPLOADING', 'approved tenders copied to Drive'],
+      ['REPORTING', 'documents run reporting'],
+      ['COMPLETE', 'documents run complete'],
+    ] as const) jobMachine.transition(jobId, state, reason);
+    const saved = targets.filter((tender) => workflow.listDocuments(tender.id).some((document) => document.state === 'DOWNLOADED')).length;
+    emitJobUpdate(update({ jobState: 'COMPLETE', phase: 'PUBLISHING', outcome: 'SUCCESS', statusMessage: `Files saved for ${saved} of ${count}.` }));
+  } catch (error) {
+    if (signal.aborted) {
+      markJobCancelled(jobs, jobMachine, jobId);
+      emitJobUpdate(update({ jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED', abortReason: USER_CANCELLED_REASON }));
+      return;
+    }
+    endJob(jobId, 'GeM documents run failed');
+    emitJobUpdate(update({ jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED', abortReason: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
 ipcMain.handle('get-documents-waiting', (_event, portalId: unknown): DocumentsWaiting => {
-  const waiting = approvedWaitingForDocuments(getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID).id);
+  const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  if (isGemPortal(portal)) return { ready: gemApprovedWaitingForDocuments(portal.id).length, notInMyTenders: [] };
+  const waiting = approvedWaitingForDocuments(portal.id);
   return {
     ready: waiting.ready.length,
     notInMyTenders: waiting.notInMyTenders.map((tender) => ({
@@ -1571,7 +1788,38 @@ async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSess
   }
 }
 
+/** GeM's documents run: no sign-in, files saved straight from GeM. */
+async function startGemDocumentRun(portal: PortalDefinition): Promise<{ jobId: string; count: number }> {
+  const { abortController, paceAction } = claimRun();
+  let ctx: RunContext;
+  let targets: TenderRow[];
+  try {
+    targets = gemApprovedWaitingForDocuments(portal.id);
+    if (targets.length === 0) throw new Error('No approved GeM tender is waiting for its files.');
+    const outputSettings = publishingSettings.get(portal.id);
+    const config: RunConfiguration = { ...runConfigurations.getDefaults(), portalId: portal.id, searchDate: new Date().toLocaleDateString('en-CA') };
+    const gem = gemClientFor(abortController.signal);
+    ctx = { portal, config, outputSettings, abortController, paceAction, gem, downloader: gemDownloader(gem, abortController.signal) };
+    activeRunPortalId = portal.id;
+    await checkReadiness(portal, outputSettings);
+  } catch (error) {
+    releaseRun(abortController);
+    throw error;
+  }
+  const job = jobs.create();
+  jobs.markDocumentRun(job.id, targets.map((tender) => tender.id));
+  jobMachine.transition(job.id, 'AUTH_REQUIRED', 'GeM documents run');
+  jobMachine.transition(job.id, 'AUTH_PENDING', 'GeM needs no sign-in');
+  jobMachine.transition(job.id, 'AUTHENTICATED', 'GeM files are public');
+  activeJobId = job.id;
+  ctx.jobId = job.id;
+  activeJobCompletion = finishRun(ctx, collectGemApprovedDocuments(ctx, job.id, targets), () => {});
+  return { jobId: job.id, count: targets.length };
+}
+
 ipcMain.handle('start-document-run', async (_event, portalId: unknown) => {
+  const requested = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  if (isGemPortal(requested)) return startGemDocumentRun(requested);
   const { abortController, paceAction } = claimRun();
   let ctx: RunContext;
   let targets: TenderRow[];
@@ -1638,8 +1886,16 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, un
     if (!runConfigurations.hasSavedDefaults()) {
       throw new Error('Save your product categories and intent in Settings before starting a job.');
     }
-    savedPortalCredentials = await loadPortalCredentials(portal.id);
-    await openPortal(portal);
+    // Each website searches its own chosen categories.
+    ctx.config = { ...config, productCategories: categoriesForPortal(runConfigurations.getDefaults(), portal) };
+    if (isGemPortal(portal)) {
+      // No portal window or sign-in for GeM.
+      ctx.gem = gemClientFor(abortController.signal);
+      ctx.downloader = gemDownloader(ctx.gem, abortController.signal);
+    } else {
+      savedPortalCredentials = await loadPortalCredentials(portal.id);
+      await openPortal(portal);
+    }
   } catch (error) {
     // Claiming the slot synchronously means this handler owns freeing it on
     // an early failure; otherwise no later job could ever start.
@@ -1655,6 +1911,11 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, un
     rejectStarted = reject;
   });
   let jobIdCaptured = false;
+
+  if (ctx.gem) {
+    activeJobCompletion = finishRun(ctx, runGemDates(ctx, plan, resolveStarted), rejectStarted);
+    return { jobId: await started, dates: plan.toRun, skipped: plan.skipped };
+  }
 
   const run = signIn(ctx, savedPortalCredentials, (update) => {
     if (!jobIdCaptured) {
@@ -1711,6 +1972,15 @@ ipcMain.handle('answer-run-question', (_event, questionId: unknown, answer: unkn
   pendingAnswer(answer);
 });
 
+ipcMain.handle('open-question-document', async (_event, questionId: unknown): Promise<void> => {
+  // Only the open question's own GeM document, never a URL the page chose.
+  const url = activeQuestion?.id === questionId ? activeQuestion?.documentUrl : undefined;
+  if (!url || !/^https:\/\/bidplus\.gem\.gov\.in\/(?:showbidDocument|showradocumentPdf|showdirectradocumentPdf)\/\d+$/.test(url)) {
+    throw new Error('That document can no longer be opened.');
+  }
+  await shell.openExternal(url);
+});
+
 ipcMain.handle('finish-run', (): void => {
   if (!pendingMoreDates) throw new Error('The run is not waiting for more dates.');
   pendingMoreDates(null);
@@ -1727,6 +1997,10 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
   const portal = getPortalDefinition(config.portalId);
   const outputSettings = publishingSettings.get(portal.id);
   const ctx: RunContext = { portal, config, outputSettings, abortController, paceAction, jobId };
+  if (isGemPortal(portal)) {
+    ctx.gem = gemClientFor(abortController.signal);
+    ctx.downloader = gemDownloader(ctx.gem, abortController.signal);
+  }
   activeSearchDate = config.searchDate;
   try {
     await checkReadiness(portal, outputSettings);
@@ -1738,6 +2012,13 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
   const latestSession = sessions.getLatestForJob(jobId);
 
   const run = (async () => {
+    if (plan.kind === 'SELECT_TENDERS' && ctx.gem) {
+      // GeM files are public: no sign-in before saving them.
+      const selected = selectAutomatically(jobId);
+      const collected = await collectDocuments(ctx, jobId, '', selected);
+      if (collected.outcome === 'SUCCESS') emitJobUpdate({ ...collected, phase: 'PUBLISHING', statusMessage: runFinishedMessage(countCollected(selected)) });
+      return;
+    }
     if (plan.kind === 'SELECT_TENDERS') {
       // Sign in first so the downloads run in that session.
       await openPortal(portal);

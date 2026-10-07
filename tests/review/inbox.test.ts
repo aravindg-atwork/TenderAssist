@@ -42,8 +42,15 @@ describe('explainScreening', () => {
 
   it('explains a failed detail read and a run that never screened', () => {
     expect(explainScreening('UNCERTAIN', [gate('G3', 'UNCERTAIN', 'DETAIL_REVIEW_FAILED', { error: 'timeout' })]).sentence)
-      .toBe('Not decided yet: TenderAssist could not open its details page. The next search opens it again from My Tenders.');
+      .toBe('Not decided yet: its details page did not open, even on a second try. The next search opens it again from My Tenders.');
     expect(explainScreening(null, []).sentence).toBe('Not screened yet: the run stopped before its checks finished.');
+  });
+
+  it('says plainly when a tender left My Tenders, or GeM did not send a bid document', () => {
+    expect(explainScreening('UNCERTAIN', [gate('G1', 'UNCERTAIN', 'NOT_IN_MY_TENDERS', { error: 'gone' })]).sentence)
+      .toMatch(/^Needs your judgement: it is no longer in your My Tenders on the portal/);
+    expect(explainScreening('UNCERTAIN', [gate('G3', 'UNCERTAIN', 'GEM_BID_DOCUMENT_FAILED', { error: 'HTTP 500' })]).sentence)
+      .toMatch(/^Not decided yet: GeM did not send its bid document/);
   });
 });
 

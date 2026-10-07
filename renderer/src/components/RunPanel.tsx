@@ -34,9 +34,15 @@ const dayLabel = (iso: string) => {
 interface Instruction { title: string; body: string; needsYou: boolean }
 
 /** One plain instruction for the moment: what is happening, and whether the operator is needed. */
-function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, portalName: string): Instruction {
-  if (!update) return { title: `Opening ${portalName}`, body: 'Preparing the portal. This can take a minute when the portal is slow.', needsYou: false };
-  if (update.question) return { title: 'TenderAssist is unsure about a tender', body: 'Look at the tender in the portal, then keep or skip it below.', needsYou: true };
+function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, portalName: string, noSignIn: boolean): Instruction {
+  if (!update) {
+    return noSignIn
+      ? { title: `Opening ${portalName}`, body: 'Reading the list of bids. No sign-in is needed, so you can leave this running.', needsYou: false }
+      : { title: `Opening ${portalName}`, body: 'Preparing the portal. This can take a minute when the portal is slow.', needsYou: false };
+  }
+  if (update.question) {
+    return { title: 'TenderAssist is unsure about a tender', body: noSignIn ? 'Open the bid document to read it, then keep or skip it below.' : 'Look at the tender in the portal, then keep or skip it below.', needsYou: true };
+  }
   if (update.awaitingMoreDates) return { title: 'All dates are done', body: update.statusMessage ?? 'Every chosen date has been searched.', needsYou: true };
   if (update.phase === 'AUTH') {
     switch (update.authStep) {
@@ -63,8 +69,16 @@ function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, porta
   if (update.phase === 'ACQUISITION' && (update.jobState === 'SESSION_EXPIRED' || update.jobState === 'AUTH_REQUIRED')) {
     return { title: 'Sign in again to continue', body: update.statusMessage ?? 'The portal signed you out. Files already saved are kept.', needsYou: true };
   }
-  if (update.phase === 'SEARCH') return { title: 'Searching the portal', body: update.statusMessage ?? 'Reading titles and ticking possible tenders into My Tenders.', needsYou: false };
-  if (update.phase === 'CLASSIFICATION') return { title: 'Reading each tender', body: update.statusMessage ?? 'Opening each favourite in My Tenders and deciding from its full details.', needsYou: false };
+  if (update.phase === 'SEARCH') {
+    return noSignIn
+      ? { title: `Searching ${portalName}`, body: update.statusMessage ?? 'Finding the bids that started on this date.', needsYou: false }
+      : { title: 'Searching the portal', body: update.statusMessage ?? 'Reading titles and ticking possible tenders into My Tenders.', needsYou: false };
+  }
+  if (update.phase === 'CLASSIFICATION') {
+    return noSignIn
+      ? { title: 'Reading each bid', body: update.statusMessage ?? 'Reading the bid document of each bid in your categories and deciding from it.', needsYou: false }
+      : { title: 'Reading each tender', body: update.statusMessage ?? 'Opening each favourite in My Tenders and deciding from its full details.', needsYou: false };
+  }
   return { title: 'Saving files', body: update.statusMessage ?? 'Writing each kept tender’s documents, zip and eligibility sheet to your folder.', needsYou: false };
 }
 
@@ -82,12 +96,16 @@ function useSecondsLeft(answerBy: string | undefined): number {
 }
 
 /** "Keep or skip?" for one unsure tender, answered while its page is still open. */
-function QuestionCard({ question, busy, onAnswer }: { question: RunQuestion; busy: boolean; onAnswer: (answer: 'KEEP' | 'SKIP') => void }) {
+function QuestionCard({ question, busy, onAnswer, onOpenDocument }: {
+  question: RunQuestion; busy: boolean; onAnswer: (answer: 'KEEP' | 'SKIP') => void; onOpenDocument: () => void;
+}) {
   const seconds = useSecondsLeft(question.answerBy);
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  // A GeM bid is known by its bid number; its internal id means nothing to a person.
+  const gem = Boolean(question.documentUrl);
   const facts = [
-    ['Tender ID', question.tenderId],
-    ['Reference', question.reference],
+    ['Tender ID', gem ? null : question.tenderId],
+    [gem ? 'Bid number' : 'Reference', question.reference],
     ['Organisation', question.organisation],
     ['Category', question.category],
     ['Closes', question.closingDate],
@@ -104,6 +122,9 @@ function QuestionCard({ question, busy, onAnswer }: { question: RunQuestion; bus
         </dl>
       )}
       <div className="ask__actions">
+        {question.documentUrl && (
+          <button type="button" className="btn btn--quiet" onClick={onOpenDocument}>Open the bid document</button>
+        )}
         <button type="button" className="btn btn--approve" disabled={busy} onClick={() => onAnswer('KEEP')}>Keep</button>
         <button type="button" className="btn btn--reject" disabled={busy} onClick={() => onAnswer('SKIP')}>Skip it</button>
       </div>
@@ -118,10 +139,12 @@ export interface RunPanelProps {
   jobId: string;
   portalName: string;
   update: AuthJobUpdate | null;
+  /** A website searched without signing in (GeM): no sign-in step. */
+  noSignIn?: boolean;
 }
 
 /** The left side of a running search: what to do now, where the run is, and its controls. */
-export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
+export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signerSlow, setSignerSlow] = useState(false);
@@ -146,8 +169,9 @@ export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
     finally { setBusy(false); }
   };
 
-  const instruction = instructionFor(update, signerSlow, portalName);
-  const current = stepIndex(update?.phase);
+  const instruction = instructionFor(update, signerSlow, portalName, noSignIn);
+  const steps = noSignIn ? STEPS.filter((step) => step.phase !== 'AUTH') : STEPS;
+  const current = noSignIn ? Math.max(0, stepIndex(update?.phase) - 1) : stepIndex(update?.phase);
   const batch = update?.batch;
   const searchDate = update?.searchDate;
 
@@ -157,7 +181,7 @@ export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
         <span className="run__portal">{portalName}</span>
         {batch && batch.dates.length > 1 ? (
           <span className="run__count">Date {Math.min(batch.done.length + (update?.awaitingMoreDates ? 0 : 1), batch.dates.length)} of {batch.dates.length}</span>
-        ) : searchDate ? <span className="run__count">Published {dayLabel(searchDate).day} {dayLabel(searchDate).month}</span> : null}
+        ) : searchDate ? <span className="run__count">{noSignIn ? 'Started' : 'Published'} {dayLabel(searchDate).day} {dayLabel(searchDate).month}</span> : null}
       </header>
 
       <section className={instruction.needsYou ? 'now now--you' : 'now'} aria-live="polite">
@@ -185,7 +209,8 @@ export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
 
       {update?.question && (
         <QuestionCard key={update.question.id} question={update.question} busy={busy}
-          onAnswer={(answer) => act(() => window.tenderAssist.answerRunQuestion(update.question!.id, answer))} />
+          onAnswer={(answer) => act(() => window.tenderAssist.answerRunQuestion(update.question!.id, answer))}
+          onOpenDocument={() => act(() => window.tenderAssist.openQuestionDocument(update.question!.id))} />
       )}
 
       {update?.awaitingMoreDates && (
@@ -241,7 +266,7 @@ export function RunPanel({ jobId, portalName, update }: RunPanelProps) {
 
       {!update?.awaitingMoreDates && (
         <ol className="steps" aria-label="Steps for this date">
-          {STEPS.map((step, index) => (
+          {steps.map((step, index) => (
             <li key={step.phase} className={index < current ? 'step is-done' : index === current ? 'step is-now' : 'step'} aria-current={index === current ? 'step' : undefined}>
               {step.label}
             </li>

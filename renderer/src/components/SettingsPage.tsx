@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
-import type { RunDefaults } from '../../../src/config/runConfiguration';
+import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
 import type { UpdateStatus } from '../../../src/electron/updateService';
@@ -9,7 +9,7 @@ import { DEFAULT_AUTOMATION_PACING, type AutomationPacingSettings, type Automati
 import { EditableChips } from './EditableChips';
 import { CategoryPicker } from './CategoryPicker';
 import { WordSuggestionList } from './WordSuggestionList';
-import { getPortalDefinition } from '../../../src/config/portalRegistry';
+import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
 import { PortalSelect } from './PortalSelect';
 import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from '../../../src/publishing/outputStructure';
 
@@ -23,6 +23,9 @@ export interface SettingsPageProps {
 
 export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChange, focusRequest }: SettingsPageProps) {
   const [productCategories, setProductCategories] = useState<string[]>([]);
+  // Each website's own chosen categories, by website id.
+  const [categoriesByPortal, setCategoriesByPortal] = useState<Record<string, string[]>>({});
+  const [gemIncludeProducts, setGemIncludeProducts] = useState(false);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [excludedKeywords, setExcludedKeywords] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<WordSuggestions | null>(null);
@@ -44,6 +47,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   useEffect(() => {
     if (!settings) return;
     setProductCategories(settings.defaults.productCategories);
+    setCategoriesByPortal(settings.defaults.categoriesByPortal);
+    setGemIncludeProducts(settings.defaults.gemIncludeProducts);
     setKeywords(settings.defaults.keywords);
     setExcludedKeywords(settings.defaults.excludedKeywords);
     // Suggestions leave out the saved words, so ask again whenever they change.
@@ -51,15 +56,26 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   }, [settings]);
 
   const selectedPortal = getPortalDefinition(selectedPortalId);
+  const gem = isGemPortal(selectedPortal);
+  // The website's own picks, or its starting ones until the operator changes them.
+  const chosenCategories = categoriesByPortal[selectedPortal.id]
+    ?? categoriesForPortal({ productCategories, keywords, excludedKeywords, categoriesByPortal: {}, gemIncludeProducts }, selectedPortal);
+  const setChosenCategories = (values: string[]) => setCategoriesByPortal({ ...categoriesByPortal, [selectedPortal.id]: values });
+
+  // GeM's list comes from GeM itself, with product categories only when product bids are searched.
+  useEffect(() => {
+    let current = true;
+    setWebsiteCategories(null);
+    window.tenderAssist.getPortalCategories(selectedPortalId, { includeProducts: gem && gemIncludeProducts })
+      .then((list) => { if (current) setWebsiteCategories(list); })
+      .catch(() => {});
+    return () => { current = false; };
+  }, [selectedPortalId, gem, gemIncludeProducts]);
 
   useEffect(() => {
     let current = true;
     setCredentialSettings(null);
     setPublishing(null);
-    setWebsiteCategories(null);
-    window.tenderAssist.getPortalCategories(selectedPortalId)
-      .then((list) => { if (current) setWebsiteCategories(list); })
-      .catch(() => {});
     setPassword('');
     setSaved(false);
     Promise.all([
@@ -114,18 +130,19 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (productCategories.length === 0) return setError('Add at least one product category.');
+    if (chosenCategories.length === 0) return setError(`Add at least one category for ${selectedPortal.name}.`);
     if (keywords.length === 0) return setError('Add at least one intent keyword.');
     setSaving(true);
     setSaved(false);
     setError(null);
-    const defaults: RunDefaults = { productCategories, keywords, excludedKeywords };
+    const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories }, gemIncludeProducts };
     try {
       if (!publishing) throw new Error('Publishing settings are still loading.');
       if (!pacing) throw new Error('Automation pacing settings are still loading.');
       const [next, nextCredentials, nextPublishing, nextPacing] = await Promise.all([
         window.tenderAssist.saveRunSettings(defaults),
-        window.tenderAssist.savePortalCredentials(selectedPortalId, {
+        // GeM has no login to save.
+        gem ? Promise.resolve(credentialSettings!) : window.tenderAssist.savePortalCredentials(selectedPortalId, {
           loginId,
           password: password || undefined,
           rememberPassword,
@@ -203,9 +220,30 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
 
         <section id="settings-look" className="block" ref={relevanceSectionRef} tabIndex={-1}>
           <h2>What to look for</h2>
-          <p className="block__lede">TenderAssist searches each category for the published date, then keeps a tender only when its full details mention one of your intent words and its title has none of the excluded words.</p>
-          <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories}
-            values={productCategories} onChange={setProductCategories} />
+          <label className="field field--wide" htmlFor="settings-look-portal">
+            <span>Website</span>
+            <PortalSelect id="settings-look-portal" value={selectedPortalId} onChange={onPortalChange} disabled={saving} />
+          </label>
+          {gem ? (
+            <>
+              <p className="block__lede">On GeM, TenderAssist reads every bid that started on the chosen date, wherever it is in India. It reads the bid document of each bid in your GeM categories, and keeps it when the bid mentions one of your intent words and its title has none of the excluded words.</p>
+              <CategoryPicker portalName="GeM" websiteList={websiteCategories}
+                values={chosenCategories} onChange={setChosenCategories} startingList={DEFAULT_GEM_CATEGORIES}
+                unknownListHint="GeM’s category list could not be read just now; these are the starting categories. Check the internet connection and open Settings again." />
+              <label className="check">
+                <input type="checkbox" checked={gemIncludeProducts} onChange={(event) => setGemIncludeProducts(event.target.checked)} />
+                Also search product bids (services are always searched)
+              </label>
+              <p className="hint">The list is GeM’s own Category list, exactly as GeM shows it. Each website keeps its own categories; the intent and excluded words below are shared by every website.</p>
+            </>
+          ) : (
+            <>
+              <p className="block__lede">TenderAssist searches each category for the published date, then keeps a tender only when its full details mention one of your intent words and its title has none of the excluded words.</p>
+              <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories}
+                values={chosenCategories} onChange={setChosenCategories} />
+              <p className="hint">These are the categories for {selectedPortal.name} only. Each website keeps its own; choose another website above to see and change its categories.</p>
+            </>
+          )}
           <EditableChips id="intent-keyword-entry" label="Intent words"
             helper="Be specific, like “web application development”, not broad words like “service”."
             values={keywords} onChange={setKeywords} placeholder="Add an intent word or phrase" />
@@ -228,9 +266,12 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             <span>Website</span>
             <PortalSelect id="settings-portal" value={selectedPortalId} onChange={onPortalChange} disabled={saving} />
           </label>
-          {selectedPortal.compatibility === 'BETA' && (
+          {gem ? (
+            <p className="hint">GeM needs no login. Its bids and their documents are public, so TenderAssist reads them directly: no CAPTCHA and no DSC.</p>
+          ) : selectedPortal.compatibility === 'BETA' && (
             <p className="hint">This website uses the same system as Tamil Nadu, but TenderAssist has not been checked on it yet.</p>
           )}
+          {!gem && (<>
           <div className="field-row">
             <label className="field" htmlFor="portal-login-id">
               <span>Login ID</span>
@@ -255,6 +296,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           {credentialSettings?.hasSavedPassword && (
             <button className="btn btn--quiet btn--small" type="button" onClick={forgetSavedPassword} disabled={saving}>Forget the saved password</button>
           )}
+          </>)}
         </section>
 
         <section id="settings-folders" className="block" ref={foldersSectionRef} tabIndex={-1}>

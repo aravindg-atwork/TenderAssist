@@ -1,6 +1,6 @@
 # TenderAssist backlog
 
-Last updated: 6 Oct 2026. Pick up from **Next up**.
+Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Done in 0.4.6 (6 Oct 2026; built and unit-tested, not yet tried on the real website)
 
@@ -18,7 +18,36 @@ Last updated: 6 Oct 2026. Pick up from **Next up**.
   - Code: `src/review/wordSuggestions.ts`.
 - Tests: 369 of 369 pass.
 
+## Done on 7 Oct 2026 (not released; built and unit-tested)
+
+- **GeM (bidplus.gem.gov.in) as a website**, searched with no sign-in.
+  - How it works and why: `docs/gem-portal.md`.
+  - Code: `src/gem/`, GeM branches in `main.ts` (`runGemDates`, `startGemDocumentRun`), and `saveTenderFiles` in `postProcessingRunner.ts`.
+  - **Each website keeps its own categories**, picked from that website's own dropdown. Old settings carry over: the saved categories become Tamil Nadu's, and other GePNIC sites start from them.
+  - Settings with GeM selected:
+    - GeM's Category list exactly as GeM shows it (search, add, remove); bids matched by GeM's category code;
+    - "Also search product bids";
+    - no login fields.
+  - GeM's starting categories match the office's kinds of work: application development, e-learning, software applications, AMC, websites, mobile apps, plus custom bids.
+  - New dependency: `pdfjs-dist` (reads the bid PDFs).
+  - Tests: 403 of 403 pass. Live check on 6 Oct 2026 (default words): 1,006 service bids, 197 read, 4 kept, about 8 minutes.
+
+- **"Could not read its details" errors fixed (Tamil Nadu and GeM).**
+  - Found from the run data: since 5 Oct every Tamil Nadu failure was one of 4 old favourites that are no longer in My Tenders, carried into every session and "not found" each time. (The earlier one-tender-per-date failures on 5 Oct were the old back-to-My-Tenders bug, already fixed.)
+  - My Tenders is now read twice: tenders not found, or whose details did not open, are looked for again from a freshly opened My Tenders.
+  - A tender missing both times is marked "no longer in My Tenders" (`NOT_IN_MY_TENDERS`), waits in Needs a look, and is un-favourited on every run so it is never carried again.
+  - GeM: about 1 request in 13 gets a random HTTP 500 (on every backend server). Retries now wait 2, 5, 15 and 40 s, and bid PDFs that still fail are tried once more at the end of the run (`GEM_BID_DOCUMENT_FAILED` if not).
+  - Plainer wording for each case in the tender file and run details.
+
 ## To test on the real website
+
+- [ ] Tamil Nadu: the next run should mark the 4 old tenders (2026_TCMPF_707978_1, 2026_TNPL_708123_1, 2026_TNPL_706473_1, 2026_MAWS_705580_1) "no longer in My Tenders" once, then never show them again.
+
+- [ ] **GeM**:
+  - open Settings and pick GeM; the category list should load from GeM;
+  - run one date; check the counts in the run panel and the files in the output folder;
+  - approve a "Needs a look" tender, then use "Collect their documents".
+- [ ] **GeM vs excluded words:** "AMC" and "annual maintenance contract" are in the excluded words, so GeM AMC bids are rejected even though AMC is now a GeM category. Remove them from the excluded words if AMC work is wanted (this also affects the other websites).
 
 - [ ] Run a search, then open Settings: "Categories to search" should list all the website's categories (about 94 on Tamil Nadu).
 - [ ] During a run, check the "Keep or skip?" card appears for a tender whose title has no intent word, and that:
@@ -30,7 +59,7 @@ Last updated: 6 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- Nothing agreed yet. Candidates are under **Later**.
+- Try GeM on the real app (see **To test on the real website → GeM**), then build the next local installer.
 
 ## Later
 

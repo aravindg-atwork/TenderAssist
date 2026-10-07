@@ -17,6 +17,8 @@ export interface RunQuestion {
   value: string | null;
   /** Why TenderAssist is unsure, in one plain sentence. */
   reason: string;
+  /** The tender's own document to read, for websites with no portal view (GeM). */
+  documentUrl?: string;
   /** When the run stops waiting (ISO time). */
   answerBy: string;
 }

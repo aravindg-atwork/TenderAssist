@@ -11,6 +11,7 @@ import { AuthSessionRepository } from '../../src/persistence/repositories/authSe
 import { StateTransitionRepository } from '../../src/persistence/repositories/stateTransitionRepository.js';
 import { TenderRepository } from '../../src/persistence/repositories/tenderRepository.js';
 import { ClassificationRepository } from '../../src/persistence/repositories/classificationRepository.js';
+import { RunConfigurationRepository } from '../../src/persistence/repositories/runConfigurationRepository.js';
 import { JobStateMachine } from '../../src/state/jobStateMachine.js';
 import { AuthStateMachine } from '../../src/state/authStateMachine.js';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
@@ -19,7 +20,8 @@ import { CHROME_PATH } from '../support/chrome.js';
 import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
 const MY_TENDERS_PAGE_1_HTML = `<html><body>
-  <h1>My Tenders</h1>
+  <a href="/my">My Tenders</a>
+  <h2>Favourite tenders</h2>
   <table>
     <tr><td>Tender ID</td><td>Tender Title</td><td>Favorite</td></tr>
     <tr><td>2026_OTHER_1</td><td>Unrelated tender</td><td>Already reviewed</td></tr>
@@ -28,7 +30,8 @@ const MY_TENDERS_PAGE_1_HTML = `<html><body>
 </body></html>`;
 
 const MY_TENDERS_PAGE_2_HTML = `<html><body>
-  <h1>My Tenders</h1>
+  <a href="/my">My Tenders</a>
+  <h2>Favourite tenders</h2>
   <table>
     <tr><td>Tender ID</td><td>Tender Title</td><td>Favorite</td></tr>
     <tr>
@@ -269,5 +272,33 @@ describe.skipIf(!CHROME_PATH)('runClassificationPhase', { timeout: 30_000 }, () 
 
     expect(asked).toBe(0);
     expect(classifications.getFinalForTender(tenderId)).toBe('KEEP');
+  });
+
+  it('reports a favourite gone from My Tenders as such, after looking twice, and stops carrying it', async () => {
+    const configs = new RunConfigurationRepository(db);
+    const config = { searchDate: '2026-09-21', productCategories: ['Information Technology'], keywords: ['software development'], excludedKeywords: [] };
+    configs.saveForJob(jobId, config);
+    // An older run of the same website also has it as a favourite.
+    const olderJob = jobs.create().id;
+    configs.saveForJob(olderJob, { ...config, searchDate: '2026-09-20' });
+    const gone = { tenderRef: 'REF/GONE/1', tenderPortalId: '2026_GONE_1', title: 'Closed portal work', organisationChain: null, publishedDate: null, closingDate: null, openingDate: null, productCategory: 'Information Technology', valueInRupees: 'NA' };
+    const older = tenders.upsert({ ...gone, jobId: olderJob });
+    tenders.markFavorited(older.id, new Date().toISOString());
+    const missing = tenders.upsert({ ...gone, jobId });
+    tenders.markFavorited(missing.id, new Date().toISOString());
+
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    await runClassificationPhase({ jobs, sessions, jobMachine, tenders, classifications }, page, jobId, authSessionId, config, () => {}, undefined);
+
+    // The tender that is there is still read.
+    expect(classifications.getFinalForTender(tenderId)).toBe('KEEP');
+    const gates = classifications.listForTender(missing.id);
+    expect(gates.map((gate) => gate.reason_code)).toEqual(['NOT_IN_MY_TENDERS', 'NOT_IN_MY_TENDERS', 'NOT_IN_MY_TENDERS', 'NOT_IN_MY_TENDERS']);
+    expect(classifications.getFinalForTender(missing.id)).toBe('UNCERTAIN');
+    expect(tenders.getById(missing.id)!.favorited).toBe(0);
+    expect(tenders.getById(older.id)!.favorited).toBe(0);
+    expect(tenders.getById(tenderId)!.favorited).toBe(1);
   });
 });

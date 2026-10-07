@@ -73,8 +73,14 @@ function rejectClause(gate: ScreenedGate): string {
 
 function uncertainSentence(gate: ScreenedGate | undefined): string {
   if (!gate) return 'Not decided yet: not every check ran. The next search finishes them.';
+  if (gate.reasonCode === 'NOT_IN_MY_TENDERS') {
+    return 'Needs your judgement: it is no longer in your My Tenders on the portal (closed, withdrawn or removed), so TenderAssist did not read it. Decide it yourself.';
+  }
+  if (gate.reasonCode === 'GEM_BID_DOCUMENT_FAILED') {
+    return 'Not decided yet: GeM did not send its bid document, even after several tries. Run its date again, or approve it and use Collect their documents.';
+  }
   if (gate.reasonCode === 'DETAIL_REVIEW_FAILED' || gate.reasonCode === 'PREFAVORITE_DETAIL_REVIEW_FAILED' || gate.reasonCode === 'DETAIL_TEXT_MISSING') {
-    return 'Not decided yet: TenderAssist could not open its details page. The next search opens it again from My Tenders.';
+    return 'Not decided yet: its details page did not open, even on a second try. The next search opens it again from My Tenders.';
   }
   if (gate.reasonCode === 'INTENT_ONLY_IN_DETAILS') {
     const words = list(gate.evidence.matchedKeywords);

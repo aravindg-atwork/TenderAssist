@@ -5,7 +5,7 @@ import type { TenderRepository, TenderRow } from '../persistence/repositories/te
 import type { ClassificationRepository, FinalClassification } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
-import { detailTextFor, navigateToMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
+import { detailTextFor, navigateToMyTenders, NotInMyTendersError, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
 import { evaluateIntentKeywords, evaluateExcludedScope, type TextGateResult } from '../classification/intentGates.js';
@@ -237,12 +237,16 @@ export async function runClassificationPhase(
     if (decided.has(tender.id)) continue;
     const error = reviewBatch.errors.get(tender.id) ?? new Error('Tender detail review did not return a result.');
     const evidence = { error: error.message };
+    // Gone from My Tenders (closed, withdrawn or removed): left for the
+    // operator, and no longer carried into later runs to fail again.
+    const gone = error instanceof NotInMyTendersError;
+    if (gone) tenders.clearFavourite(tender);
     for (const gate of ['G1', 'G2', 'G3', 'G4'] as const) {
       classifications.saveGate({
         tenderId: tender.id,
         gate,
         result: 'UNCERTAIN',
-        reasonCode: 'DETAIL_REVIEW_FAILED',
+        reasonCode: gone ? 'NOT_IN_MY_TENDERS' : 'DETAIL_REVIEW_FAILED',
         evidence,
         classifierVersion: CLASSIFIER_VERSION,
       });

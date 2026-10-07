@@ -1,7 +1,7 @@
 // renderer/src/App.tsx
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AuthJobUpdate, RunSettingsState, SettingsSection } from '../../src/electron/ipcTypes';
-import { DEFAULT_PORTAL_ID, getPortalDefinition } from '../../src/config/portalRegistry';
+import { DEFAULT_PORTAL_ID, getPortalDefinition, isGemPortal } from '../../src/config/portalRegistry';
 import { applyTextSize } from './display';
 import { TodayPage, type FinishedRun } from './components/TodayPage';
 import { TendersPage } from './components/TendersPage';
@@ -110,7 +110,12 @@ export function App() {
       </header>
 
       <main className="main">
-        {showWorkspace && activeJobId ? (
+        {showWorkspace && activeJobId && isGemPortal(portal) ? (
+          // GeM is read without a portal window, so the run panel stands alone.
+          <div className="workspace workspace--alone">
+            <RunPanel jobId={activeJobId} portalName={portal.name} update={activeUpdate} noSignIn />
+          </div>
+        ) : showWorkspace && activeJobId ? (
           <RunWorkspace
             portalId={portal.id}
             portalName={portal.name}

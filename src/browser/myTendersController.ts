@@ -249,22 +249,43 @@ async function goToNextPage(page: Page, paceAction: PaceAction): Promise<boolean
 
 export interface TenderReviewBatch {
   reviewed: Map<string, TenderDetailSnapshot>;
+  /** Tenders not reviewed, and why. A `NotInMyTendersError` means it is not in My Tenders at all. */
   errors: Map<string, Error>;
   pagesScanned: number;
 }
 
-/** Review every current-job favorite across all pages in My Tenders. */
-export async function reviewTendersFromMyTenders(
+/**
+ * A favourite that is not in My Tenders on the portal, checked twice: it was
+ * closed, withdrawn, or removed from My Tenders. Not a page that failed.
+ */
+export class NotInMyTendersError extends Error {
+  constructor(tender: TenderRow) {
+    super(`Tender ${tender.tender_portal_id ?? tender.tender_ref} is no longer in My Tenders on the portal.`);
+    this.name = 'NotInMyTendersError';
+  }
+}
+
+interface ScanResult {
+  reviewed: Map<string, TenderDetailSnapshot>;
+  /** Found in My Tenders, but its details could not be read. */
+  failed: Map<string, Error>;
+  /** Not seen on any page. */
+  notFound: Set<string>;
+  pagesScanned: number;
+}
+
+/** One pass through every page of My Tenders, from the page open now. */
+async function scanMyTenders(
   page: Page,
   tenders: TenderRow[],
-  maxPages = 100,
-  paceAction: PaceAction = noPacing,
-  whileOpen?: WhileDetailOpen,
-  portalHomeUrl?: string
-): Promise<TenderReviewBatch> {
+  maxPages: number,
+  paceAction: PaceAction,
+  whileOpen: WhileDetailOpen | undefined,
+  portalHomeUrl: string | undefined
+): Promise<ScanResult> {
   const pending = new Map(tenders.map((tender) => [tender.id, tender]));
   const reviewed = new Map<string, TenderDetailSnapshot>();
-  const errors = new Map<string, Error>();
+  const failed = new Map<string, Error>();
   const seenPages = new Set<string>();
   let pagesScanned = 0;
 
@@ -284,23 +305,55 @@ export async function reviewTendersFromMyTenders(
         // "not found"; the portal's own My Tenders link always does.
         reviewed.set(tenderId, await reviewTenderAtRow(page, tender, row, paceAction, whileOpen, () => navigateToMyTenders(page, paceAction, portalHomeUrl)));
       } catch (error) {
-        errors.set(tenderId, error instanceof Error ? error : new Error(String(error)));
+        failed.set(tenderId, error instanceof Error ? error : new Error(String(error)));
       }
       pending.delete(tenderId);
     }
 
     if (pending.size === 0 || !(await goToNextPage(page, paceAction))) break;
   }
+  return { reviewed, failed, notFound: new Set(pending.keys()), pagesScanned };
+}
 
-  for (const [tenderId, tender] of pending) {
-    errors.set(
-      tenderId,
-      new Error(
-        `Tender ${tender.tender_portal_id ?? tender.tender_ref} was not found after scanning ${pagesScanned} My Tenders page(s).`
-      )
-    );
+/**
+ * Review every current-job favourite across all pages in My Tenders. Any
+ * tender not found, or whose details did not open, gets a second pass from a
+ * freshly opened My Tenders: a slow portal or a list that did not come back
+ * properly should not cost a tender. Only a tender missing from both passes
+ * is reported as not in My Tenders.
+ */
+export async function reviewTendersFromMyTenders(
+  page: Page,
+  tenders: TenderRow[],
+  maxPages = 100,
+  paceAction: PaceAction = noPacing,
+  whileOpen?: WhileDetailOpen,
+  portalHomeUrl?: string
+): Promise<TenderReviewBatch> {
+  const first = await scanMyTenders(page, tenders, maxPages, paceAction, whileOpen, portalHomeUrl);
+  const reviewed = new Map(first.reviewed);
+  let pagesScanned = first.pagesScanned;
+  const leftOver = tenders.filter((tender) => !reviewed.has(tender.id));
+  let second: ScanResult | null = null;
+  if (leftOver.length > 0) {
+    const reopened = await navigateToMyTenders(page, paceAction, portalHomeUrl).then(() => true, () => false);
+    if (reopened) {
+      second = await scanMyTenders(page, leftOver, maxPages, paceAction, whileOpen, portalHomeUrl);
+      for (const [id, details] of second.reviewed) reviewed.set(id, details);
+      pagesScanned += second.pagesScanned;
+    }
   }
 
+  const errors = new Map<string, Error>();
+  for (const tender of leftOver) {
+    if (reviewed.has(tender.id)) continue;
+    const failure = second?.failed.get(tender.id) ?? first.failed.get(tender.id);
+    const missingBothTimes = first.notFound.has(tender.id) && (!second || second.notFound.has(tender.id));
+    errors.set(tender.id, failure && !missingBothTimes
+      ? failure
+      : second ? new NotInMyTendersError(tender)
+        : new Error(`Tender ${tender.tender_portal_id ?? tender.tender_ref} was not found, and My Tenders could not be opened again to check.`));
+  }
   return { reviewed, errors, pagesScanned };
 }
 

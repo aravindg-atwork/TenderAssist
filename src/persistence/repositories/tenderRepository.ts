@@ -52,6 +52,9 @@ export interface TenderDetailInput {
   tenderCategory: string | null;
   detailText: string;
   documentLinks?: Array<{ url: string; fileName: string }>;
+  /** Kept as found in the list when not given. */
+  valueInRupees?: string | null;
+  closingDate?: string | null;
 }
 
 export class TenderRepository {
@@ -159,6 +162,24 @@ export class TenderRepository {
       .run(favoritedAt, new Date().toISOString(), id);
   }
 
+  /**
+   * The tender is no longer in My Tenders on the portal: un-mark it on every
+   * run of the same website, so no later run carries it over to look again.
+   */
+  clearFavourite(tender: Pick<TenderRow, 'job_id' | 'tender_portal_id' | 'tender_ref'>): void {
+    this.db
+      .prepare(
+        `UPDATE tenders SET favorited = 0, updated_at = ?
+         WHERE favorited = 1
+           AND (tender_ref = ? OR (? IS NOT NULL AND tender_portal_id = ?))
+           AND job_id IN (
+             SELECT c.job_id FROM job_run_configs c
+             WHERE c.portal_id = COALESCE((SELECT portal_id FROM job_run_configs WHERE job_id = ?), 'tamil-nadu')
+           )`
+      )
+      .run(new Date().toISOString(), tender.tender_ref, tender.tender_portal_id, tender.tender_portal_id, tender.job_id);
+  }
+
   updateDetail(id: string, input: TenderDetailInput): void {
     const now = new Date().toISOString();
     this.db
@@ -172,6 +193,8 @@ export class TenderRepository {
            tender_category = ?,
            detail_text = ?,
            document_links_json = ?,
+           value_in_rupees = COALESCE(?, value_in_rupees),
+           closing_date = COALESCE(?, closing_date),
            detail_reviewed_at = ?,
            updated_at = ?
          WHERE id = ?`
@@ -185,6 +208,8 @@ export class TenderRepository {
         input.tenderCategory,
         input.detailText,
         JSON.stringify(input.documentLinks ?? []),
+        input.valueInRupees ?? null,
+        input.closingDate ?? null,
         now,
         now,
         id

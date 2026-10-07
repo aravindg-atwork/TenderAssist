@@ -31,6 +31,14 @@ function isExpiredSessionResponse(finalUrl: string, contentType: string | undefi
   return isSessionExpiredPage(finalUrl, text) || /page=(?:Login|NoAuthorizationPage|CommonErrorPage)/i.test(text);
 }
 
+/**
+ * Downloads a tender's documents without a signed-in portal page, for
+ * websites whose files are public (GeM). It checks its own URLs.
+ */
+export interface DocumentDownloader {
+  get(url: string): Promise<{ finalUrl: string; contentType: string; body: Buffer }>;
+}
+
 export interface PostProcessingDeps {
   jobs: JobRepository;
   sessions: AuthSessionRepository;
@@ -40,6 +48,8 @@ export interface PostProcessingDeps {
   workflow: TenderWorkflowRepository;
   outputs: JobOutputRepository;
   signal?: AbortSignal;
+  /** Used instead of the portal page when given; no sign-in is needed then. */
+  downloader?: DocumentDownloader;
 }
 
 function safeFileName(value: string, index: number, url: string): string {
@@ -74,6 +84,41 @@ function linksFor(tender: TenderRow): Array<{ url: string; fileName: string }> {
     const parsed = JSON.parse(tender.document_links_json) as Array<{ url?: unknown; fileName?: unknown }>;
     return parsed.filter((link): link is { url: string; fileName: string } => typeof link.url === 'string' && typeof link.fileName === 'string');
   } catch { return []; }
+}
+
+/**
+ * Saves every file a tender links to into its folder with a downloader, and
+ * records each result. Files already saved are skipped; a failed file is
+ * recorded and the rest carry on.
+ */
+export async function saveTenderFiles(
+  workflow: TenderWorkflowRepository,
+  tender: TenderRow,
+  folder: string,
+  downloader: DocumentDownloader,
+  signal?: AbortSignal
+): Promise<void> {
+  mkdirSync(folder, { recursive: true });
+  const links = linksFor(tender);
+  for (let index = 0; index < links.length; index += 1) {
+    throwIfCancellationRequested(signal);
+    const link = links[index];
+    const proposedFileName = safeFileName(link.fileName, index, link.url);
+    const document = workflow.upsertDocument(tender.id, link.url, proposedFileName);
+    if (document.state === 'DOWNLOADED') continue;
+    try {
+      const file = await downloader.get(link.url);
+      throwIfCancellationRequested(signal);
+      if (/text\/html/i.test(file.contentType)) throw new Error('The website returned a web page instead of the file.');
+      const fileName = fileNameForResponse(proposedFileName, file.contentType);
+      const path = join(folder, fileName);
+      writeFileSync(path, file.body);
+      workflow.completeDocument(document.id, fileName, path, createHash('sha256').update(file.body).digest('hex'));
+    } catch (error) {
+      if (isCancellationRequested(signal)) throw error;
+      workflow.failDocument(document.id, error instanceof Error ? error.message : String(error));
+    }
+  }
 }
 
 export async function runPostProcessing(
@@ -114,7 +159,7 @@ export async function runPostProcessing(
     const { outputDate, structure, jobDirectory } = plan;
     const authState = deps.sessions.getById(authSessionId)?.state;
     const pending = approved.some((tender) => linksFor(tender).some((link) => deps.workflow.findDocument(tender.id, link.url)?.state !== 'DOWNLOADED'));
-    if (pending && (!page || authState === 'SESSION_EXPIRED' || authState === 'TAB_LOST')) {
+    if (pending && !deps.downloader && (!page || authState === 'SESSION_EXPIRED' || authState === 'TAB_LOST')) {
       throw new PortalSessionExpiredError(PORTAL_SESSION_EXPIRED_REASON);
     }
     deps.jobMachine.transition(jobId, 'ACQUIRING_DOCUMENTS', 'approved tender document acquisition started');
@@ -123,6 +168,11 @@ export async function runPostProcessing(
       throwIfCancellationRequested(deps.signal);
       const folder = tenderDocumentsDirectory(jobDirectory, tender, deps.outputs.serialNumberFor(plan, tender.id), structure, outputDate);
       mkdirSync(folder, { recursive: true });
+      if (deps.downloader) {
+        await saveTenderFiles(deps.workflow, tender, folder, deps.downloader, deps.signal);
+        onUpdate(snapshot('ACQUISITION'));
+        continue;
+      }
       const links = linksFor(tender);
       for (let index = 0; index < links.length; index += 1) {
         throwIfCancellationRequested(deps.signal);

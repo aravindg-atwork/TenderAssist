@@ -1,5 +1,7 @@
 export type PortalGroup = 'Central Government' | 'PSU / Other' | 'State / UT';
 export type PortalCompatibility = 'VERIFIED' | 'BETA';
+/** GePNIC sites need sign-in and a browser; GeM's search and documents are public. */
+export type PortalKind = 'GEPNIC' | 'GEM';
 
 export interface PortalDefinition {
   id: string;
@@ -8,6 +10,8 @@ export interface PortalDefinition {
   stateName: string;
   url: string;
   compatibility: PortalCompatibility;
+  /** Defaults to GePNIC. */
+  kind?: PortalKind;
 }
 
 /**
@@ -15,8 +19,10 @@ export interface PortalDefinition {
  * of India ePublishing directory. Tamil Nadu is the currently verified
  * end-to-end adapter; the remaining sites share the NIC family and are exposed
  * as beta until their login/search/DSC flow is confirmed on a real account.
+ * GeM (bidplus.gem.gov.in) is searched over its public data, with no sign-in.
  */
 export const PORTALS: readonly PortalDefinition[] = [
+  { id: 'gem', name: 'GeM (Government e-Marketplace)', group: 'Central Government', stateName: 'Central Government', url: 'https://bidplus.gem.gov.in/all-bids', compatibility: 'BETA', kind: 'GEM' },
   { id: 'cppp-1', name: 'Central Public Procurement Portal 1', group: 'Central Government', stateName: 'Central Government', url: 'https://eprocure.gov.in/eprocure/app', compatibility: 'BETA' },
   { id: 'cppp-2', name: 'Central Public Procurement Portal 2', group: 'Central Government', stateName: 'Central Government', url: 'https://etenders.gov.in/eprocure/app', compatibility: 'BETA' },
   { id: 'defence', name: 'Defence eProcurement', group: 'Central Government', stateName: 'Central Government', url: 'https://defproc.gov.in/nicgep/app', compatibility: 'BETA' },
@@ -73,6 +79,10 @@ export const DEFAULT_PORTAL_ID = 'tamil-nadu';
 
 export function getPortalDefinition(portalId?: string): PortalDefinition {
   return PORTALS.find((portal) => portal.id === portalId) ?? PORTALS.find((portal) => portal.id === DEFAULT_PORTAL_ID)!;
+}
+
+export function isGemPortal(portal: PortalDefinition): boolean {
+  return portal.kind === 'GEM';
 }
 
 export function portalTargetPrefix(portal: PortalDefinition): string {
