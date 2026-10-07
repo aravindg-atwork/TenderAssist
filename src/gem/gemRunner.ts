@@ -11,7 +11,7 @@ import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
 import type { AuthJobUpdate } from '../orchestration/authJobRunner.js';
 import type { RunQuestionAnswer } from '../orchestration/runQuestion.js';
-import { evaluateExcludedScope, evaluateIntentKeywords } from '../classification/intentGates.js';
+import { evaluateExcludedScope, evaluateIntentKeywords, evaluateTenderIntent, type TextGateResult } from '../classification/intentGates.js';
 import { unsureReason } from '../orchestration/classificationPhaseRunner.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from '../orchestration/jobCancellation.js';
 import { retryTransient } from '../orchestration/transientRetry.js';
@@ -71,6 +71,28 @@ export function inChosenCategory(bid: Pick<GemBid, 'category' | 'categoryCode'>,
   return sameCategory(categoryOf(chosen), bid.category);
 }
 
+const STATES = ['Andaman and Nicobar', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli', 'Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'];
+
+/** Where the work is: the buyer's state when the buyer is a state, and the delivery PIN code. */
+export function gemLocation(facts: Pick<GemDocumentFacts, 'ministry' | 'deliveryPincode'> | null): string | null {
+  if (!facts) return null;
+  const buyer = facts.ministry?.toLowerCase().replace(/&/g, 'and') ?? '';
+  const state = STATES.find((name) => buyer.startsWith(name.toLowerCase()));
+  const parts = [state, facts.deliveryPincode && `PIN ${facts.deliveryPincode}`].filter(Boolean);
+  return parts.length > 0 ? parts.join(' - ') : null;
+}
+
+/** A bid's intent words: see `evaluateTenderIntent`. */
+export function gemIntent(bid: Pick<GemBid, 'title'>, bidText: string, keywords: string[]): { title: TextGateResult; intent: TextGateResult } {
+  return evaluateTenderIntent(bid.title, bidText, keywords);
+}
+
+/** In a chosen category other than custom bids: the category itself is the work. */
+export function isOwnCategory(bid: Pick<GemBid, 'category' | 'categoryCode'>, chosen: readonly string[], codes?: ReadonlyMap<string, string>): boolean {
+  if (/^custom bid for services$/i.test(bid.category.trim())) return false;
+  return chosen.some((name) => !/^custom bid for services$/i.test(name.trim()) && inChosenCategory(bid, name, codes));
+}
+
 export function bidFileName(bid: Pick<GemBid, 'bidNumber'>): string {
   return `GeM bid ${bid.bidNumber.replace(/[\\/]/g, '-')}.pdf`;
 }
@@ -100,6 +122,8 @@ export function detailFieldsFor(bid: GemBid, facts: GemDocumentFacts | null): Ar
     { label: 'Bid Start Date', value: portalStyleDate(bid.startsAt) },
     { label: 'Bid Submission End Date', value: facts?.bidEndsAt ?? portalStyleDate(bid.endsAt) },
     { label: 'Bid Opening Date', value: facts?.bidOpensAt ?? null },
+    { label: 'Pre Bid Meeting Date', value: facts?.preBidAt ?? null },
+    { label: 'Location', value: gemLocation(facts) },
     { label: 'Bid Offer Validity', value: facts?.offerValidity ?? null },
     { label: 'Period of Work', value: facts?.contractPeriod ?? null },
     { label: 'Pre-Qualification', value: qualification || null },
@@ -304,7 +328,7 @@ export async function runGemDate(
       toRead.push({ bid, tender });
       continue;
     }
-    const titleIntent = evaluateIntentKeywords(bid.title, config.keywords);
+    const titleIntent = evaluateIntentKeywords(bid.title, config.keywords, { wholePhrase: true });
     gate(tender.id, 'G3', titleIntent.result, titleIntent.reasonCode, { stage: 'TITLE', matchedKeywords: titleIntent.matchedTerms });
   }
 
@@ -335,8 +359,13 @@ export async function runGemDate(
         if (pass === 1) tryAgain.push(batch[index]);
         continue;
       }
-      const intent = evaluateIntentKeywords(`${bid.title} ${bidSpecificText(content.text)}`, config.keywords, { wholePhrase: true });
-      gate(tender.id, 'G3', intent.result, intent.reasonCode, { matchedKeywords: intent.matchedTerms, configuredKeywords: config.keywords });
+      const { title: titleIntent, intent } = gemIntent(bid, bidSpecificText(content.text), config.keywords);
+      if (isOwnCategory(bid, config.productCategories, deps.categoryCodes)) {
+        // A chosen GeM category other than custom bids is the work itself.
+        gate(tender.id, 'G3', 'PASS', 'CHOSEN_CATEGORY', { matchedKeywords: intent.matchedTerms, category: bid.category });
+      } else {
+        gate(tender.id, 'G3', intent.result, intent.reasonCode, { matchedKeywords: intent.matchedTerms, configuredKeywords: config.keywords });
+      }
       if (facts?.itemCategory) {
         const scope = `${bid.title} ${facts.itemCategory}`;
         const excluded = evaluateExcludedScope(scope, config.excludedKeywords);
@@ -344,7 +373,7 @@ export async function runGemDate(
       }
 
       const reason = deps.askOperator
-        ? unsureReason(classifications.getFinalForTender(tender.id), evaluateIntentKeywords(bid.title, config.keywords), intent.matchedTerms)
+        ? unsureReason(classifications.getFinalForTender(tender.id), isOwnCategory(bid, config.productCategories, deps.categoryCodes) ? { result: 'PASS', reasonCode: 'CHOSEN_CATEGORY', matchedTerms: [] } : titleIntent, intent.matchedTerms)
         : null;
       if (deps.askOperator && reason) {
         const answer = await deps.askOperator(tenders.getById(tender.id) ?? tender, reason, documentUrl);

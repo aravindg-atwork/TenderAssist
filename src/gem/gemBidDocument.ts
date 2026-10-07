@@ -31,6 +31,10 @@ export interface GemDocumentFacts {
   epbgPercentage: string | null;
   evaluationMethod: string | null;
   totalQuantity: string | null;
+  /** Pre-bid meeting, when the buyer holds one. */
+  preBidAt: string | null;
+  /** The PIN code of the first delivery (consignee) address. */
+  deliveryPincode: string | null;
 }
 
 export interface GemAttachment {
@@ -109,6 +113,8 @@ export function factsFromBidText(text: string): GemDocumentFacts {
     epbgPercentage: after(flat, /ePBG Percentage\(%\)/, /([\d.]+)/),
     evaluationMethod: after(flat, /\/Evaluation Method/, /([A-Za-z ]{3,80}?)(?= [^\x20-\x7E]|$| \S*\/)/),
     totalQuantity: after(flat, /\/Total Quantity/, /([\d,]+)/),
+    preBidAt: after(flat, /Pre-Bid Date and Time/, /[^\d]{0,160}?(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})/),
+    deliveryPincode: /Consignee[\s\S]{0,600}?\b(\d{6})\s*,/i.exec(flat)?.[1] ?? null,
   };
 }
 

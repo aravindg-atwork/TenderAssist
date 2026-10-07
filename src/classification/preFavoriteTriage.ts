@@ -20,7 +20,7 @@ export function triageTenderTitle(
   title: string,
   config: PreFavoriteIntent
 ): PreFavoriteDecision {
-  const intent = evaluateIntentKeywords(title, config.keywords);
+  const intent = evaluateIntentKeywords(title, config.keywords, { wholePhrase: true });
   const exclusion = evaluateExcludedScope(title, config.excludedKeywords);
 
   if (exclusion.result === 'REJECT') {

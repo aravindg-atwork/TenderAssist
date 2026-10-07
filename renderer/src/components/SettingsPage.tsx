@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
-import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, type RunDefaults } from '../../../src/config/runConfiguration';
+import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
 import type { UpdateStatus } from '../../../src/electron/updateService';
@@ -57,6 +57,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   }, [settings]);
 
   const selectedPortal = getPortalDefinition(selectedPortalId);
+  const wordKey = (word: string) => word.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+  const broadWords = keywords.filter((word) => TOO_BROAD_INTENT_WORDS.includes(wordKey(word)));
+  const missingRecommended = RECOMMENDED_INTENT_WORDS.filter((word) => !keywords.some((current) => wordKey(current) === wordKey(word)));
   const gem = isGemPortal(selectedPortal);
   // The website's own picks, or its starting ones until the operator changes them.
   const chosenCategories = categoriesByPortal[selectedPortal.id]
@@ -254,8 +257,23 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             </>
           )}
           <EditableChips id="intent-keyword-entry" label="Intent words"
-            helper="Be specific, like “web application development”, not broad words like “service”."
+            helper="A single word (like “website”) counts only in a tender’s title. A phrase (like “website development”) also counts in its details."
             values={keywords} onChange={setKeywords} placeholder="Add an intent word or phrase" />
+          {broadWords.length > 0 && (
+            <p className="notice notice--attention" role="note">
+              {broadWords.map((word) => `“${word}”`).join(', ')} on {broadWords.length === 1 ? 'its' : 'their'} own {broadWords.length === 1 ? 'is' : 'are'} too broad:
+              it keeps tenders that are not your work (for example, “AMC” keeps maintenance contracts for furnaces and RO plants).
+              Remove {broadWords.length === 1 ? 'it' : 'them'}, or use a phrase such as “software AMC” or “website maintenance”.
+            </p>
+          )}
+          {missingRecommended.length > 0 && (
+            <p className="hint">
+              <button type="button" className="btn btn--quiet btn--small" onClick={() => setKeywords([...keywords, ...missingRecommended])}>
+                Add {missingRecommended.length} recommended words
+              </button>{' '}
+              Phrases worded the way IT, website, app and e-learning tenders are, taken from the tenders this office pursued. Remove any you do not want, then save.
+            </p>
+          )}
           <WordSuggestionList title="Suggested intent words, from tenders you approved" suggestions={suggestions?.intent ?? []}
             current={keywords} onAdd={(phrase) => setKeywords([...keywords, phrase])} />
           <EditableChips id="excluded-keyword-entry" label="Excluded words"

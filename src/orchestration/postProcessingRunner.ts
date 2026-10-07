@@ -16,6 +16,7 @@ import type { RunConfiguration } from '../config/runConfiguration.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
 import { isCancellationRequested, markJobCancelled, throwIfCancellationRequested, USER_CANCELLED_REASON } from './jobCancellation.js';
 import { isSessionExpiredPage } from '../browser/sessionExpiredDetector.js';
+import { PORTALS } from '../config/portalRegistry.js';
 
 const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024;
 
@@ -231,7 +232,7 @@ export async function runPostProcessing(
       documents: deps.workflow.listDocuments(tender.id),
       requirements: deps.workflow.getRequirements(tender.id),
       serialNumber: deps.outputs.serialNumberFor(plan, tender.id),
-    })), structure, plan.runNumber);
+    })), structure, plan.runNumber, { url: portalUrl, name: PORTALS.find((portal) => portal.url === portalUrl)?.name ?? 'the website' });
     throwIfCancellationRequested(deps.signal);
     deps.jobMachine.transition(jobId, 'REPORTING', 'workbook and folders created');
     deps.jobMachine.transition(jobId, 'COMPLETE', 'job output published successfully');

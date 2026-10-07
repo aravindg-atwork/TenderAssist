@@ -60,3 +60,24 @@ export function evaluateExcludedScope(summaryText: string, excludedKeywords: str
     ? { result: 'REJECT', reasonCode: 'EXCLUDED_PRIMARY_SCOPE', matchedTerms }
     : { result: 'PASS', reasonCode: 'NO_EXCLUDED_PRIMARY_SCOPE', matchedTerms: [] };
 }
+
+/**
+ * A tender's intent words, the same way on every website. In the title, a
+ * word or phrase counts when its words stand together. In the details (a
+ * whole page or bid document, with menus and standard terms), only phrases of
+ * two or more words count: single words such as "website", "portal" or "AMC"
+ * appear on almost every page.
+ */
+export function evaluateTenderIntent(title: string, details: string, keywords: string[]): { title: TextGateResult; intent: TextGateResult } {
+  const titleResult = evaluateIntentKeywords(title, keywords, { wholePhrase: true });
+  const phrases = keywords.filter((keyword) => normalized(keyword).split(' ').filter(Boolean).length > 1);
+  const detailResult = details.trim() ? evaluateIntentKeywords(details, phrases, { wholePhrase: true }) : { matchedTerms: [] as string[] };
+  const matchedTerms = [...new Set([...titleResult.matchedTerms, ...detailResult.matchedTerms])];
+  if (!title.trim() && !details.trim()) return { title: titleResult, intent: { result: 'UNCERTAIN', reasonCode: 'DETAIL_TEXT_MISSING', matchedTerms: [] } };
+  return {
+    title: titleResult,
+    intent: matchedTerms.length > 0
+      ? { result: 'PASS', reasonCode: 'INTENT_KEYWORD_MATCH', matchedTerms }
+      : { result: 'REJECT', reasonCode: 'NO_INTENT_KEYWORD_MATCH', matchedTerms: [] },
+  };
+}

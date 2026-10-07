@@ -170,6 +170,23 @@ describe('a GeM run for one date', () => {
     expect(inChosenCategory({ category: 'Facility Management Services', categoryCode: 'x' }, 'Facility Management Services - Lumpsum Based - Other')).toBe(true);
   });
 
+  it('keeps a bid in a chosen GeM category (not custom bids) even when it names none of the intent words', async () => {
+    const config = { ...CONFIG, productCategories: [...CONFIG.productCategories, 'Hiring Of Agency For It Projects- Milestone Basis'] };
+    await runGemDate(deps([bid(20, 'Hiring of Agency for IT Projects- Milestone basis - scope unspecified')], { 20: BID_TEXT }), jobId, config, () => {});
+    expect(finalFor('GEM/2026/B/20')).toBe('KEEP');
+  });
+
+  it('does not let a single word in the bid document, or a broad word in the title, keep a bid', async () => {
+    const words = { ...CONFIG, keywords: ['website', 'software AMC'] };
+    const text = `${BID_TEXT.split('/Disclaimer')[0]} The bid is published on the GeM website. AMC of the furnace for two years.`;
+    await runGemDate(deps([
+      bid(21, 'Custom Bid for Services - AMC for Calibration of Furnaces'),
+      bid(22, 'Custom Bid for Services - Website redesign for the institute'),
+    ], { 21: text, 22: text }), jobId, words, () => {});
+    expect(finalFor('GEM/2026/B/21')).toBe('REJECT');
+    expect(finalFor('GEM/2026/B/22')).toBe('KEEP');
+  });
+
   it('rebuilds a bid from a saved tender, to read its PDF again later', () => {
     const saved = tenders.upsert({
       jobId, tenderRef: 'GEM/2026/R/746323', tenderPortalId: '9983631', title: 'Custom Bid for Services - X',

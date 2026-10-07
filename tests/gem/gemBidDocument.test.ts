@@ -37,6 +37,8 @@ describe('reading a GeM bid PDF', () => {
       epbgPercentage: '5.00',
       evaluationMethod: 'Total value wise evaluation',
       totalQuantity: null,
+      preBidAt: null,
+      deliveryPincode: null,
     });
   });
 

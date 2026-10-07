@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { jobOutputDirectory, mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
+import { folderTitle, jobOutputDirectory, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
 import type { TenderRow } from '../../src/persistence/repositories/tenderRepository.js';
 import { DEFAULT_OUTPUT_STRUCTURE } from '../../src/publishing/outputStructure.js';
 
@@ -31,9 +31,17 @@ describe('publishJobWorkbook', () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(output.workbookPath);
     const sheet = workbook.getWorksheet('Approved Tenders')!;
-    expect(sheet.getCell('C2').value).toBe(tender.title);
-    expect(sheet.getCell('I2').value).toBe('Information Technology Department');
-    expect(sheet.getCell('J2').value).toBe('Tamil Nadu');
+    // The office's own columns, in its order.
+    expect(sheet.getRow(1).values).toEqual([undefined, 'SI No', 'TDR Number', 'Department', 'Location', 'Tender Title (short)',
+      'Project Nature', 'Tender Value', 'Bid Start Date', 'Bid End Date', 'EMD', 'Pre-bid Meeting Date', 'Eligibility',
+      'Eligibility Notes', 'View Tender Link', 'Tender Document Link']);
+    expect(sheet.getCell('A2').value).toBe(1);
+    expect(sheet.getCell('B2').value).toBe('PORTAL-1');
+    expect(sheet.getCell('C2').value).toBe('Information Technology Department');
+    expect(sheet.getCell('D2').value).toBe('Tamil Nadu');
+    expect(sheet.getCell('E2').value).toBe(tender.title);
+    expect(sheet.getCell('F2').value).toBe('Application Dev');
+    expect(sheet.getCell('H2').value).toBe('22-09-2026');
     expect(sheet.autoFilter).toBeTruthy();
 
     const tenderDirectory = tenderOutputDirectory(output.jobDirectory, tender, 1);
@@ -100,5 +108,52 @@ describe('mirrorTenderFolderToDrive', () => {
     const local = mkdtempSync(join(tmpdir(), 'tenderassist-local-')); dirs.push(local);
     expect(mirrorTenderFolderToDrive(join(local, 'x'), local, '  ')).toBeNull();
     expect(() => mirrorTenderFolderToDrive(tmpdir(), local, join(local, 'drive'))).toThrow(/outside/);
+  });
+});
+
+describe('copying a day to Drive', () => {
+  const dirs: string[] = [];
+  afterEach(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); dirs.length = 0; });
+
+  it('puts the approved tender folder and the day report sheet in the same places as on this computer', async () => {
+    const local = mkdtempSync(join(tmpdir(), 'tenderassist-local-')); dirs.push(local);
+    const drive = mkdtempSync(join(tmpdir(), 'tenderassist-drive-')); dirs.push(drive);
+    const tender = {
+      id: 't1', job_id: 'job-1', tender_ref: 'GEM/2026/B/8085066', tender_portal_id: '9900001',
+      title: 'Custom Bid for Services - Integrated Mobile Application for the WDRA 2 Web Portal',
+      organisation_chain: null, published_date: '2026-10-06T11:00:00+05:30', closing_date: '27-Oct-2026 03:00 PM',
+      department: 'WDRA', state_name: null, opening_date: null, product_category: 'Custom Bid for Services', value_in_rupees: '',
+      favorited: 0, favorited_at: null, detail_product_category: null, tender_category: null, detail_text: null,
+      detail_reviewed_at: null, document_links_json: '[]', created_at: '', updated_at: '',
+    } satisfies TenderRow;
+    const output = await publishJobWorkbook(local, '2026-10-06', 'job-1', [{ tender, automaticDecision: 'KEEP', documents: [], serialNumber: 1 }]);
+    const tenderFolder = tenderOutputDirectory(output.jobDirectory, tender, 1);
+    mkdirSync(join(tenderFolder, 'Documents'), { recursive: true });
+    writeFileSync(join(tenderFolder, 'Documents', 'GeM bid GEM-2026-B-8085066.pdf'), 'pdf');
+
+    mirrorTenderFolderToDrive(tenderFolder, local, drive);
+    const copied = mirrorReportSheetsToDrive(output.jobDirectory, local, drive, 'Approved-Tenders-06-10-2026.xlsx');
+
+    const day = join(drive, '10-2026', '06-10-2026');
+    expect(copied).toEqual([join(day, 'Approved-Tenders-06-10-2026.xlsx')]);
+    expect(existsSync(join(day, 'Approved-Tenders-06-10-2026.xlsx'))).toBe(true);
+    const driveTender = join(day, '06-10-2026_1_Integrated Mobile Application for the WDRA 2 Web Portal');
+    expect(existsSync(join(driveTender, 'Eligibility.xlsx'))).toBe(true);
+    expect(existsSync(join(driveTender, 'Documents', 'GeM bid GEM-2026-B-8085066.pdf'))).toBe(true);
+    // Nothing is copied when no Drive folder is set.
+    expect(mirrorReportSheetsToDrive(output.jobDirectory, local, '  ', 'Approved-Tenders-06-10-2026.xlsx')).toEqual([]);
+  });
+});
+
+describe('tender folder names', () => {
+  it('drop GeM’s "Custom Bid for Services -" and stay short, but keep finding folders saved under the old full name', () => {
+    expect(folderTitle('Custom Bid for Services - Integrated Mobile Application for the WDRA 2 Web Portal')).toBe('Integrated Mobile Application for the WDRA 2 Web Portal');
+    expect(folderTitle('x'.repeat(200))).toHaveLength(80);
+    const day = mkdtempSync(join(tmpdir(), 'tenderassist-day-'));
+    const tender = { title: 'Custom Bid for Services - Website redesign' } as TenderRow;
+    expect(tenderOutputDirectory(day, tender, 2, DEFAULT_OUTPUT_STRUCTURE, '2026-10-06')).toBe(join(day, '06-10-2026_2_Website redesign'));
+    mkdirSync(join(day, '06-10-2026_2_Custom Bid for Services - Website redesign'));
+    expect(tenderOutputDirectory(day, tender, 2, DEFAULT_OUTPUT_STRUCTURE, '2026-10-06')).toBe(join(day, '06-10-2026_2_Custom Bid for Services - Website redesign'));
+    rmSync(day, { recursive: true, force: true });
   });
 });

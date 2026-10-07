@@ -140,7 +140,8 @@ describe('runPostProcessing tender selection', () => {
     await workbook.xlsx.readFile(workbookPath);
     const sheet = workbook.getWorksheet('Approved Tenders')!;
     expect(sheet.rowCount).toBe(2);
-    expect(sheet.getCell('A2').value).toBe('2026_SELECTED');
+    expect(sheet.getCell('A2').value).toBe(1);
+    expect(sheet.getCell('B2').value).toBe('2026_SELECTED');
   });
 
   it('publishes an empty approved workbook and completes when the user selects nothing', async () => {

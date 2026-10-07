@@ -45,18 +45,41 @@ export const DEFAULT_GEM_CATEGORIES: readonly string[] = [
   'Web/mobile Based Ar/vr Or Ar/vr Related Application Development',
 ];
 
+/**
+ * Intent words in the way the office's own tenders are worded, taken from its
+ * list of tenders it pursued in 2026-27 (341 titles): these recognise 304 of
+ * them, against 134 for the earlier list. Single words count in a title only.
+ */
+export const RECOMMENDED_INTENT_WORDS: readonly string[] = [
+  'application development', 'app development', 'software development', 'software application', 'web application',
+  'web based', 'web portal', 'portal development', 'website development', 'website design', 'website redesign',
+  'website maintenance', 'web hosting', 'mobile app', 'mobile application', 'android app', 'e-learning',
+  'learning content', 'content development', 'interactive content', 'learning management system', 'learning system', 'e-content',
+  'IT projects', 'IT project', 'management system', 'management software', 'management portal', 'information system',
+  'HRMS', 'ERP', 'academic erp', 'chatbot', 'artificial intelligence', 'AI/ML', 'AI based', 'AI enabled', 'AI driven',
+  'whatsapp', 'cloud based software', 'SaaS', 'digital platform', 'digital transformation', 'digital application',
+  'application modules', 'document management system', 'automation software', 'examination software',
+  'examination system', 'computer based test', 'computer based examination', 'online recruitment', 'recruitment portal',
+  'online application', 'online registration', 'registration system', 'system implementation partner',
+  'complaint management', 'grievance management', 'visitor management', 'GIS implementation', 'e-commerce platform',
+  'full stack', 'software implementation', 'enterprise application', 'application service provider', 'online portal',
+  'system integrator', 'AR/VR', 'virtual reality', 'software support', 'software maintenance', 'application maintenance',
+  'software AMC', 'AMC of software', 'AMC of website', 'penetration testing', 'security audit of website',
+  'database administration', 'edtech', 'digitization', 'digitisation', 'website', 'websites', 'portal', 'software',
+  'app', 'apps', 'LMS', 'CMS', 'dashboard',
+];
+
+/**
+ * Words too broad to mean the office's work on their own: "AMC" alone keeps
+ * maintenance contracts for furnaces and RO plants.
+ */
+export const TOO_BROAD_INTENT_WORDS: readonly string[] = [
+  'amc', 'maintenance', 'support', 'service', 'services', 'system', 'management', 'online', 'digital', 'it', 'development', 'design', 'data',
+];
+
 export const DEFAULT_RUN_DEFAULTS: RunDefaults = {
   productCategories: CONFIGURED_SEARCHES.map((search) => search.productCategory),
-  keywords: [
-    'software development',
-    'web application',
-    'mobile application',
-    'information technology services',
-    'system integration',
-    'digitization',
-    'documentary film',
-    'video production',
-  ],
+  keywords: [...RECOMMENDED_INTENT_WORDS],
   // AMC work is wanted (software AMC), so it is not excluded.
   excludedKeywords: [
     'computer hardware',

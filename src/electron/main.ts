@@ -59,7 +59,8 @@ import type {
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
-import { mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
+import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
+import { resolveOutputStructure } from '../publishing/outputStructure.js';
 import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { retryTransient } from '../orchestration/transientRetry.js';
@@ -682,7 +683,8 @@ function publishStoredJob(jobId: string) {
     ? explicitlyProcessed
     : allItems.filter((item) => (item.manualReview?.decision ?? item.automaticDecision) === 'KEEP');
   const numbered = items.map((item) => ({ ...item, serialNumber: jobOutputs.serialNumberFor(plan, item.tender.id) }));
-  return publishJobWorkbook(plan.outputRoot, plan.outputDate, jobId, numbered, plan.structure, plan.runNumber);
+  const portal = getPortalDefinition(config.portalId);
+  return publishJobWorkbook(plan.outputRoot, plan.outputDate, jobId, numbered, plan.structure, plan.runNumber, { url: portal.url, name: portal.name });
 }
 
 // Jobs published before output plans existed get one from today's settings
@@ -1146,6 +1148,7 @@ const APPROVED_LIFECYCLES: readonly string[] = ['APPROVED', 'DOCUMENTS_COLLECTED
  */
 function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
   const problems: string[] = [];
+  const sheetsCopied = new Set<string>();
   for (const tender of tenderRows) {
     const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
     if (!lifecycle || !APPROVED_LIFECYCLES.includes(lifecycle)) continue;
@@ -1158,6 +1161,11 @@ function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
     if (!existsSync(folder)) continue;
     try {
       mirrorTenderFolderToDrive(folder, plan.outputRoot, driveRoot);
+      // The day's report sheet goes with it, once per day folder.
+      if (!sheetsCopied.has(plan.jobDirectory)) {
+        sheetsCopied.add(plan.jobDirectory);
+        mirrorReportSheetsToDrive(plan.jobDirectory, plan.outputRoot, driveRoot, resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook);
+      }
     } catch (error) {
       problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
     }

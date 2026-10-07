@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateExcludedScope, evaluateIntentKeywords } from '../../src/classification/intentGates.js';
+import { evaluateExcludedScope, evaluateIntentKeywords, evaluateTenderIntent } from '../../src/classification/intentGates.js';
 
 describe('intent gates', () => {
   it('matches full normalized intent phrases, case-insensitively', () => {
@@ -31,5 +31,17 @@ describe('intent gates', () => {
     ]);
     expect(result.result).toBe('REJECT');
     expect(result.matchedTerms).toEqual(['desktop computer']);
+  });
+});
+
+describe('evaluateTenderIntent', () => {
+  it('counts single words only in the title, and phrases anywhere with their words together', () => {
+    const words = ['website', 'mobile app', 'software AMC'];
+    expect(evaluateTenderIntent('Website redesign', '', words).intent.matchedTerms).toEqual(['website']);
+    // The page around a tender mentions "website" and "app" everywhere.
+    expect(evaluateTenderIntent('Lease of public toilet', 'Visit the portal website. Download the mobile version of the app.', words).intent.result).toBe('REJECT');
+    expect(evaluateTenderIntent('Field staff tracking', 'Scope: develop a mobile app for field staff.', words).intent.matchedTerms).toEqual(['mobile app']);
+    expect(evaluateTenderIntent('AMC for furnaces and software', 'AMC of furnace software', words).intent.result).toBe('REJECT');
+    expect(evaluateTenderIntent('', '', words).intent.result).toBe('UNCERTAIN');
   });
 });

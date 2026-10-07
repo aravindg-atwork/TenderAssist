@@ -8,7 +8,7 @@ import type { RunConfiguration } from '../config/runConfiguration.js';
 import { detailTextFor, navigateToMyTenders, NotInMyTendersError, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
-import { evaluateIntentKeywords, evaluateExcludedScope, type TextGateResult } from '../classification/intentGates.js';
+import { evaluateIntentKeywords, evaluateExcludedScope, evaluateTenderIntent, type TextGateResult } from '../classification/intentGates.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
 import type { PaceAction } from './actionPacer.js';
@@ -122,6 +122,7 @@ export async function runClassificationPhase(
 
   const evaluatedAgainst = `${config.searchDate}T23:59:59+05:30`;
   const matchedIntent = new Map<string, string[]>();
+  const titleIntents = new Map<string, TextGateResult>();
   // Each tender is decided from its full details page, and a kept tender's
   // documents are downloaded before that page closes.
   const recordDecision = (tender: TenderRow, detail: TenderDetailSnapshot) => {
@@ -175,7 +176,10 @@ export async function runClassificationPhase(
       classifierVersion: CLASSIFIER_VERSION,
     });
 
-    const g3 = evaluateIntentKeywords(`${tender.title} ${detail.bodyText}`, config.keywords);
+    // The portal's own one-line "Work Description" reads like a title; the rest of the page only counts phrases.
+    const workDescription = detail.fields.find((field) => /^works*description$/i.test(field.label))?.value ?? '';
+    const { title: titleIntent, intent: g3 } = evaluateTenderIntent(`${tender.title} ${workDescription}`, detail.bodyText, config.keywords);
+    titleIntents.set(tender.id, titleIntent);
     matchedIntent.set(tender.id, g3.matchedTerms);
     classifications.saveGate({
       tenderId: tender.id,
@@ -207,7 +211,7 @@ export async function runClassificationPhase(
     let answer: RunQuestionAnswer | null = null;
     const final = classifications.getFinalForTender(tender.id);
     const matched = matchedIntent.get(tender.id) ?? [];
-    const reason = deps.askOperator ? unsureReason(final, evaluateIntentKeywords(tender.title, config.keywords), matched) : null;
+    const reason = deps.askOperator ? unsureReason(final, titleIntents.get(tender.id) ?? evaluateIntentKeywords(tender.title, config.keywords, { wholePhrase: true }), matched) : null;
     if (deps.askOperator && reason) {
       answer = await deps.askOperator(tender, detail, reason);
       if (isCancellationRequested(deps.signal)) return;
