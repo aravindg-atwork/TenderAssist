@@ -1,6 +1,6 @@
 {
   "name": "tenderassist",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "description": "Desktop automation for finding and shortlisting relevant government tenders",
   "author": "TenderAssist",
   "private": true,
@@ -50,7 +50,8 @@
       "dist/**/*",
       "renderer/dist/**/*",
       "src/persistence/migrations/**/*",
-      "package.json"
+      "package.json",
+      "google-oauth-client.json"
     ],
     "asar": true,
     "publish": [

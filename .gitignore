@@ -7,3 +7,6 @@ release/
 *.db-wal
 *.db-shm
 .env
+
+# Google sign-in credential for Drive upload: packed into the app build, never committed.
+google-oauth-client.json

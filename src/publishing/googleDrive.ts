@@ -29,6 +29,23 @@ export class GoogleDriveError extends Error {
   }
 }
 
+/**
+ * The app's own Google sign-in credential, from the file Google Cloud gives
+ * for a Desktop app ({"installed": {"client_id", "client_secret", …}}). It is
+ * packed into the build; operators never see or type it.
+ */
+export function parseGoogleClientFile(text: string): DriveCredentials | null {
+  try {
+    const parsed = JSON.parse(text) as { installed?: Record<string, unknown>; web?: Record<string, unknown> } & Record<string, unknown>;
+    const client = parsed.installed ?? parsed.web ?? parsed;
+    const clientId = typeof client.client_id === 'string' ? client.client_id.trim() : '';
+    const clientSecret = typeof client.client_secret === 'string' ? client.client_secret.trim() : '';
+    return clientId && clientSecret ? { clientId, clientSecret } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The folder id from a Drive folder link (or the id itself). */
 export function parseDriveFolderId(input: string): string | null {
   const value = input.trim();

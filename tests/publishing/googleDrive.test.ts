@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GoogleDriveClient, parseDriveFolderId, signInWithBrowser } from '../../src/publishing/googleDrive.js';
+import { GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser } from '../../src/publishing/googleDrive.js';
 
 interface Item { id: string; name: string; mimeType: string; parents: string[]; content?: Buffer; md5Checksum?: string }
 
@@ -137,5 +137,14 @@ describe('signing in to Google in the browser', () => {
       back.searchParams.set('error', 'access_denied');
       setTimeout(() => { void fetch(back.toString()); }, 10);
     }, { timeoutMs: 5_000 })).rejects.toThrow(/cancelled/);
+  });
+});
+
+describe('the app’s own Google sign-in credential', () => {
+  it('is read from the file Google Cloud gives for a Desktop app', () => {
+    expect(parseGoogleClientFile('{"installed":{"client_id":"abc.apps.googleusercontent.com","client_secret":"GOCSPX-x","redirect_uris":["http://localhost"]}}'))
+      .toEqual({ clientId: 'abc.apps.googleusercontent.com', clientSecret: 'GOCSPX-x' });
+    expect(parseGoogleClientFile('{"installed":{"client_id":"abc"}}')).toBeNull();
+    expect(parseGoogleClientFile('not json')).toBeNull();
   });
 });

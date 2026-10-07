@@ -2,7 +2,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createReadStream, existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir, arch, release } from 'node:os';
 import { createDatabase, withTransaction } from '../persistence/db.js';
@@ -62,7 +62,7 @@ import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
-import { GoogleDriveClient, parseDriveFolderId, signInWithBrowser } from '../publishing/googleDrive.js';
+import { GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser, type DriveCredentials } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
 import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
@@ -661,24 +661,12 @@ ipcMain.handle('save-publishing-settings', (_event, portalId: string, settings) 
 ipcMain.handle('get-google-drive', () => googleDriveStatus());
 
 ipcMain.handle('save-google-drive', async (_event, input: unknown): Promise<GoogleDriveStatus> => {
-  const value = (input ?? {}) as { clientId?: unknown; clientSecret?: unknown; folderLink?: unknown };
-  const current = googleDriveSettings.get();
-  const clientId = typeof value.clientId === 'string' ? value.clientId.trim() : current.clientId;
+  const value = (input ?? {}) as { folderLink?: unknown };
   const folderLink = typeof value.folderLink === 'string' ? value.folderLink.trim() : '';
   const folderId = folderLink ? parseDriveFolderId(folderLink) : '';
   if (folderLink && !folderId) throw new Error('That does not look like a Google Drive folder link. Open the folder in Drive and copy the address from the browser.');
-  const secret = typeof value.clientSecret === 'string' ? value.clientSecret.trim() : '';
-  const credentialsChanged = clientId !== current.clientId || Boolean(secret);
-  googleDriveSettings.save({
-    ...current,
-    clientId,
-    clientSecretEncrypted: secret ? await encryptText(secret) : current.clientSecretEncrypted,
-    // New sign-in details need a new sign-in.
-    refreshTokenEncrypted: credentialsChanged ? null : current.refreshTokenEncrypted,
-    accountEmail: credentialsChanged ? '' : current.accountEmail,
-    folderId: folderId ?? '',
-    folderName: folderId === current.folderId ? current.folderName : '',
-  });
+  const current = googleDriveSettings.get();
+  googleDriveSettings.save({ ...current, folderId: folderId ?? '', folderName: folderId === current.folderId ? current.folderName : '' });
   // Check a new folder straight away when already signed in.
   const drive = await googleDriveClient();
   if (drive && folderId && folderId !== current.folderId) {
@@ -689,21 +677,28 @@ ipcMain.handle('save-google-drive', async (_event, input: unknown): Promise<Goog
 });
 
 ipcMain.handle('connect-google-drive', async (): Promise<GoogleDriveStatus> => {
+  const credentials = builtInGoogleClient();
+  if (!credentials) throw new Error('This copy of TenderAssist was built without Google sign-in. Ask for a build that includes it.');
   const settings = googleDriveSettings.get();
-  const clientSecret = await decryptText(settings.clientSecretEncrypted);
-  if (!settings.clientId || !clientSecret) throw new Error('Enter the Client ID and Client secret first, then save.');
-  if (!settings.folderId) throw new Error('Enter the Drive folder link first, then save.');
-  const { refreshToken } = await signInWithBrowser({ clientId: settings.clientId, clientSecret }, (url) => shell.openExternal(url));
-  const client = new GoogleDriveClient({ clientId: settings.clientId, clientSecret }, refreshToken);
-  const [account, folder] = await Promise.all([client.account(), client.folder(settings.folderId)]);
-  googleDriveSettings.save({
-    ...googleDriveSettings.get(),
-    refreshTokenEncrypted: await encryptText(refreshToken),
-    accountEmail: account.email,
-    folderName: folder.name,
-    connectedAt: new Date().toISOString(),
-  });
-  return googleDriveStatus();
+  if (!settings.folderId) throw new Error('Paste the Drive folder link and save it first.');
+  try {
+    const { refreshToken } = await signInWithBrowser(credentials, async (url) => {
+      googleSignInLink = url;
+      await shell.openExternal(url);
+    });
+    const client = new GoogleDriveClient(credentials, refreshToken);
+    const [account, folder] = await Promise.all([client.account(), client.folder(settings.folderId)]);
+    googleDriveSettings.save({
+      ...googleDriveSettings.get(),
+      refreshTokenEncrypted: await encryptText(refreshToken),
+      accountEmail: account.email,
+      folderName: folder.name,
+      connectedAt: new Date().toISOString(),
+    });
+    return googleDriveStatus();
+  } finally {
+    googleSignInLink = null;
+  }
 });
 
 ipcMain.handle('check-google-drive', async (): Promise<GoogleDriveStatus> => {
@@ -1262,19 +1257,31 @@ async function decryptText(value: string | null): Promise<string | null> {
 }
 
 /** A Drive client for the saved sign-in, or null when Drive is not set up and signed in. */
+/**
+ * TenderAssist's own Google sign-in credential, packed into the build from
+ * google-oauth-client.json (kept out of git). Operators never see it.
+ */
+function builtInGoogleClient(): DriveCredentials | null {
+  try { return parseGoogleClientFile(readFileSync(join(app.getAppPath(), 'google-oauth-client.json'), 'utf8')); }
+  catch { return null; }
+}
+
 async function googleDriveClient(): Promise<{ client: GoogleDriveClient; folderId: string } | null> {
   const settings = googleDriveSettings.get();
-  const clientSecret = await decryptText(settings.clientSecretEncrypted);
+  const credentials = builtInGoogleClient();
   const refreshToken = await decryptText(settings.refreshTokenEncrypted);
-  if (!settings.clientId || !clientSecret || !refreshToken || !settings.folderId) return null;
-  return { client: new GoogleDriveClient({ clientId: settings.clientId, clientSecret }, refreshToken), folderId: settings.folderId };
+  if (!credentials || !refreshToken || !settings.folderId) return null;
+  return { client: new GoogleDriveClient(credentials, refreshToken), folderId: settings.folderId };
 }
+
+// The Google sign-in address while a sign-in waits, for opening it in another browser.
+let googleSignInLink: string | null = null;
 
 async function googleDriveStatus(): Promise<GoogleDriveStatus> {
   const settings = googleDriveSettings.get();
   return {
-    clientId: settings.clientId,
-    hasClientSecret: Boolean(settings.clientSecretEncrypted),
+    available: builtInGoogleClient() !== null,
+    signInLink: googleSignInLink,
     folderId: settings.folderId,
     folderName: settings.folderName,
     accountEmail: settings.accountEmail,

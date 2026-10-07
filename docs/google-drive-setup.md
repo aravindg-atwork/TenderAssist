@@ -1,6 +1,11 @@
 # Uploading approved tenders to Google Drive: one-time setup
 
-TenderAssist uploads approved tenders straight to a Google Drive folder through Google's Drive API. Nothing needs to be installed on the computer, but Google needs to know about TenderAssist once. Someone who can manage the company's Google account does steps 1–4, about 10 minutes. The operator does step 5.
+TenderAssist uploads approved tenders straight to a Google Drive folder through Google's Drive API. Nothing needs installing on the computer.
+
+There are two parts:
+
+- **Once, for whoever builds TenderAssist** (steps 1–5): register the app with Google and put its credential into the build.
+- **For the operator** (step 6): paste the Drive folder link and sign in. Operators never see a Client ID or secret.
 
 ## 1. Create a project
 
@@ -28,11 +33,23 @@ TenderAssist uploads approved tenders straight to a Google Drive folder through 
 2. Application type: **Desktop app**. Name: `TenderAssist`. Choose **Create**.
 3. Copy the **Client ID** (ends in `.apps.googleusercontent.com`) and the **Client secret**.
 
-## 5. In TenderAssist (the operator)
+## 5. Put the credential into the build (developer)
+
+1. In **Credentials**, download the Desktop client's JSON (the download icon).
+2. Save it in the project root as `google-oauth-client.json`.
+   - It is listed in `.gitignore`, so it is never committed.
+   - `package.json` → `build.files` packs it into the app.
+3. Build the installer as usual.
+4. Settings shows "This copy of TenderAssist was built without Google sign-in" when the file is missing.
+
+Google treats a Desktop app's client secret as part of the app, not as a password. Keeping it out of git still keeps it out of public view.
+
+## 6. In TenderAssist (the operator)
 
 1. Open **Settings → Folders → Upload to Google Drive**.
-2. Paste the **Drive folder link** (open the folder in Drive and copy the browser address), the **Client ID** and the **Client secret**. Choose **Save these details**.
+2. Paste the **Drive folder link** (open the folder in Drive and copy the browser address), then choose **Save the folder**.
 3. Choose **Sign in to Google**. The browser opens: choose the account and allow access. When the page says "Signed in", go back to TenderAssist.
+   - If no browser window opens, or it shows an error (for example Chrome's paused sign-in), choose **Copy the sign-in link** and open it in a private (Incognito) window.
 4. Settings now shows "Signed in as … Uploading to …".
 
 The signed-in account must be able to add files to the folder, which means Editor access.
