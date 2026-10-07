@@ -38,7 +38,7 @@ import { waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
 import { suggestWords, workDescriptionFrom, type DecidedTenderText, type WordSuggestions } from '../review/wordSuggestions.js';
-import { RUN_QUESTION_TIMEOUT_MS, waitForAnswer, type RunQuestion, type RunQuestionAnswer } from '../orchestration/runQuestion.js';
+import { RUN_QUESTION_TIMEOUT_MS, waitForAnswer, withRunState, type RunQuestion, type RunQuestionAnswer } from '../orchestration/runQuestion.js';
 import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
 import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing, saveTenderFiles, type DocumentDownloader } from '../orchestration/postProcessingRunner.js';
 import { GemClient } from '../gem/gemClient.js';
@@ -180,7 +180,7 @@ function preflightFor(portal: PortalDefinition, settings: PublishingSettings) {
 }
 
 function emitJobUpdate(raw: AuthJobUpdate): void {
-  const update: AuthJobUpdate = { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion, ...raw };
+  const update: AuthJobUpdate = withRunState(raw, { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion });
   lastActiveJobUpdate = update;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
 }
@@ -944,6 +944,8 @@ interface RunContext {
   jobId?: string;
   /** The session's first date also checks every undecided favourite, whatever its date. */
   checkAllUndecided?: boolean;
+  /** A question went unanswered: the operator is away, so the rest of the run does not wait. */
+  operatorAway?: boolean;
   /** GeM runs: no portal page; files come straight from GeM. */
   gem?: GemClient;
   downloader?: DocumentDownloader;
@@ -1274,9 +1276,22 @@ function carryOverUndecidedFavourites(jobId: string, portalId: string, searchDat
  * is open. Their answer is their decision on the tender; with no answer the
  * tender waits in "Needs a look" with a note saying why.
  */
+/** The durable tender a run's tender belongs to, recorded now if it is new. */
+function syncedOpportunityId(tender: TenderRow, ctx: RunContext, jobId: string): string | null {
+  let opportunityId = tender.opportunity_id ?? null;
+  syncOpportunities('question', () => { opportunityId = opportunities.recordSighting(tender, ctx.portal.id, { jobId }).id; });
+  return opportunityId;
+}
+
 async function askOperatorDuringRun(ctx: RunContext, jobId: string, tender: TenderRow, reason: string, documentUrl?: string): Promise<RunQuestionAnswer | null> {
   const signal = ctx.abortController.signal;
   const fresh = tenders.getById(tender.id) ?? tender;
+  if (ctx.operatorAway) {
+    // An earlier question went unanswered: leave this one for the Inbox without waiting.
+    const id = syncedOpportunityId(fresh, ctx, jobId);
+    if (id) syncOpportunities('question', () => opportunities.addNote(id, `Left for you: an earlier question in this run went unanswered, so TenderAssist stopped asking. ${reason}`, 'automation', { jobId }));
+    return null;
+  }
   activeQuestion = {
     id: randomUUID(),
     tenderTitle: fresh.title,
@@ -1291,20 +1306,23 @@ async function askOperatorDuringRun(ctx: RunContext, jobId: string, tender: Tend
     answerBy: new Date(Date.now() + RUN_QUESTION_TIMEOUT_MS).toISOString(),
   };
   if (lastActiveJobUpdate) emitJobUpdate({ ...lastActiveJobUpdate, outcome: undefined, statusMessage: `Waiting for your answer on ${fresh.title}.` });
+  // Flash the taskbar button so the question is noticed behind other windows.
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.flashFrame(true);
   const answer = await waitForAnswer((deliver) => { pendingAnswer = deliver; }, RUN_QUESTION_TIMEOUT_MS, signal);
   activeQuestion = undefined;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(false);
+  if (!answer && !signal.aborted) ctx.operatorAway = true;
   if (lastActiveJobUpdate) {
     emitJobUpdate({
       ...lastActiveJobUpdate,
       question: undefined,
       statusMessage: answer === 'KEEP' ? `Kept ${fresh.title}. Saving its documents.`
         : answer === 'SKIP' ? `Skipped ${fresh.title}.`
-          : `No answer, so ${fresh.title} waits in Needs a look.`,
+          : `No answer, so ${fresh.title} waits in Needs a look. TenderAssist will not stop to ask again in this run.`,
     });
   }
   if (signal.aborted) return null;
-  let opportunityId = fresh.opportunity_id ?? null;
-  syncOpportunities('question', () => { opportunityId = opportunities.recordSighting(fresh, ctx.portal.id, { jobId }).id; });
+  const opportunityId = syncedOpportunityId(fresh, ctx, jobId);
   if (answer) {
     const note = 'Answered during the run.';
     workflow.saveReview(tender.id, answer === 'KEEP' ? 'KEEP' : 'REJECT', note);

@@ -49,3 +49,15 @@ export function waitForAnswer(
     register((answer) => finish(answer));
   });
 }
+
+/**
+ * What the screen is sent for a run update. The open question always comes
+ * from the run itself: an update copied from an earlier one carries that
+ * update's empty question, which must never hide the one waiting now.
+ */
+export function withRunState<T extends { question?: RunQuestion }, B = unknown>(
+  raw: T,
+  state: { question: RunQuestion | undefined; searchDate?: string; batch?: B }
+): T & { question: RunQuestion | undefined; searchDate?: string; batch?: B } {
+  return { searchDate: state.searchDate, batch: state.batch, ...raw, question: state.question };
+}
