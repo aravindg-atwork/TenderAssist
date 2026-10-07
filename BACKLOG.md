@@ -18,7 +18,7 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - Code: `src/review/wordSuggestions.ts`.
 - Tests: 369 of 369 pass.
 
-## Done after 0.4.8 (7 Oct 2026; built and tested, not yet in an installer)
+## Done in 0.4.9 (7 Oct 2026; local installer built)
 
 - **Report sheet in the office's 15 columns** (`src/publishing/reportSheet.ts`): SI No, TDR Number, Department, Location, Tender Title (short), Project Nature, Tender Value, Bid Start/End Date, EMD, Pre-bid Meeting Date, Eligibility ("To check"), Eligibility Notes, and links to the tender and to its Documents folder.
   - The folder link is relative, so it works in the Drive copy too.
@@ -33,6 +33,7 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - Replayed on real data: 304/341 of their tenders recognised (was 134). Today's GeM junk (AMC furnaces, RO plants) is gone, and "Hiring of Agency for IT Projects" is kept.
   - On Tamil Nadu, the recommended words would have matched 50/65 junk tenders under the old rule; the new rule matches 1.
 - **Direct Google Drive upload** (see Next up): sign in once in Settings; approved tenders and the day report sheet are uploaded, skipping unchanged files. The sign-in is encrypted and left out of backups.
+- Real Drive check (7 Oct): signed in as tenders@bowandbaan.com, folder "Claude TN Tenders- 2026-27" writable, a test file uploaded, and a second upload skipped it as unchanged.
 - Tests: 421 of 421 pass.
 
 ## Done in 0.4.8 (7 Oct 2026; local installer built)
@@ -82,13 +83,13 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- **Google Drive upload (direct, no Google app).** Built and tested against a stand-in Drive. Not yet tried against the real Drive.
-  - Code: `src/publishing/googleDrive.ts`, Settings → Folders → Upload to Google Drive, and `uploadApprovedTendersToGoogleDrive` in `main.ts`.
-  - Setup steps for whoever manages the Google account: `docs/google-drive-setup.md`.
-  - The operator's folder: https://drive.google.com/drive/folders/1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2.
-  - To do: create the Desktop OAuth client (Internal consent screen if Workspace), sign in, approve one tender, and check that the folder and report sheet appear in Drive.
-- Build 0.4.9 after that check.
-- **Folder layout today:** `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx`, with `Approved-Tenders-DD-MM-YYYY.xlsx` (the report sheet) in the day folder. Confirm with the operator that this is what they want.
+- Install `release/TenderAssist-Setup-0.4.9.exe`.
+  - In Settings → Folders → Upload to Google Drive: paste the folder link, Client ID and secret, Save, then Sign in to Google as tenders@bowandbaan.com.
+    - The Desktop sign-in opens Chrome; if Chrome shows a 400 error, use an Incognito window.
+  - Approve one tender and check its folder and the report sheet in "Claude TN Tenders- 2026-27".
+  - In Settings → What to look for: Add the recommended words, remove "AMC", and remove "annual maintenance contract" from the excluded words if AMC work is wanted.
+- The Google consent screen is External / Testing with tenders@bowandbaan.com as a test user, so Google ends the sign-in every 7 days (Settings then says to sign in again). Making the project Internal under the bowandbaan.com Workspace would remove that.
+- **Folder layout:** confirm `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx` + the day report sheet is what the operator wants.
 
 ## Later
 
@@ -101,4 +102,4 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - final reviewer pass on the maroon/cream look;
   - write `DESIGN.md` and `.impeccable/design.json`;
   - don't commit `.impeccable/review` screenshots (real data).
-- **Release:** next local installer after 0.4.8 (local build only; no push, no release upload).
+- **Release:** next local installer after 0.4.9 (local build only; no push, no release upload).

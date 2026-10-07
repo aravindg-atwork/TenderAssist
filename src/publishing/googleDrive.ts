@@ -248,6 +248,9 @@ export class GoogleDriveClient {
       }
       if (status === 401) this.token = null;
       const detail = response ? await response.json().then((body: { error?: { message?: string } }) => body.error?.message ?? '').catch(() => '') : '';
+      if (/has not been used in project|is disabled/i.test(detail)) {
+        throw new GoogleDriveError('The Google Drive API is switched off in the Google Cloud project. Open console.cloud.google.com → APIs & Services → Library → Google Drive API → Enable, wait a few minutes, then try again.', status);
+      }
       throw new GoogleDriveError(status === 404
         ? 'The Drive folder was not found. Check the folder link, and that the signed-in account can open it.'
         : `Google Drive refused the request (HTTP ${status}${detail ? `: ${detail}` : ''}).`, status);
