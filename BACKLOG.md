@@ -32,7 +32,8 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
   - A warning for words that are too broad, such as "AMC".
   - Replayed on real data: 304/341 of their tenders recognised (was 134). Today's GeM junk (AMC furnaces, RO plants) is gone, and "Hiring of Agency for IT Projects" is kept.
   - On Tamil Nadu, the recommended words would have matched 50/65 junk tenders under the old rule; the new rule matches 1.
-- Tests: 415 of 415 pass.
+- **Direct Google Drive upload** (see Next up): sign in once in Settings; approved tenders and the day report sheet are uploaded, skipping unchanged files. The sign-in is encrypted and left out of backups.
+- Tests: 421 of 421 pass.
 
 ## Done in 0.4.8 (7 Oct 2026; local installer built)
 
@@ -81,9 +82,11 @@ Last updated: 7 Oct 2026. Pick up from **Next up**.
 
 ## Next up
 
-- **Drive copy on this PC.** Google Drive for desktop is not installed, so there is no Drive folder to copy into. The operator's folder is https://drive.google.com/drive/folders/1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2.
-  - Once Drive for desktop shows `G:\`, set that folder in Settings → Folders (both websites).
-  - Then approve one tender and check that its folder and the day's report sheet appear in Drive.
+- **Google Drive upload (direct, no Google app).** Built and tested against a stand-in Drive. Not yet tried against the real Drive.
+  - Code: `src/publishing/googleDrive.ts`, Settings → Folders → Upload to Google Drive, and `uploadApprovedTendersToGoogleDrive` in `main.ts`.
+  - Setup steps for whoever manages the Google account: `docs/google-drive-setup.md`.
+  - The operator's folder: https://drive.google.com/drive/folders/1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2.
+  - To do: create the Desktop OAuth client (Internal consent screen if Workspace), sign in, approve one tender, and check that the folder and report sheet appear in Drive.
 - Build 0.4.9 after that check.
 - **Folder layout today:** `MM-YYYY / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx`, with `Approved-Tenders-DD-MM-YYYY.xlsx` (the report sheet) in the day folder. Confirm with the operator that this is what they want.
 

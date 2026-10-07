@@ -7,6 +7,7 @@ import { runMigrations } from '../../src/persistence/migrate.js';
 import { createDatabase } from '../../src/persistence/db.js';
 import { PortalCredentialRepository } from '../../src/persistence/repositories/portalCredentialRepository.js';
 import { applyPendingRestore, createBackup, inspectBackup, stageRestore } from '../../src/system/backup.js';
+import { EMPTY_GOOGLE_DRIVE_SETTINGS, GoogleDriveSettingsRepository } from '../../src/persistence/repositories/googleDriveSettingsRepository.js';
 
 const MIGRATIONS = join(process.cwd(), 'src', 'persistence', 'migrations');
 
@@ -38,6 +39,18 @@ describe('backup and restore', () => {
     expect(credential).toEqual({ loginId: 'operator', encryptedPasswordBase64: null });
     // The live database keeps its password.
     expect(new PortalCredentialRepository(db).get('tamil-nadu').encryptedPasswordBase64).toBe('c2VjcmV0');
+  });
+
+  it('leaves the Google Drive sign-in and client secret out of the copy, keeping the folder', () => {
+    const drive = new GoogleDriveSettingsRepository(db);
+    drive.save({ ...EMPTY_GOOGLE_DRIVE_SETTINGS, clientId: 'client', clientSecretEncrypted: 'c2VjcmV0', refreshTokenEncrypted: 'dG9rZW4=', folderId: 'FOLDER', folderName: 'Tenders', accountEmail: 'fe1@example.com', connectedAt: '2026-10-07' });
+    const target = join(dir, 'backup.db');
+    createBackup(db, target);
+    const copy = new DatabaseSync(target);
+    const copied = new GoogleDriveSettingsRepository(copy).get();
+    copy.close();
+    expect(copied).toEqual({ ...EMPTY_GOOGLE_DRIVE_SETTINGS, clientId: 'client', folderId: 'FOLDER', folderName: 'Tenders' });
+    expect(drive.get().refreshTokenEncrypted).toBe('dG9rZW4=');
   });
 
   it('replaces an existing file at the chosen path', () => {

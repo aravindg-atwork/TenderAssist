@@ -2,7 +2,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createReadStream, existsSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir, arch, release } from 'node:os';
 import { createDatabase, withTransaction } from '../persistence/db.js';
@@ -55,12 +55,15 @@ import type {
   SavePortalCredentialInput,
   AuthJobUpdate,
   SettingsSection,
+  GoogleDriveStatus,
 } from './ipcTypes.js';
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
+import { GoogleDriveClient, parseDriveFolderId, signInWithBrowser } from '../publishing/googleDrive.js';
+import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
 import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { retryTransient } from '../orchestration/transientRetry.js';
@@ -127,6 +130,7 @@ const portalCategories = new PortalCategoryRepository(db);
 const displaySettings = new DisplaySettingsRepository(db);
 const jobOutputs = new JobOutputRepository(db);
 const opportunities = new OpportunityRepository(db);
+const googleDriveSettings = new GoogleDriveSettingsRepository(db);
 const opportunitySync = { tenders, classifications, opportunities, workflow };
 
 // Tender records are a view over run data; a failure to update them must
@@ -654,6 +658,67 @@ ipcMain.handle('get-portal-credential-settings', async (_event, portalId: string
 
 ipcMain.handle('get-publishing-settings', (_event, portalId: string) => publishingSettings.get(getPortalDefinition(portalId).id));
 ipcMain.handle('save-publishing-settings', (_event, portalId: string, settings) => publishingSettings.save(settings, getPortalDefinition(portalId).id));
+ipcMain.handle('get-google-drive', () => googleDriveStatus());
+
+ipcMain.handle('save-google-drive', async (_event, input: unknown): Promise<GoogleDriveStatus> => {
+  const value = (input ?? {}) as { clientId?: unknown; clientSecret?: unknown; folderLink?: unknown };
+  const current = googleDriveSettings.get();
+  const clientId = typeof value.clientId === 'string' ? value.clientId.trim() : current.clientId;
+  const folderLink = typeof value.folderLink === 'string' ? value.folderLink.trim() : '';
+  const folderId = folderLink ? parseDriveFolderId(folderLink) : '';
+  if (folderLink && !folderId) throw new Error('That does not look like a Google Drive folder link. Open the folder in Drive and copy the address from the browser.');
+  const secret = typeof value.clientSecret === 'string' ? value.clientSecret.trim() : '';
+  const credentialsChanged = clientId !== current.clientId || Boolean(secret);
+  googleDriveSettings.save({
+    ...current,
+    clientId,
+    clientSecretEncrypted: secret ? await encryptText(secret) : current.clientSecretEncrypted,
+    // New sign-in details need a new sign-in.
+    refreshTokenEncrypted: credentialsChanged ? null : current.refreshTokenEncrypted,
+    accountEmail: credentialsChanged ? '' : current.accountEmail,
+    folderId: folderId ?? '',
+    folderName: folderId === current.folderId ? current.folderName : '',
+  });
+  // Check a new folder straight away when already signed in.
+  const drive = await googleDriveClient();
+  if (drive && folderId && folderId !== current.folderId) {
+    const folder = await drive.client.folder(folderId);
+    googleDriveSettings.save({ ...googleDriveSettings.get(), folderName: folder.name });
+  }
+  return googleDriveStatus();
+});
+
+ipcMain.handle('connect-google-drive', async (): Promise<GoogleDriveStatus> => {
+  const settings = googleDriveSettings.get();
+  const clientSecret = await decryptText(settings.clientSecretEncrypted);
+  if (!settings.clientId || !clientSecret) throw new Error('Enter the Client ID and Client secret first, then save.');
+  if (!settings.folderId) throw new Error('Enter the Drive folder link first, then save.');
+  const { refreshToken } = await signInWithBrowser({ clientId: settings.clientId, clientSecret }, (url) => shell.openExternal(url));
+  const client = new GoogleDriveClient({ clientId: settings.clientId, clientSecret }, refreshToken);
+  const [account, folder] = await Promise.all([client.account(), client.folder(settings.folderId)]);
+  googleDriveSettings.save({
+    ...googleDriveSettings.get(),
+    refreshTokenEncrypted: await encryptText(refreshToken),
+    accountEmail: account.email,
+    folderName: folder.name,
+    connectedAt: new Date().toISOString(),
+  });
+  return googleDriveStatus();
+});
+
+ipcMain.handle('check-google-drive', async (): Promise<GoogleDriveStatus> => {
+  const drive = await googleDriveClient();
+  if (!drive) throw new Error('Google Drive is not signed in yet.');
+  const [account, folder] = await Promise.all([drive.client.account(), drive.client.folder(drive.folderId)]);
+  googleDriveSettings.save({ ...googleDriveSettings.get(), accountEmail: account.email, folderName: folder.name });
+  return googleDriveStatus();
+});
+
+ipcMain.handle('disconnect-google-drive', async (): Promise<GoogleDriveStatus> => {
+  googleDriveSettings.save({ ...googleDriveSettings.get(), refreshTokenEncrypted: null, accountEmail: '', connectedAt: null });
+  return googleDriveStatus();
+});
+
 ipcMain.handle('get-automation-pacing', () => automationSettings.get());
 ipcMain.handle('save-automation-pacing', (_event, settings) => automationSettings.save(settings));
 ipcMain.handle('select-publishing-folder', async (_event, initialPath?: string): Promise<string | null> => {
@@ -1170,6 +1235,8 @@ function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
       problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  // Also uploaded straight to Google Drive when it is signed in (in the background).
+  uploadApprovedTendersToGoogleDrive(tenderRows);
   return problems;
 }
 
@@ -1179,6 +1246,98 @@ function reportDriveProblems(problems: string[]): void {
     'Not copied to Drive',
     `The approval is saved, and the files are safe in the local output folder, but they could not be copied to Drive:\n\n${problems.join('\n')}\n\nCheck that the Drive folder in Settings exists and Google Drive is running, then approve again.`
   );
+}
+
+// ── Google Drive: direct upload through Google's Drive API ──────────────────
+
+async function encryptText(value: string): Promise<string> {
+  if (!(await safeStorage.isAsyncEncryptionAvailable())) throw new Error('Secure storage is not available on this computer, so the Google sign-in cannot be saved.');
+  return (await safeStorage.encryptStringAsync(value)).toString('base64');
+}
+
+async function decryptText(value: string | null): Promise<string | null> {
+  if (!value) return null;
+  try { return (await safeStorage.decryptStringAsync(Buffer.from(value, 'base64'))).result; }
+  catch { return null; }
+}
+
+/** A Drive client for the saved sign-in, or null when Drive is not set up and signed in. */
+async function googleDriveClient(): Promise<{ client: GoogleDriveClient; folderId: string } | null> {
+  const settings = googleDriveSettings.get();
+  const clientSecret = await decryptText(settings.clientSecretEncrypted);
+  const refreshToken = await decryptText(settings.refreshTokenEncrypted);
+  if (!settings.clientId || !clientSecret || !refreshToken || !settings.folderId) return null;
+  return { client: new GoogleDriveClient({ clientId: settings.clientId, clientSecret }, refreshToken), folderId: settings.folderId };
+}
+
+async function googleDriveStatus(): Promise<GoogleDriveStatus> {
+  const settings = googleDriveSettings.get();
+  return {
+    clientId: settings.clientId,
+    hasClientSecret: Boolean(settings.clientSecretEncrypted),
+    folderId: settings.folderId,
+    folderName: settings.folderName,
+    accountEmail: settings.accountEmail,
+    signedIn: Boolean(settings.refreshTokenEncrypted),
+    encryptionAvailable: await safeStorage.isAsyncEncryptionAvailable(),
+    lastUpload: lastDriveUpload,
+  };
+}
+
+let lastDriveUpload: GoogleDriveStatus['lastUpload'] = null;
+// Uploads run one after another in the background; approving never waits on Drive.
+let driveUploads: Promise<void> = Promise.resolve();
+
+/**
+ * Uploads approved tenders' folders, and their day's report sheet, to the
+ * Google Drive folder in the same layout as the local output folder. Notes the
+ * result on each tender's history; problems are shown once at the end.
+ */
+function uploadApprovedTendersToGoogleDrive(tenderRows: TenderRow[]): void {
+  const targets = tenderRows.filter((tender) => {
+    const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
+    return lifecycle && APPROVED_LIFECYCLES.includes(lifecycle);
+  });
+  if (targets.length === 0) return;
+  driveUploads = driveUploads.then(async () => {
+    const drive = await googleDriveClient();
+    if (!drive) return;
+    const problems: string[] = [];
+    const sheetsDone = new Set<string>();
+    let uploaded = 0;
+    for (const tender of targets) {
+      const plan = jobOutputs.getPlan(tender.job_id);
+      const serialNumber = jobOutputs.findSerialNumber(tender.id);
+      if (!plan || serialNumber === undefined) continue;
+      const folder = tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate);
+      if (!existsSync(folder)) continue;
+      try {
+        const segments = relative(resolve(plan.outputRoot), resolve(folder)).split(/[\\/]+/).filter(Boolean);
+        const dayId = await drive.client.ensurePath(drive.folderId, segments.slice(0, -1));
+        const tenderId = await drive.client.ensureFolder(dayId, segments[segments.length - 1]);
+        const report = await drive.client.putFolder(tenderId, folder);
+        if (!sheetsDone.has(plan.jobDirectory)) {
+          sheetsDone.add(plan.jobDirectory);
+          const sheetName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook.replace(/\.xlsx$/i, '').toLocaleLowerCase();
+          for (const name of readdirSync(plan.jobDirectory)) {
+            if (/\.xlsx$/i.test(name) && name.toLocaleLowerCase().startsWith(sheetName)) await drive.client.putFile(dayId, join(plan.jobDirectory, name), name);
+          }
+        }
+        uploaded += 1;
+        if (tender.opportunity_id) {
+          const id = tender.opportunity_id;
+          syncOpportunities('drive', () => opportunities.addNote(id, `Uploaded to Google Drive: ${[googleDriveSettings.get().folderName, ...segments].join(' / ')} (${report.uploaded} new or changed ${report.uploaded === 1 ? 'file' : 'files'}).`, 'automation', { jobId: tender.job_id }));
+        }
+      } catch (error) {
+        problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    lastDriveUpload = { at: new Date().toISOString(), uploaded, failed: problems.length, problem: problems[0] ?? null };
+    if (problems.length > 0) {
+      dialog.showErrorBox('Not uploaded to Google Drive',
+        `The approval is saved, and the files are safe in the local output folder, but these could not be uploaded to Google Drive:\n\n${problems.join('\n')}\n\nCheck the internet connection and the Google Drive settings, then approve again (files already uploaded are not sent twice).`);
+    }
+  }).catch((error) => console.error('[TenderAssist] Google Drive upload failed:', error));
 }
 
 function approvedTenderRowsFor(opportunityIds: string[]): TenderRow[] {

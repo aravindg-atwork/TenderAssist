@@ -106,6 +106,21 @@ export interface JobListItem {
 }
 
 /** Approved tenders still waiting for their documents. */
+/** Google Drive upload settings as the screen sees them; secrets never leave the main process. */
+export interface GoogleDriveStatus {
+  clientId: string;
+  hasClientSecret: boolean;
+  folderId: string;
+  /** The folder's name on Drive, once checked. */
+  folderName: string;
+  /** The Google account uploads are made as, once signed in. */
+  accountEmail: string;
+  signedIn: boolean;
+  encryptionAvailable: boolean;
+  /** The last upload in this session, if any. */
+  lastUpload: { at: string; uploaded: number; failed: number; problem: string | null } | null;
+}
+
 export interface DocumentsWaiting {
   /** In My Tenders, so a documents run can open them. */
   ready: number;
@@ -185,6 +200,13 @@ export interface TenderAssistApi {
   startDocumentRun(portalId: string): Promise<{ jobId: string; count: number }>;
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
+  getGoogleDrive(): Promise<GoogleDriveStatus>;
+  /** Saves the folder link and sign-in details; a new Client ID or secret needs signing in again. */
+  saveGoogleDrive(input: { clientId: string; clientSecret?: string; folderLink: string }): Promise<GoogleDriveStatus>;
+  /** Opens Google sign-in in the browser and waits for it to finish. */
+  connectGoogleDrive(): Promise<GoogleDriveStatus>;
+  checkGoogleDrive(): Promise<GoogleDriveStatus>;
+  disconnectGoogleDrive(): Promise<GoogleDriveStatus>;
   /** Opens the open question's own document (a GeM bid PDF) in the browser. */
   openQuestionDocument(questionId: string): Promise<void>;
   /** While the run waits after its last date: sign out and finish. */

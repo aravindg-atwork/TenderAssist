@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
+import { GoogleDriveSetting } from './GoogleDriveSetting';
 import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
@@ -335,7 +336,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
               onChange={(event) => publishing && setPublishing({ ...publishing, localOutputRoot: event.target.value })} />
             <button className="btn btn--quiet" type="button" onClick={() => choosePublishingFolder('local')}>Choose…</button>
           </div>
-          <label className="field field--wide" htmlFor="drive-output-root"><span>Copy approved tenders to Drive folder <small>optional</small></span></label>
+          <GoogleDriveSetting />
+          <label className="field field--wide" htmlFor="drive-output-root"><span>Or copy approved tenders to a Google Drive for desktop folder <small>optional</small></span></label>
           <div className="picker">
             <input id="drive-output-root" type="text" value={publishing?.driveOutputRoot ?? ''}
               onChange={(event) => publishing && setPublishing({ ...publishing, driveOutputRoot: event.target.value })}

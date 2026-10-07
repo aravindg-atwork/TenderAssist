@@ -74,8 +74,8 @@ export function TodayPage({
   // Whether approved tenders are copied to a Drive folder, so the message after approving is true.
   const [driveSet, setDriveSet] = useState(false);
   useEffect(() => {
-    window.tenderAssist.getPublishingSettings(selectedPortalId)
-      .then((settings) => setDriveSet(Boolean(settings.driveOutputRoot.trim())))
+    Promise.all([window.tenderAssist.getPublishingSettings(selectedPortalId), window.tenderAssist.getGoogleDrive()])
+      .then(([settings, drive]) => setDriveSet(Boolean(settings.driveOutputRoot.trim()) || drive.signedIn))
       .catch(() => setDriveSet(false));
   }, [selectedPortalId]);
   const portal = getPortalDefinition(selectedPortalId);

@@ -39,6 +39,16 @@ export function createBackup(db: DatabaseSync, destination: string): void {
         } catch { /* an unreadable entry is replaced with an empty one */ }
         update.run(JSON.stringify({ loginId, encryptedPasswordBase64: null }), row.key);
       }
+      // The Google sign-in and client secret are encrypted for this Windows account too.
+      const drive = copy.prepare("SELECT value_json FROM app_settings WHERE key = 'google_drive'").get() as { value_json: string } | undefined;
+      if (drive) {
+        try {
+          const parsed = JSON.parse(drive.value_json) as Record<string, unknown>;
+          update.run(JSON.stringify({ ...parsed, clientSecretEncrypted: null, refreshTokenEncrypted: null, accountEmail: '', connectedAt: null }), 'google_drive');
+        } catch {
+          update.run('{}', 'google_drive');
+        }
+      }
     } finally {
       copy.close();
     }
