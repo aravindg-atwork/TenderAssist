@@ -17,7 +17,7 @@ export interface ResolvedOutputStructure {
 }
 
 export const DEFAULT_OUTPUT_STRUCTURE: OutputStructureSettings = {
-  monthFolderTemplate: '{MM}-{YYYY}',
+  monthFolderTemplate: '{MONTH}-{YYYY}',
   dayFolderTemplate: '{DD}-{MM}-{YYYY}',
   tenderFolderTemplate: '{DD}-{MM}-{YYYY}_{SNO}_{TITLE}',
   approvedWorkbookTemplate: 'Approved-Tenders-{DD}-{MM}-{YYYY}.xlsx',
@@ -25,13 +25,18 @@ export const DEFAULT_OUTPUT_STRUCTURE: OutputStructureSettings = {
   documentsFolderTemplate: 'Documents',
 };
 
-const ALLOWED_TOKENS = new Set(['DD', 'MM', 'YYYY', 'SNO', 'TITLE']);
+const ALLOWED_TOKENS = new Set(['DD', 'MM', 'MONTH', 'YYYY', 'SNO', 'TITLE']);
+
+/** The month folder template before October 2026, when months were numbers (10-2026). */
+export const PREVIOUS_MONTH_FOLDER_TEMPLATE = '{MM}-{YYYY}';
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const INVALID_SEGMENT_CHARACTERS = /[<>:"/\\|?*\x00-\x1F]/;
 
-function dateParts(value: string): Record<'DD' | 'MM' | 'YYYY', string> {
+function dateParts(value: string): Record<'DD' | 'MM' | 'MONTH' | 'YYYY', string> {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) throw new Error('Output date must use YYYY-MM-DD format.');
-  return { YYYY: match[1], MM: match[2], DD: match[3] };
+  return { YYYY: match[1], MM: match[2], MONTH: MONTH_NAMES[Number(match[2]) - 1] ?? match[2], DD: match[3] };
 }
 
 function validateTemplate(label: string, value: unknown): string {
@@ -44,7 +49,7 @@ function validateTemplate(label: string, value: unknown): string {
     const name = token.slice(1, -1);
     if (!ALLOWED_TOKENS.has(name)) throw new Error(`${label} uses unsupported token ${token}.`);
   }
-  if (/[{}]/.test(template.replace(/\{(?:DD|MM|YYYY|SNO|TITLE)\}/g, ''))) {
+  if (/[{}]/.test(template.replace(/\{(?:DD|MM|MONTH|YYYY|SNO|TITLE)\}/g, ''))) {
     throw new Error(`${label} has an incomplete token.`);
   }
   return template;
@@ -82,7 +87,7 @@ export function resolveOutputStructure(
 ): ResolvedOutputStructure {
   const normalized = normalizeOutputStructure(structure);
   const tokens = { ...dateParts(outputDate), SNO: String(serialNumber), TITLE: title };
-  const render = (template: string) => safeSegment(template.replace(/\{(DD|MM|YYYY|SNO|TITLE)\}/g, (_match, token: keyof typeof tokens) => tokens[token]));
+  const render = (template: string) => safeSegment(template.replace(/\{(DD|MM|MONTH|YYYY|SNO|TITLE)\}/g, (_match, token: keyof typeof tokens) => tokens[token]));
   const renderWorkbook = (template: string) => ensureWorkbookExtension(render(template));
   return {
     monthFolder: render(normalized.monthFolderTemplate),

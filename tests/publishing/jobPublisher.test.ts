@@ -26,7 +26,7 @@ describe('publishJobWorkbook', () => {
     const output = await publishJobWorkbook(root, '2026-09-22', 'job-12345678', [{
       tender, automaticDecision: 'KEEP', documents: [],
     }]);
-    expect(output.jobDirectory).toBe(join(root, '09-2026', '22-09-2026'));
+    expect(output.jobDirectory).toBe(join(root, 'September-2026', '22-09-2026'));
     expect(output.workbookPath).toBe(join(output.jobDirectory, 'Approved-Tenders-22-09-2026.xlsx'));
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(output.workbookPath);
@@ -59,8 +59,8 @@ describe('publishJobWorkbook', () => {
 
   it('keeps a stable date hierarchy without using the job id', () => {
     const root = 'C:\\TenderAssist';
-    expect(jobOutputDirectory(root, '2026-01-05', 'job-one')).toBe(join(root, '01-2026', '05-01-2026'));
-    expect(jobOutputDirectory(root, '2026-01-05', 'job-two')).toBe(join(root, '01-2026', '05-01-2026'));
+    expect(jobOutputDirectory(root, '2026-01-05', 'job-one')).toBe(join(root, 'January-2026', '05-01-2026'));
+    expect(jobOutputDirectory(root, '2026-01-05', 'job-two')).toBe(join(root, 'January-2026', '05-01-2026'));
   });
 
   it('applies custom folder and workbook templates without changing the chosen root', async () => {
@@ -139,7 +139,7 @@ describe('copying a day to Drive', () => {
     mirrorTenderFolderToDrive(tenderFolder, local, drive);
     const copied = mirrorReportSheetsToDrive(output.jobDirectory, local, drive, 'Approved-Tenders-06-10-2026.xlsx');
 
-    const day = join(drive, '10-2026', '06-10-2026');
+    const day = join(drive, 'October-2026', '06-10-2026');
     expect(copied).toEqual([join(day, 'Approved-Tenders-06-10-2026.xlsx')]);
     expect(existsSync(join(day, 'Approved-Tenders-06-10-2026.xlsx'))).toBe(true);
     const driveTender = join(day, '06-10-2026_1_Integrated Mobile Application for the WDRA 2 Web Portal');

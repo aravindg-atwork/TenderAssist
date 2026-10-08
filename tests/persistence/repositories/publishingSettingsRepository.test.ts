@@ -29,4 +29,14 @@ describe('PublishingSettingsRepository', () => {
       structure: { ...structure, tenderFolderTemplate: '{TITLE}' },
     })).toThrow(/must include \{SNO\}/);
   });
+
+  it('moves settings on the old numbered month (10-2026) to named months (October-2026)', () => {
+    repo.save({ localOutputRoot: 'D:\TN', driveOutputRoot: '', structure: { ...DEFAULT_OUTPUT_STRUCTURE, monthFolderTemplate: '{MM}-{YYYY}' } });
+    expect(repo.get().structure.monthFolderTemplate).toBe('{MONTH}-{YYYY}');
+  });
+
+  it('leaves a month template the operator typed themselves', () => {
+    repo.save({ localOutputRoot: 'D:\TN', driveOutputRoot: '', structure: { ...DEFAULT_OUTPUT_STRUCTURE, monthFolderTemplate: '{YYYY}-{MM}' } });
+    expect(repo.get().structure.monthFolderTemplate).toBe('{YYYY}-{MM}');
+  });
 });

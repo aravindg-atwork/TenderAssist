@@ -56,8 +56,19 @@ export function documentFileName(directory: string, suggested: string): string {
   return candidate;
 }
 
+// A see-through layer over the portal while a run drives it. The operator's
+// mouse lands on this layer instead of the page; TenderAssist's own clicks go
+// to the page directly (through the browser protocol), so they are unaffected.
+const SHIELD_PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:rgba(214,234,245,0.06);cursor:not-allowed;user-select:none;font:600 13px/1.3 "Segoe UI",system-ui,sans-serif}
+.note{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:9px 16px;border-radius:999px;background:#0b2250;color:#fff;box-shadow:0 8px 24px -8px rgba(11,34,80,.6);white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:#34d399}
+</style></head><body><div class="note"><span class="dot"></span>TenderAssist is working here. Clicks are paused so they do not interrupt it.</div></body></html>`;
+
 export class EmbeddedPortalHost {
   private view: WebContentsView | undefined;
+  private shield: WebContentsView | undefined;
+  private locked = false;
   private crashed = false;
   private automationPopups = false;
   private readonly automationContents = new Set<Electron.WebContents>();
@@ -104,6 +115,7 @@ export class EmbeddedPortalHost {
     view.setBounds(this.bounds);
     view.setVisible(this.visible);
     window.contentView.addChildView(view);
+    this.addShield(window);
     view.webContents.setZoomFactor(this.zoomFactor);
     // Chromium can reset zoom when a navigation crosses origins; reapply so the
     // operator's chosen size survives every portal page.
@@ -213,6 +225,7 @@ export class EmbeddedPortalHost {
   }
 
   close(): void {
+    this.removeShield();
     const view = this.view;
     this.view = undefined;
     if (!view) return;
@@ -224,6 +237,46 @@ export class EmbeddedPortalHost {
   setVisible(visible: boolean): void {
     this.visible = visible;
     this.view?.setVisible(visible);
+    this.shield?.setVisible(visible && this.locked);
+  }
+
+  /** Hold the operator's clicks back from the portal (true) or give the portal back (false). */
+  setLocked(locked: boolean): void {
+    if (this.locked === locked) return;
+    this.locked = locked;
+    const shield = this.shield;
+    if (!shield || shield.webContents.isDestroyed()) return;
+    shield.setVisible(this.visible && locked);
+    // Keys typed into the portal would reach it too, so focus moves off the page while locked.
+    if (locked && this.view?.webContents.isFocused()) shield.webContents.focus();
+  }
+
+  get isLocked(): boolean {
+    return this.locked;
+  }
+
+  private addShield(window: BrowserWindow): void {
+    this.removeShield();
+    const shield = new WebContentsView({
+      webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, javascript: false, devTools: false },
+    });
+    shield.setBackgroundColor('#00000000');
+    shield.setBounds(this.bounds);
+    shield.setVisible(this.visible && this.locked);
+    shield.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    shield.webContents.on('will-navigate', (event) => event.preventDefault());
+    window.contentView.addChildView(shield);
+    void shield.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(SHIELD_PAGE)}`).catch(() => {});
+    this.shield = shield;
+  }
+
+  private removeShield(): void {
+    const shield = this.shield;
+    this.shield = undefined;
+    if (!shield) return;
+    const window = this.windowProvider();
+    if (window && !window.isDestroyed()) window.contentView.removeChildView(shield);
+    if (!shield.webContents.isDestroyed()) shield.webContents.close();
   }
 
   setBounds(bounds: Rectangle): void {
@@ -236,6 +289,7 @@ export class EmbeddedPortalHost {
     const height = Math.max(1, Math.min(Math.round(bounds.height), content.height - y));
     this.bounds = { x, y, width, height };
     this.view?.setBounds(this.bounds);
+    this.shield?.setBounds(this.bounds);
   }
 
   /** False once the page has crashed: it must be opened again, not reused. */

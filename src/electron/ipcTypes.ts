@@ -218,10 +218,19 @@ export interface TenderAssistApi {
   openQuestionDocument(questionId: string): Promise<void>;
   /** While the run waits after its last date: sign out and finish. */
   finishRun(): Promise<void>;
+  /** Opens the app menu (backup, restore, exports, about) at a point in the window. */
+  showAppMenu(x: number, y: number): Promise<void>;
+  /** After the last date: finish this sign-in and search another website. */
+  switchPortalRun(config: RunConfiguration, untilDate?: string, options?: { runAgain?: boolean }): Promise<{ jobId: string; dates: string[]; skipped: string[] }>;
   getJobDetail(jobId: string): Promise<JobDetail>;
   deleteJob(jobId: string): Promise<void>;
   onJobUpdate(callback: (update: AuthJobUpdate) => void): () => void;
   onAppNavigation(callback: (command: AppNavigationCommand) => void): () => void;
+  /** Whether the portal holds back the operator's clicks while a run drives it. */
+  getPortalLock(): Promise<{ locked: boolean; overridden: boolean }>;
+  /** Take control of the portal during a run (true), or hand it back to TenderAssist (false). */
+  setPortalControl(take: boolean): Promise<{ locked: boolean; overridden: boolean }>;
+  onPortalLock(callback: (state: { locked: boolean; overridden: boolean }) => void): () => void;
   getInbox(): Promise<InboxView>;
   /** Approve, reject, defer, or reopen one or many tenders; all or nothing. */
   decideTenders(opportunityIds: string[], decision: OperatorDecision, note?: string): Promise<InboxView>;

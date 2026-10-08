@@ -207,9 +207,11 @@ export async function runClassificationPhase(
     if (isCancellationRequested(deps.signal)) return;
     recordDecision(tender, detail);
     decided.add(tender.id);
-    onUpdate(snapshot());
-    let answer: RunQuestionAnswer | null = null;
     const final = classifications.getFinalForTender(tender.id);
+    // One line per tender read, so the run panel always shows movement.
+    const verdict = final === 'KEEP' ? 'Kept' : final === 'REJECT' ? 'Rejected' : 'Unsure';
+    onUpdate({ ...snapshot(), statusMessage: `Read ${decided.size} of ${currentJobTenders.length}: ${tender.title}. ${verdict}.` });
+    let answer: RunQuestionAnswer | null = null;
     const matched = matchedIntent.get(tender.id) ?? [];
     const reason = deps.askOperator ? unsureReason(final, titleIntents.get(tender.id) ?? evaluateIntentKeywords(tender.title, config.keywords, { wholePhrase: true }), matched) : null;
     if (deps.askOperator && reason) {

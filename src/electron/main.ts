@@ -19,7 +19,7 @@ import { PublishingSettingsRepository, type PublishingSettings } from '../persis
 import { PortalCategoryRepository, type PortalCategoryList } from '../persistence/repositories/portalCategoryRepository.js';
 import { AutomationSettingsRepository } from '../persistence/repositories/automationSettingsRepository.js';
 import { DisplaySettingsRepository, type TextSize } from '../persistence/repositories/displaySettingsRepository.js';
-import { TenderWorkflowRepository, type ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
+import { TenderWorkflowRepository, type ManualTenderDecision, type TenderReviewRow } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
 import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, syncJobOpportunities } from '../orchestration/opportunitySync.js';
@@ -79,6 +79,7 @@ import { createActionPacer } from '../orchestration/actionPacer.js';
 import { DEFAULT_PORTAL_ID, getPortalDefinition, isGemPortal, type PortalDefinition } from '../config/portalRegistry.js';
 import { describeResumePlan, planResume, prepareForDocumentCollection } from '../orchestration/jobResume.js';
 import type { PaceAction } from '../orchestration/actionPacer.js';
+import { portalLockState, type PortalLockState } from './portalLock.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EMBEDDED_CDP_PORT = 18_000 + Math.floor(Math.random() * 10_000);
@@ -94,6 +95,12 @@ app.commandLine.appendSwitch('lang', 'en-IN');
 if (!app.isPackaged && process.env.TENDERASSIST_USER_DATA) {
   app.setPath('userData', process.env.TENDERASSIST_USER_DATA);
 }
+// The database and DSC downloads follow the same override, so a development
+// copy never opens the installed app's database. Only path lookups see it:
+// child processes (such as the DSC signer) keep the real APPDATA.
+const dataPathEnv: NodeJS.ProcessEnv = !app.isPackaged && process.env.TENDERASSIST_USER_DATA
+  ? { ...process.env, APPDATA: process.env.TENDERASSIST_USER_DATA }
+  : process.env;
 
 // Claim the process lock before opening SQLite. A fast double-click can start
 // two Electron main processes concurrently; the losing process must exit
@@ -109,11 +116,11 @@ const migrationsDir = join(app.getAppPath(), 'src', 'persistence', 'migrations')
 let restoredPreviousDatabase: string | null = null;
 let restoreStartupError: string | null = null;
 try {
-  restoredPreviousDatabase = applyPendingRestore(getDatabasePath());
+  restoredPreviousDatabase = applyPendingRestore(getDatabasePath(dataPathEnv));
 } catch (error) {
   restoreStartupError = error instanceof Error ? error.message : String(error);
 }
-const db = createDatabase(getDatabasePath());
+const db = createDatabase(getDatabasePath(dataPathEnv));
 runMigrations(db, migrationsDir);
 const jobs = new JobRepository(db);
 const sessions = new AuthSessionRepository(db);
@@ -161,7 +168,7 @@ let pendingMoreDates: ((choice: DateBatchPlan | null) => void) | undefined;
 // The "Keep or skip?" question on screen, and how to deliver its answer.
 let activeQuestion: RunQuestion | undefined;
 let pendingAnswer: ((answer: RunQuestionAnswer) => void) | undefined;
-const dscDownloadDirectory = join(getAppDataDir(), 'dsc-downloads');
+const dscDownloadDirectory = join(getAppDataDir(dataPathEnv), 'dsc-downloads');
 const dscArtifacts = new Map<string, DscJnlpArtifact>();
 // Fresh sign-ins allowed while collecting documents before the run stops.
 const MAX_ACQUISITION_SIGN_INS = 3;
@@ -198,6 +205,21 @@ function emitJobUpdate(raw: AuthJobUpdate): void {
   const update: AuthJobUpdate = withRunState(raw, { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion });
   lastActiveJobUpdate = update;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
+  applyPortalLock();
+}
+
+// While a run drives the portal, the operator's clicks are held back from it
+// (see portalLock.ts) unless they chose to take control for this run.
+let operatorTookControl = false;
+
+function currentPortalLock(): PortalLockState {
+  return portalLockState(activeJobId ? lastActiveJobUpdate : undefined, operatorTookControl);
+}
+
+function applyPortalLock(): void {
+  const state = currentPortalLock();
+  portalHost?.setLocked(state.locked);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('portal-lock', state);
 }
 
 async function credentialSettings(portalId: string): Promise<PortalCredentialSettings> {
@@ -230,12 +252,22 @@ function createWindow(): void {
     height: 880,
     minWidth: 900,
     minHeight: 620,
+    // Shown once the first frame is painted, on the app's own background: no white flash at start.
+    show: false,
+    backgroundColor: '#d6eaf5',
+    // A modern frameless window: the app draws its own top bar; Windows keeps
+    // its minimise / maximise / close buttons, drawn over the bar's colour.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#d6eaf5', symbolColor: '#364865', height: 44 },
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '..', '..', 'build', 'icon.png') }),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: false,
     },
   });
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
   mainWindow.on('closed', () => {
     portalHost?.close();
     portalHost = undefined;
@@ -328,7 +360,7 @@ async function restoreData(): Promise<void> {
       cancelId: 1,
     });
     if (answer.response !== 0) return;
-    stageRestore(backupPath, getDatabasePath());
+    stageRestore(backupPath, getDatabasePath(dataPathEnv));
     portalHost?.close();
     db.close();
     app.relaunch();
@@ -469,6 +501,11 @@ ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unk
   if (!OPERATOR_DECISIONS.includes(decision as OperatorDecision)) throw new Error('Unknown decision.');
   opportunities.decide(opportunityIds, decision as OperatorDecision, { note: typeof note === 'string' ? note : null });
   if (decision === 'APPROVE') afterApproval(approvedTenderRowsFor(opportunityIds));
+  else if (decision === 'REJECT') {
+    // A rejection also updates the day's sheet (and its Drive copy).
+    const rows = opportunityIds.flatMap((id) => tenders.listForOpportunity(id));
+    void refreshDaySheets(rows).then(() => { if (runsUploadToDrive()) uploadSavedTendersToGoogleDrive(rows); });
+  }
   return buildInbox(opportunities);
 });
 
@@ -737,6 +774,22 @@ ipcMain.handle('select-publishing-folder', async (_event, initialPath?: string):
   return result.canceled ? null : result.filePaths[0] ?? null;
 });
 
+const APPROVED_BY_OPERATOR = 'Approved by you';
+const REJECTED_BY_OPERATOR = 'Rejected by you';
+
+/** The operator's own call on a tender (Approve or Reject on Today or Tenders), as a review row for the sheet. */
+function operatorDecisionReview(tender: TenderRow): TenderReviewRow | undefined {
+  const opportunity = tender.opportunity_id ? opportunities.getById(tender.opportunity_id) : undefined;
+  if (!opportunity) return undefined;
+  if (APPROVED_LIFECYCLES.includes(opportunity.lifecycle)) {
+    return { tender_id: tender.id, decision: 'KEEP', reason: APPROVED_BY_OPERATOR, decided_at: '' };
+  }
+  if (opportunity.lifecycle === 'REJECTED') {
+    return { tender_id: tender.id, decision: 'REJECT', reason: REJECTED_BY_OPERATOR, decided_at: '' };
+  }
+  return undefined;
+}
+
 function publishStoredJob(jobId: string) {
   const config = runConfigurations.getForJob(jobId);
   if (!config) throw new Error('This job has no saved run configuration.');
@@ -744,11 +797,13 @@ function publishStoredJob(jobId: string) {
   const allItems = tenders.listForJob(jobId).map((tender) => ({
     tender,
     automaticDecision: classifications.getFinalForTender(tender.id),
-    manualReview: workflow.getReview(tender.id),
+    manualReview: workflow.getReview(tender.id) ?? operatorDecisionReview(tender),
     documents: workflow.listDocuments(tender.id),
     requirements: workflow.getRequirements(tender.id),
   }));
-  const explicitlyProcessed = allItems.filter((item) => item.requirements || item.documents.length > 0);
+  // Tenders the operator approved (even long after the run) are always on the day's sheet.
+  const explicitlyProcessed = allItems.filter((item) => item.requirements || item.documents.length > 0
+    || (item.manualReview?.decision === 'KEEP' && item.manualReview.reason === APPROVED_BY_OPERATOR));
   const items = explicitlyProcessed.length > 0
     ? explicitlyProcessed
     : allItems.filter((item) => (item.manualReview?.decision ?? item.automaticDecision) === 'KEEP');
@@ -788,6 +843,12 @@ ipcMain.handle('get-run-history', (_event, portalId: string) => {
     if (!completed.has(value)) missedDates.push(value);
   }
   return { recentRunDates, missedDates };
+});
+ipcMain.handle('get-portal-lock', (): PortalLockState => currentPortalLock());
+ipcMain.handle('set-portal-control', (_event, take: unknown): PortalLockState => {
+  operatorTookControl = take === true;
+  applyPortalLock();
+  return currentPortalLock();
 });
 ipcMain.handle('set-portal-bounds', (_event, bounds) => portalHost?.setBounds(bounds));
 ipcMain.handle('set-portal-visible', (_event, visible: boolean) => portalHost?.setVisible(visible === true));
@@ -1065,6 +1126,8 @@ function releaseRun(abortController: AbortController): void {
   pendingMoreDates = undefined;
   activeQuestion = undefined;
   pendingAnswer = undefined;
+  operatorTookControl = false;
+  applyPortalLock();
 }
 
 async function checkReadiness(portal: PortalDefinition, outputSettings: PublishingSettings): Promise<void> {
@@ -1096,6 +1159,7 @@ async function openPortal(portal: PortalDefinition): Promise<void> {
   portalHost.onCrashed(handlePortalCrash);
   portalHost.setZoomPercent(displaySettings.getPortalZoom(portal.id));
   await portalHost.open(portal.url);
+  applyPortalLock();
   await waitForCdpReady(EMBEDDED_CDP_PORT, 15000);
 }
 
@@ -1408,7 +1472,23 @@ function afterApproval(tenderRows: TenderRow[]): void {
   for (const jobId of new Set(tenderRows.map((tender) => tender.job_id))) {
     syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, jobId));
   }
-  reportDriveProblems(copyApprovedTendersToDrive(tenderRows));
+  void refreshDaySheets(tenderRows).then(() => {
+    reportDriveProblems(copyApprovedTendersToDrive(tenderRows));
+    if (runsUploadToDrive()) uploadSavedTendersToGoogleDrive(tenderRows);
+  });
+}
+
+/**
+ * A decision made after the run (on Today or Tenders, any day later) is
+ * written into that day's report sheet, so the sheet on this computer and on
+ * Drive always shows what was approved or rejected. Runs in the background.
+ */
+async function refreshDaySheets(tenderRows: TenderRow[]): Promise<void> {
+  for (const jobId of new Set(tenderRows.map((tender) => tender.job_id))) {
+    if (jobId === activeJobId) continue; // The running search writes its own sheet when it finishes.
+    try { await publishStoredJob(jobId); }
+    catch (error) { console.error(`Could not update the report sheet of run ${jobId}:`, error); }
+  }
 }
 
 interface CollectedCounts { shortlisted: number; needsReview: number }
@@ -2134,7 +2214,11 @@ ipcMain.handle('start-document-run', async (_event, portalId: unknown) => {
   return { jobId: await started, count: targets.length };
 });
 
-ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) => {
+ipcMain.handle('start-job', (_event, requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) =>
+  startSearch(requestedConfig, untilDate, options));
+
+/** Sign in (or not, for GeM) and search the planned dates; resolves once the run has its job id. */
+async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) {
   const { abortController, paceAction } = claimRun();
   let ctx: RunContext;
   let plan: DateBatchPlan;
@@ -2207,7 +2291,7 @@ ipcMain.handle('start-job', async (_event, requestedConfig: RunConfiguration, un
   // sign-in fails before its first update.
   activeJobCompletion = finishRun(ctx, run, rejectStarted);
   return { jobId: await started, dates: plan.toRun, skipped: plan.skipped };
-});
+}
 
 /** The dates in a range still to run for a portal; throws when there are none. */
 function planDatesToRun(portalId: string, from: string, to: string, runAgain = false): DateBatchPlan {
@@ -2251,6 +2335,30 @@ ipcMain.handle('open-question-document', async (_event, questionId: unknown): Pr
     throw new Error('That document can no longer be opened.');
   }
   await shell.openExternal(url);
+});
+
+// After the last date: search on another website. The current sign-in is
+// finished (signed out, report shown) and the other website's run starts.
+// Its dates are checked first, so a range with nothing to run leaves the
+// current sign-in waiting as it was.
+ipcMain.handle('switch-portal-run', async (_event, requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) => {
+  if (!pendingMoreDates) throw new Error('The run is not waiting for more dates.');
+  const portal = getPortalDefinition(normalizeRunConfiguration(requestedConfig).portalId);
+  if (portal.id === activeRunPortalId) throw new Error('That is the website already signed in. Choose its dates instead.');
+  const from = normalizeRunConfiguration(requestedConfig).searchDate;
+  planDatesToRun(portal.id, from, typeof untilDate === 'string' && untilDate ? untilDate : from, options?.runAgain === true);
+  const completion = activeJobCompletion;
+  pendingMoreDates(null);
+  await completion;
+  return startSearch(requestedConfig, untilDate, options);
+});
+
+// The menu bar is hidden by the frameless window; its commands (backup,
+// restore, exports, about) open from the sidebar's More button.
+ipcMain.handle('show-app-menu', (_event, x: unknown, y: unknown): void => {
+  const menu = Menu.getApplicationMenu();
+  if (!menu || !mainWindow) return;
+  menu.popup({ window: mainWindow, x: typeof x === 'number' ? Math.round(x) : undefined, y: typeof y === 'number' ? Math.round(y) : undefined });
 });
 
 ipcMain.handle('finish-run', (): void => {

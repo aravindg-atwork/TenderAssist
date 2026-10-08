@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { DEFAULT_OUTPUT_STRUCTURE, normalizeOutputStructure, type OutputStructureSettings } from '../../publishing/outputStructure.js';
+import { DEFAULT_OUTPUT_STRUCTURE, normalizeOutputStructure, PREVIOUS_MONTH_FOLDER_TEMPLATE, type OutputStructureSettings } from '../../publishing/outputStructure.js';
 
 const LEGACY_KEY = 'publishing_settings';
 const keyFor = (portalId: string) => `publishing_settings:${portalId}`;
@@ -29,7 +29,7 @@ export class PublishingSettingsRepository {
           ? parsed.localOutputRoot.trim()
           : legacyOutput.trim() || this.defaultOutputRoot,
         driveOutputRoot: typeof parsed.driveOutputRoot === 'string' ? parsed.driveOutputRoot.trim() : '',
-        structure: normalizeOutputStructure(parsed.structure),
+        structure: withNamedMonths(normalizeOutputStructure(parsed.structure)),
       };
     } catch {
       return { localOutputRoot: this.defaultOutputRoot, driveOutputRoot: '', structure: DEFAULT_OUTPUT_STRUCTURE };
@@ -51,4 +51,15 @@ export class PublishingSettingsRepository {
     ).run(keyFor(portalId), JSON.stringify(next), now);
     return next;
   }
+}
+
+/**
+ * Month folders are named October-2026, not 10-2026 (8 Oct 2026). Settings
+ * still on the old default move to the new one; a month template the operator
+ * typed themselves is left alone. Runs already saved keep their own folders.
+ */
+function withNamedMonths(structure: OutputStructureSettings): OutputStructureSettings {
+  return structure.monthFolderTemplate === PREVIOUS_MONTH_FOLDER_TEMPLATE
+    ? { ...structure, monthFolderTemplate: DEFAULT_OUTPUT_STRUCTURE.monthFolderTemplate }
+    : structure;
 }

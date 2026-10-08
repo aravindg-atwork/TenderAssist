@@ -135,7 +135,7 @@ describe('runPostProcessing tender selection', () => {
     expect(outputEntries.some((entry) => entry.includes('Eligibility.xlsx'))).toBe(true);
     expect(outputEntries.some((entry) => entry.includes('Skipped tender'))).toBe(false);
 
-    const workbookPath = join(outputRoot, '09-2026', '23-09-2026', 'Approved-Tenders-23-09-2026.xlsx');
+    const workbookPath = join(outputRoot, 'September-2026', '23-09-2026', 'Approved-Tenders-23-09-2026.xlsx');
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(workbookPath);
     const sheet = workbook.getWorksheet('Approved Tenders')!;
@@ -187,7 +187,7 @@ describe('runPostProcessing tender selection', () => {
 
     expect(result.outcome).toBe('SUCCESS');
     expect(jobs.getById(job.id)?.state).toBe('COMPLETE');
-    const workbookPath = join(outputRoot, '09-2026', '23-09-2026', 'Approved-Tenders-23-09-2026.xlsx');
+    const workbookPath = join(outputRoot, 'September-2026', '23-09-2026', 'Approved-Tenders-23-09-2026.xlsx');
     expect(existsSync(workbookPath)).toBe(true);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(workbookPath);
@@ -229,7 +229,7 @@ describe('runPostProcessing tender selection', () => {
       expect(result.outcome).toBe('SUCCESS');
     }
 
-    const dayFolder = join(outputRoot, '09-2026', '23-09-2026');
+    const dayFolder = join(outputRoot, 'September-2026', '23-09-2026');
     const entries = readdirSync(dayFolder);
     expect(entries).toContain('23-09-2026_1_Morning tender');
     expect(entries).toContain('23-09-2026_2_Afternoon tender');

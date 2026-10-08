@@ -357,6 +357,10 @@ export async function runGemDate(
       if (!content) {
         gate(tender.id, 'G3', 'UNCERTAIN', 'GEM_BID_DOCUMENT_FAILED', { error: readError, attempt: pass });
         if (pass === 1) tryAgain.push(batch[index]);
+        statusMessage = pass === 1
+          ? `Bid ${index + 1} of ${batch.length}: GeM did not send its document; it is tried again at the end.`
+          : `Bid ${index + 1} of ${batch.length}: GeM still did not send its document. Unsure.`;
+        emit();
         continue;
       }
       const { title: titleIntent, intent } = gemIntent(bid, bidSpecificText(content.text), config.keywords);
@@ -371,6 +375,10 @@ export async function runGemDate(
         const excluded = evaluateExcludedScope(scope, config.excludedKeywords);
         gate(tender.id, 'G4', excluded.result, excluded.reasonCode, { matchedExcludedKeywords: excluded.matchedTerms, evaluatedText: scope });
       }
+      // One line per bid read, so the run panel always shows movement.
+      const decided = classifications.getFinalForTender(tender.id);
+      statusMessage = `Read bid ${index + 1} of ${batch.length}: ${bid.title}. ${decided === 'KEEP' ? 'Kept' : decided === 'REJECT' ? 'Rejected' : 'Unsure'}.`;
+      emit();
 
       const reason = deps.askOperator
         ? unsureReason(classifications.getFinalForTender(tender.id), isOwnCategory(bid, config.productCategories, deps.categoryCodes) ? { result: 'PASS', reasonCode: 'CHOSEN_CATEGORY', matchedTerms: [] } : titleIntent, intent.matchedTerms)

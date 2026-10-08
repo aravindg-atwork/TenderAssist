@@ -56,6 +56,8 @@ const api: TenderAssistApi = {
   uploadEverythingToGoogleDrive: () => ipcRenderer.invoke('upload-everything-to-google-drive'),
   openQuestionDocument: (questionId) => ipcRenderer.invoke('open-question-document', questionId),
   finishRun: () => ipcRenderer.invoke('finish-run'),
+  showAppMenu: (x, y) => ipcRenderer.invoke('show-app-menu', x, y),
+  switchPortalRun: (config, untilDate, options) => ipcRenderer.invoke('switch-portal-run', config, untilDate, options),
   getJobDetail: (jobId) => ipcRenderer.invoke('get-job-detail', jobId),
   deleteJob: (jobId) => ipcRenderer.invoke('delete-job', jobId),
   onJobUpdate: (callback) => {
@@ -72,6 +74,13 @@ const api: TenderAssistApi = {
   getTenderTimeline: (opportunityId) => ipcRenderer.invoke('get-tender-timeline', opportunityId),
   getTenderFile: (opportunityId) => ipcRenderer.invoke('get-tender-file', opportunityId),
   openTenderFolder: (opportunityId) => ipcRenderer.invoke('open-tender-folder', opportunityId),
+  getPortalLock: () => ipcRenderer.invoke('get-portal-lock'),
+  setPortalControl: (take) => ipcRenderer.invoke('set-portal-control', take),
+  onPortalLock: (callback) => {
+    const listener = (_event: IpcRendererEvent, state: { locked: boolean; overridden: boolean }) => callback(state);
+    ipcRenderer.on('portal-lock', listener);
+    return () => ipcRenderer.removeListener('portal-lock', listener);
+  },
   onAppNavigation: (callback) => {
     const listener = (_event: IpcRendererEvent, command: AppNavigationCommand) => callback(command);
     ipcRenderer.on('app-navigate', listener);

@@ -36,7 +36,7 @@ describe('JobOutputRepository', () => {
     });
     expect(later.outputRoot).toBe(root);
     expect(later.structure).toEqual(DEFAULT_OUTPUT_STRUCTURE);
-    expect(later.jobDirectory).toBe(join(root, '09-2026', '24-09-2026'));
+    expect(later.jobDirectory).toBe(join(root, 'September-2026', '24-09-2026'));
   });
 
   it('continues serial numbers across jobs in the same day folder and keeps them stable', () => {
