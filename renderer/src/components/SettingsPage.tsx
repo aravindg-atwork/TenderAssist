@@ -208,6 +208,13 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     }
   };
 
+  // One section at a time: the side list switches between them.
+  const [active, setActive] = useState<'look' | 'login' | 'folders' | 'display' | 'speed' | 'updates'>('look');
+  useEffect(() => {
+    if (focusRequest?.section === 'relevance') setActive('look');
+    if (focusRequest?.section === 'folders') setActive('folders');
+  }, [focusRequest]);
+
   if (!settings) return <div className="page"><p className="page__empty">Loading settings…</p></div>;
 
   const canSave = !saving && Boolean(credentialSettings && publishing && pacing);
@@ -222,13 +229,13 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         <h1>Settings</h1>
         <ul>
           {SECTIONS.map(([id, label]) => (
-            <li key={id}><a href={`#settings-${id}`}>{label}</a></li>
+            <li key={id}><button type="button" className={active === id ? 'setnav is-on' : 'setnav'} aria-current={active === id ? 'page' : undefined} onClick={() => setActive(id)}>{label}</button></li>
           ))}
         </ul>
       </nav>
 
       <div className="settings__body">
-        <section id="settings-look" className="block" ref={relevanceSectionRef} tabIndex={-1}>
+        <section id="settings-look" hidden={active !== 'look'} className="block" ref={relevanceSectionRef} tabIndex={-1}>
           <h2>What to look for</h2>
           {!settings.configured && (
             <div className="notice notice--attention">Check the starting values below, then select Save changes at the bottom once before your first search.</div>
@@ -239,7 +246,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           </label>
           {gem ? (
             <>
-              <p className="block__lede">On GeM, TenderAssist reads every bid that started on the chosen date, wherever it is in India. It reads the bid document of each bid in your GeM categories, and keeps it when the bid mentions one of your intent words and its title has none of the excluded words.</p>
+              <p className="block__lede">Bids in these categories are kept when they mention an intent word.</p>
               <CategoryPicker portalName="GeM" websiteList={websiteCategories}
                 values={chosenCategories} onChange={setChosenCategories} startingList={DEFAULT_GEM_CATEGORIES}
                 unknownListHint="GeM’s category list could not be read just now; these are the starting categories. Check the internet connection and open Settings again." />
@@ -251,10 +258,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             </>
           ) : (
             <>
-              <p className="block__lede">TenderAssist searches each category for the published date, then keeps a tender only when its full details mention one of your intent words and its title has none of the excluded words.</p>
+              <p className="block__lede">Tenders in these categories are kept when they mention an intent word.</p>
               <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories}
                 values={chosenCategories} onChange={setChosenCategories} />
-              <p className="hint">These are the categories for {selectedPortal.name} only. Each website keeps its own; choose another website above to see and change its categories.</p>
             </>
           )}
           <EditableChips id="intent-keyword-entry" label="Intent words"
@@ -287,7 +293,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           )}
         </section>
 
-        <section id="settings-login" className="block">
+        <section id="settings-login" hidden={active !== 'login'} className="block">
           <h2>Portal login</h2>
           <p className="block__lede">Your login ID and password are filled in for you. You still type the CAPTCHA and your DSC PIN yourself.</p>
           <label className="field field--wide" htmlFor="settings-portal">
@@ -327,7 +333,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           </>)}
         </section>
 
-        <section id="settings-folders" className="block" ref={foldersSectionRef} tabIndex={-1}>
+        <section id="settings-folders" hidden={active !== 'folders'} className="block" ref={foldersSectionRef} tabIndex={-1}>
           <h2>Folders</h2>
           <p className="block__lede">Each date gets a folder, and each kept tender a folder inside it with its documents (and the zip, where the website offers one) and eligibility sheet. Approved tenders are copied to the Drive folder.</p>
           <label className="field field--wide" htmlFor="local-output-root"><span>Save tenders in</span></label>
@@ -346,7 +352,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           </div>
           <details className="disclosure" ref={folderCustomizerRef}>
             <summary>Change folder and file names</summary>
-            <p className="hint">Use {'{DD}'}, {'{MM}'}, {'{YYYY}'}, {'{SNO}'} and {'{TITLE}'}. The tender folder must keep {'{SNO}'} so tenders never overwrite each other.</p>
+            <p className="hint">Use {'{DD}'}, {'{MM}'} (10), {'{MONTH}'} (October), {'{YYYY}'}, {'{SNO}'} and {'{TITLE}'}. The tender folder must keep {'{SNO}'} so tenders never overwrite each other.</p>
             <div className="field-grid">
               <label className="field"><span>Month folder</span><input value={publishing?.structure.monthFolderTemplate ?? ''} onChange={(event) => updateStructure('monthFolderTemplate', event.target.value)} /></label>
               <label className="field"><span>Date folder</span><input value={publishing?.structure.dayFolderTemplate ?? ''} onChange={(event) => updateStructure('dayFolderTemplate', event.target.value)} /></label>
@@ -373,9 +379,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           </details>
         </section>
 
-        <section id="settings-display" className="block"><TextSizeSetting /></section>
+        <section id="settings-display" hidden={active !== 'display'} className="block"><TextSizeSetting /></section>
 
-        <section id="settings-speed" className="block">
+        <section id="settings-speed" hidden={active !== 'speed'} className="block">
           <h2>Speed</h2>
           <p className="block__lede">How quickly TenderAssist clicks on the portal. A short random pause between clicks looks like a person and is gentler on a slow portal.</p>
           <div className="choices" role="radiogroup" aria-label="Click speed">
@@ -404,7 +410,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           )}
         </section>
 
-        <section id="settings-updates" className="block">
+        <section id="settings-updates" hidden={active !== 'updates'} className="block">
           <h2>Updates</h2>
           <div className="update">
             <div>

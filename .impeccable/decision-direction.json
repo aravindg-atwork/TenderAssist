@@ -1,0 +1,153 @@
+{
+  "title": "Choose the look for TenderAssist",
+  "question": "One direction is assigned; you can keep it, take an alternative, re-roll, or go with the plain category standard.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Ink & Stamp",
+      "kicker": "THE ROLL",
+      "lineage": "Indian office rubber stamps in violet ink on plain office paper",
+      "thesis": "Every decision is stamped: a tender you approve or reject gets a dated ink mark, the way an office file does.",
+      "palette": ["#4b3a8c", "#f4f5f8", "#1d1f2b", "#1f7a4d", "#b3261e", "#b7791f"],
+      "materials": ["violet stamp ink", "cool white office paper", "rubber-stamp impressions"],
+      "viewport": "A violet side rail (Today, Tenders, Runs, Settings); Today opens with Find tenders (from/to dates, Start) and below it one tender at a time to decide, Approve / Reject / Later.",
+      "risk": "Stamps turn into a gimmick if used for anything but decisions and finished dates.",
+      "raised": [
+        { "from": "challenger-datamatics", "raise": "Violet ink owns the whole side rail at full strength, not a scattered accent." },
+        { "from": "challenger-console", "raise": "Reject and Stop sit apart from Approve and Start, with deliberate space between them." },
+        { "from": "challenger-orienteering", "raise": "One reserved ink marks 'you are here': the active date and the step needing you." },
+        { "from": "challenger-catalog", "raise": "Every tender card keeps value, closing date and department in the same fixed places." },
+        { "from": "challenger-folio", "raise": "The date strip holds every date at one size on one line, so 21 dates read as a sequence." }
+      ],
+      "wireframe": { "cols": 12, "rows": 10, "regions": [
+        { "label": "violet rail", "x": 0, "y": 0, "w": 2, "h": 10, "accent": true },
+        { "label": "Find tenders: dates + Start", "x": 2, "y": 0, "w": 10, "h": 2 },
+        { "label": "date strip (stamped when done)", "x": 2, "y": 2, "w": 10, "h": 1 },
+        { "label": "tender card to decide", "x": 2, "y": 3, "w": 7, "h": 7 },
+        { "label": "Approve / Later   ·   Reject apart", "x": 9, "y": 3, "w": 3, "h": 7, "accent": true }
+      ] },
+      "comp": ".impeccable/mocks/decision/assigned.png"
+    },
+    {
+      "id": "model-pick",
+      "label": "Office Tender File",
+      "kicker": "IMPECCABLE’S PICK",
+      "lineage": "the green and buff government file cover with tags and a noting sheet",
+      "thesis": "Each tender is a file: a cover with its facts, tabs for details and documents, and a noting sheet where the decision is written.",
+      "palette": ["#2f5d50", "#e6e9e4", "#1c2420", "#c0392b", "#d9b45a"],
+      "materials": ["file-cover green board", "string tag", "ruled noting sheet"],
+      "viewport": "Green file-cover header on each tender, tabs for Details / Documents / Decision; Today lists files waiting like a tray.",
+      "risk": "The most familiar office metaphor, and buff paper drifts toward the cream look every tool ships.",
+      "wireframe": { "cols": 12, "rows": 10, "regions": [
+        { "label": "top bar", "x": 0, "y": 0, "w": 12, "h": 1, "accent": true },
+        { "label": "tray of files waiting", "x": 0, "y": 1, "w": 4, "h": 9 },
+        { "label": "file cover + tabs", "x": 4, "y": 1, "w": 8, "h": 2, "accent": true },
+        { "label": "noting sheet: decision + reason", "x": 4, "y": 3, "w": 8, "h": 7 }
+      ] },
+      "comp": ".impeccable/mocks/decision/model-pick.png"
+    },
+    {
+      "id": "challenger-gate-board",
+      "label": "Gate Board",
+      "verdict": "competitive",
+      "lineage": "airport boarding pass and live departures board",
+      "thesis": "A date range runs like a departures board: each date a row, the current one lit, finished ones dropping off; each tender a segmented pass.",
+      "palette": ["#14181f", "#f2f3f5", "#ffffff", "#e8a317", "#2e7d5b"],
+      "materials": ["high-contrast panels", "tabular figures", "one alert colour for changes"],
+      "viewport": "A board of dates (status, tenders found, kept) beside the portal; deciding shows each tender as a pass with fixed segments.",
+      "case": "Fuses strongly for multi-date runs and progress; less natural for calmly deciding tenders.",
+      "risk": "Can feel like a monitoring screen rather than an office tool.",
+      "wireframe": { "cols": 12, "rows": 10, "regions": [
+        { "label": "top bar", "x": 0, "y": 0, "w": 12, "h": 1 },
+        { "label": "dates board (rows, current lit)", "x": 0, "y": 1, "w": 5, "h": 9, "accent": true },
+        { "label": "tender pass: segments", "x": 5, "y": 1, "w": 7, "h": 5 },
+        { "label": "decide", "x": 5, "y": 6, "w": 7, "h": 4 }
+      ] },
+      "hero": "https://impeccable.style/worlds/cards/vernacular-ephemera-boarding-pass-and-gate-board-hero.webp",
+      "comp": ".impeccable/mocks/decision/challenger-gate-board.png"
+    },
+    {
+      "id": "challenger-datamatics",
+      "label": "Data Field",
+      "verdict": "declined",
+      "lineage": "black and white barcode data art",
+      "thesis": "Tenders as a dense black-and-white data field.",
+      "palette": ["#000000", "#ffffff"],
+      "materials": ["hairline bars", "monospace numbers"],
+      "viewport": "Columns of tender numbers in pure black and white.",
+      "case": "Fuses poorly: cold and strobing for a calm daily office tool.",
+      "kept": "Total palette commitment: violet owns the rail.",
+      "risk": "Unreadable for a non-technical operator.",
+      "hero": "https://impeccable.style/worlds/cards/ikeda-datamatics-hero.webp"
+    },
+    {
+      "id": "challenger-console",
+      "label": "Dark Console",
+      "verdict": "declined",
+      "lineage": "dark developer consoles",
+      "thesis": "A graphite working surface split by hairline seams.",
+      "palette": ["#1c1e22", "#2a2d33", "#7aa2f7"],
+      "materials": ["graphite panels", "hairline seams"],
+      "viewport": "Persistent dark panels around the portal.",
+      "case": "Fuses poorly: reads as a programmer's tool, not an office's.",
+      "kept": "Destructive actions isolated from their neighbours.",
+      "risk": "Technical feel you asked to avoid.",
+      "hero": "https://impeccable.style/worlds/cards/digital-design-canon-dark-first-developer-console-hero.webp"
+    },
+    {
+      "id": "challenger-orienteering",
+      "label": "Orienteering Map",
+      "verdict": "declined",
+      "lineage": "orienteering maps and course legends",
+      "thesis": "A run as a course of numbered controls in purple.",
+      "palette": ["#ffffff", "#7a1fa2", "#b5d38a", "#8a5a2b"],
+      "materials": ["contour texture", "course overprint"],
+      "viewport": "Dates as numbered controls on a course line.",
+      "case": "Fuses poorly: a sport's map language the operator does not read.",
+      "kept": "One reserved ink for 'you are here'.",
+      "risk": "Decorative terrain with no job.",
+      "hero": "https://impeccable.style/worlds/cards/notation-diagram-systems-orienteering-map-hero.webp"
+    },
+    {
+      "id": "challenger-catalog",
+      "label": "Character Catalog",
+      "verdict": "declined",
+      "lineage": "pastel character goods catalogs",
+      "thesis": "Tenders as a ranked roster of cards.",
+      "palette": ["#fde2e4", "#cde7f0", "#fff1c1"],
+      "materials": ["pastel cells", "rounded name plates"],
+      "viewport": "A pastel grid of tender cards.",
+      "case": "Fuses poorly: playful, which you ruled out.",
+      "kept": "Fixed furniture on every card.",
+      "risk": "Unserious for government tenders.",
+      "hero": "https://impeccable.style/worlds/cards/pop-culture-shelf-character-goods-catalog-hero.webp"
+    },
+    {
+      "id": "challenger-folio",
+      "label": "Botanical Folio",
+      "verdict": "declined",
+      "lineage": "botanical plates through the seasons",
+      "thesis": "A date range as a sequence of same-scale plates.",
+      "palette": ["#f3ead8", "#3d6b3a", "#a3262a"],
+      "materials": ["cream plates", "sepia rules"],
+      "viewport": "Dates as aligned plates on one baseline.",
+      "case": "Fuses poorly: cream and engraving, an editorial costume.",
+      "kept": "Same size and baseline across a sequence.",
+      "risk": "The cream look every tool ships.",
+      "hero": "https://impeccable.style/worlds/cards/editorial-sequence-montage-botanical-folio-season-hero.webp"
+    }
+  ],
+  "reroll": { "registers": ["safer", "bolder"] },
+  "buildPath": { "value": "code", "toggle": false },
+  "canon": true,
+  "canonCard": {
+    "label": "The category standard",
+    "thesis": "A clean, light business app: white panels, grey text, one blue accent, done impeccably.",
+    "palette": ["#ffffff", "#111827", "#2563eb"],
+    "materials": ["clean grid", "neutral panels"],
+    "viewport": "Side menu, a header, and tidy lists and forms you already know.",
+    "risk": "Clear but forgettable; looks like every other admin tool.",
+    "comp": ".impeccable/mocks/decision/canon.png"
+  },
+  "steer": true
+}

@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "renderer/src/styles.css"
+        ],
+        "createdAt": "2026-10-08T06:13:15.222Z",
+        "reason": "model triage: L628 is .history__entry, a neutral grey 2px timeline rail with dots on a History tab list, not a coloured accent border on a card"
+      }
+    ]
+  }
+}

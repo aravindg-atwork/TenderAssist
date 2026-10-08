@@ -1,5 +1,5 @@
 // renderer/src/App.tsx
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { AuthJobUpdate, RunSettingsState, SettingsSection } from '../../src/electron/ipcTypes';
 import { DEFAULT_PORTAL_ID, getPortalDefinition, isGemPortal } from '../../src/config/portalRegistry';
 import { applyTextSize } from './display';
@@ -10,16 +10,16 @@ import { RunDetail } from './components/RunDetail';
 import { SettingsPage } from './components/SettingsPage';
 import { RunWorkspace } from './components/RunWorkspace';
 import { RunPanel } from './components/RunPanel';
-import { BrandMark } from './components/icons';
+import { BrandMark, HistoryIcon, MoreIcon, SettingsIcon, StackIcon, TodayIcon } from './components/icons';
 import { SessionReport } from './components/SessionReport';
 
 type View = 'today' | 'tenders' | 'runs' | 'settings';
 
-const NAV: Array<{ id: View; label: string }> = [
-  { id: 'today', label: 'Today' },
-  { id: 'tenders', label: 'Tenders' },
-  { id: 'runs', label: 'Runs' },
-  { id: 'settings', label: 'Settings' },
+const NAV: Array<{ id: View; label: string; icon: () => ReactElement }> = [
+  { id: 'today', label: 'Today', icon: TodayIcon },
+  { id: 'tenders', label: 'Tenders', icon: StackIcon },
+  { id: 'runs', label: 'Runs', icon: HistoryIcon },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 // The menu bar still names the old pages.
@@ -85,42 +85,74 @@ export function App() {
     if (update.outcome) window.tenderAssist.getInbox().then((inbox) => setWaiting(inbox.attentionCount)).catch(console.error);
   }), []);
 
+  // After the last date of one website, search another: this sign-in ends and the other website's run starts.
+  const switchPortal = useCallback(async (nextPortalId: string, from: string, to: string, runAgain: boolean) => {
+    if (!settings) throw new Error('Settings are still loading.');
+    setPortalId(nextPortalId);
+    try {
+      await window.tenderAssist.switchPortalRun({ searchDate: from, portalId: nextPortalId, ...settings.defaults }, to > from ? to : from, { runAgain });
+    } catch (err) {
+      setPortalId(portalId);
+      throw err;
+    }
+  }, [settings, portalId]);
+
   const running = activeJobId !== null;
   const portal = getPortalDefinition(portalId);
   const showWorkspace = running && view === 'today' && !openRunId;
 
   return (
     <div className={showWorkspace ? 'app app--running' : 'app'}>
-      <header className="bar">
-        <span className="bar__brand"><BrandMark /> TenderAssist</span>
+      <aside className="bar">
+        <span className="bar__brand"><BrandMark /> <span className="bar__name">TenderAssist</span></span>
         <nav className="bar__nav" aria-label="Main">
           {NAV.map((item) => (
-            <button key={item.id} type="button" className="bar__tab" aria-current={view === item.id ? 'page' : undefined} onClick={() => goFromReport(item.id)}>
-              {item.label}
+            <button key={item.id} type="button" className="bar__tab" aria-current={view === item.id ? 'page' : undefined} onClick={() => goFromReport(item.id)} title={item.label}>
+              <item.icon />
+              <span className="bar__label">{item.label}</span>
               {item.id === 'today' && waiting > 0 && <span className="count count--bar" aria-label={`${waiting} waiting for a decision`}>{waiting}</span>}
               {item.id === 'settings' && settings && !settings.configured && <span className="bar__dot" aria-label="Needs setting up" />}
             </button>
           ))}
         </nav>
-        {running && !showWorkspace && (
-          <button type="button" className="bar__running" onClick={() => go('today')}>
-            <span className="bar__pulse" aria-hidden="true" /> Search running · show
-          </button>
+        <button type="button" className="bar__tab bar__more" title="Back up, restore, export, about"
+          onClick={(event) => { const box = event.currentTarget.getBoundingClientRect(); void window.tenderAssist.showAppMenu(box.right + 4, box.top); }}>
+          <MoreIcon />
+          <span className="bar__label">More</span>
+        </button>
+        {showWorkspace && (
+          <span className="bar__running">
+            <span className="bar__pulse" aria-hidden="true" />
+            <span className="bar__label">Search running</span>
+          </span>
         )}
-      </header>
+      </aside>
 
       <main className="main">
+        <header className="topbar">
+          <span className="topbar__next">
+            {showWorkspace ? <>Searching <strong>{portal.name}</strong></>
+              : settings && !settings.configured ? <>Next: <button type="button" className="topbar__link" onClick={() => openSettings('relevance')}>tell TenderAssist what to look for</button></>
+                : waiting > 0 ? <>Next: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>decide {waiting} {waiting === 1 ? 'tender' : 'tenders'}</button></>
+                  : <>Next: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>find today’s tenders</button></>}
+          </span>
+          {running && !showWorkspace && (
+            <button type="button" className="topbar__chip" onClick={() => go('today')}>
+              <span className="bar__pulse" aria-hidden="true" /> Search running · show
+            </button>
+          )}
+        </header>
         {showWorkspace && activeJobId && isGemPortal(portal) ? (
           // GeM is read without a portal window, so the run panel stands alone.
           <div className="workspace workspace--alone">
-            <RunPanel jobId={activeJobId} portalName={portal.name} update={activeUpdate} noSignIn />
+            <RunPanel jobId={activeJobId} portalId={portal.id} portalName={portal.name} onSwitchPortal={switchPortal} update={activeUpdate} noSignIn />
           </div>
         ) : showWorkspace && activeJobId ? (
           <RunWorkspace
             portalId={portal.id}
             portalName={portal.name}
             update={activeUpdate}
-            guide={<RunPanel jobId={activeJobId} portalName={portal.name} update={activeUpdate} />}
+            guide={<RunPanel jobId={activeJobId} portalId={portal.id} portalName={portal.name} onSwitchPortal={switchPortal} update={activeUpdate} />}
           />
         ) : openRunId ? (
           <RunDetail jobId={openRunId} isActive={openRunId === activeJobId} onBack={() => setOpenRunId(null)} onOpenSettings={openSettings} />

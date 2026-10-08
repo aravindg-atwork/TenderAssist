@@ -5,7 +5,7 @@ import {
   MIN_PORTAL_ZOOM_PERCENT,
   stepPortalZoom,
 } from '../../../src/persistence/repositories/displaySettingsRepository';
-import { BackIcon, RefreshIcon } from './icons';
+import { BackIcon, KeyIcon, RefreshIcon } from './icons';
 
 export interface PortalViewportProps {
   portalId: string;
@@ -17,6 +17,23 @@ export interface PortalViewportProps {
 export function PortalViewport({ portalId, portalName, active = true }: PortalViewportProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(DEFAULT_PORTAL_ZOOM_PERCENT);
+  // While the run drives the portal, the operator's clicks are held back;
+  // taking control is a deliberate two-step action, and can be undone.
+  const [lock, setLock] = useState<{ locked: boolean; overridden: boolean }>({ locked: false, overridden: false });
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    window.tenderAssist.getPortalLock().then(setLock).catch(() => {});
+    return window.tenderAssist.onPortalLock((next) => { setLock(next); if (!next.locked) setConfirming(false); });
+  }, []);
+  useEffect(() => {
+    if (!confirming) return;
+    const timer = setTimeout(() => setConfirming(false), 5_000);
+    return () => clearTimeout(timer);
+  }, [confirming]);
+  const takeControl = (take: boolean) => {
+    setConfirming(false);
+    window.tenderAssist.setPortalControl(take).then(setLock).catch(console.error);
+  };
 
   useEffect(() => {
     window.tenderAssist.getPortalZoom(portalId).then(setZoom).catch(console.error);
@@ -67,6 +84,21 @@ export function PortalViewport({ portalId, portalName, active = true }: PortalVi
     <section className="portal" aria-label={`${portalName} portal`}>
       <div className="portal__bar">
         <span className="portal__name"><span className="portal__live" aria-hidden="true" />{portalName}</span>
+        {lock.locked && (
+          <span className="portal__lock" role="status">
+            <span className="portal__lock-text">Clicks paused while TenderAssist works</span>
+            <button type="button" className={confirming ? 'btn btn--sm btn--warn' : 'btn btn--sm btn--line'}
+              onClick={() => (confirming ? takeControl(true) : setConfirming(true))}>
+              <KeyIcon /> {confirming ? 'Click again: it can interrupt the run' : 'Let me use the portal'}
+            </button>
+          </span>
+        )}
+        {lock.overridden && (
+          <span className="portal__lock portal__lock--yours" role="status">
+            <span className="portal__lock-text">You have control. Clicks can interrupt the run.</span>
+            <button type="button" className="btn btn--sm btn--primary" onClick={() => takeControl(false)}>Hand back</button>
+          </span>
+        )}
         <div className="portal__tools">
           <div className="zoom" role="group" aria-label="Portal zoom">
             <button className="btn btn--tool" type="button" onClick={() => applyZoom(stepPortalZoom(zoom, -1))}
@@ -78,8 +110,8 @@ export function PortalViewport({ portalId, portalName, active = true }: PortalVi
             <button className="btn btn--tool" type="button" onClick={() => applyZoom(stepPortalZoom(zoom, 1))}
               disabled={zoom >= MAX_PORTAL_ZOOM_PERCENT} aria-label="Make the portal larger">+</button>
           </div>
-          <button className="btn btn--tool" type="button" onClick={() => window.tenderAssist.portalGoBack()}><BackIcon /> Back</button>
-          <button className="btn btn--tool" type="button" onClick={() => window.tenderAssist.portalReload()}><RefreshIcon /> Reload</button>
+          <button className="btn btn--tool" type="button" disabled={lock.locked} title={lock.locked ? 'Paused while TenderAssist works' : undefined} onClick={() => window.tenderAssist.portalGoBack()}><BackIcon /> Back</button>
+          <button className="btn btn--tool" type="button" disabled={lock.locked} title={lock.locked ? 'Paused while TenderAssist works' : undefined} onClick={() => window.tenderAssist.portalReload()}><RefreshIcon /> Reload</button>
         </div>
       </div>
       <div ref={surfaceRef} className="portal__surface">

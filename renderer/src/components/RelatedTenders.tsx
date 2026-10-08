@@ -13,7 +13,7 @@ export function RelatedTenders({ related, onDismiss }: { related: TenderSummary[
           </span>{' '}
           <span className="related-tenders__id">{other.tenderId}</span>{' '}
           <span className="related-tenders__status">({LIFECYCLE_LABELS[other.lifecycle] ?? other.lifecycle})</span>
-          <span className="related-tenders__why"> — {other.reason}: “{other.title}”</span>
+          <span className="related-tenders__why">: {other.reason}, “{other.title}”</span>
           {onDismiss && (
             <button className="btn btn--quiet btn--small related-tenders__dismiss" type="button" onClick={() => onDismiss(other.id)}>
               Not related

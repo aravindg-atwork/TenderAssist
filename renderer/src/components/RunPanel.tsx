@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { AuthJobUpdate, RunQuestion } from '../../../src/electron/ipcTypes';
-import { AlertIcon, KeyIcon, RefreshIcon, StopIcon } from './icons';
+import { AlertIcon, CheckIcon, KeyIcon, RefreshIcon, StopIcon } from './icons';
+import { PortalSelect } from './PortalSelect';
+import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
 import { plainError } from '../words';
 
 const OPENWEBSTART_DOWNLOAD_URL = 'https://openwebstart.com/download/';
@@ -139,25 +141,109 @@ function QuestionCard({ question, busy, onAnswer, onOpenDocument }: {
   );
 }
 
+interface TrailEntry { at: number; text: string }
+
+const VERDICT = /\s(Kept|Rejected|Unsure)\.$/;
+const clockTime = (at: number) => new Date(at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+/** Seconds since the run last reported anything, ticking once a second. */
+function useSince(at: number): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
+  return Math.max(0, Math.round((now - at) / 1_000));
+}
+
+/**
+ * What TenderAssist is doing, Speed Post tracking style: each step the run
+ * reports is written as a timed line, newest first, so a long search always
+ * shows movement. A ticking "last update" says it is alive between steps.
+ */
+function Trail({ entries, lastAt, active }: { entries: TrailEntry[]; lastAt: number; active: boolean }) {
+  const since = useSince(lastAt);
+  const latest = entries[0]?.text ?? '';
+  const count = /(\d+) of (\d+)/.exec(latest);
+  const done = count ? Number(count[1]) : 0;
+  const total = count ? Number(count[2]) : 0;
+  const quiet = since >= 45;
+  return (
+    <section className="trail" aria-label="What TenderAssist is doing">
+      <header className="trail__head">
+        <span className={active ? 'trail__live' : 'trail__live is-paused'} aria-hidden="true" />
+        <span className="trail__state">
+          {!active ? 'Waiting for you' : quiet ? 'Still working. The portal can be slow; nothing is lost.' : 'Working'}
+        </span>
+        <span className="trail__since">{since < 3 ? 'just now' : `last update ${since < 60 ? `${since}s` : `${Math.floor(since / 60)}m ${since % 60}s`} ago`}</span>
+      </header>
+      {total > 0 && (
+        <div className="trail__progress">
+          <span className="trail__bar" aria-hidden="true"><span style={{ transform: `scaleX(${Math.min(1, done / total)})` }} /></span>
+          <span className="trail__count"><strong>{done}</strong> of {total}</span>
+        </div>
+      )}
+      <ol className="trail__list" aria-live="polite">
+        {entries.length === 0 && <li className="trail__empty">Steps appear here as they happen.</li>}
+        {entries.map((entry, index) => {
+          const verdict = VERDICT.exec(entry.text);
+          return (
+            <li key={`${entry.at}-${index}`} className={index === 0 ? 'trail__row is-latest' : 'trail__row'}>
+              <time className="trail__time" dateTime={new Date(entry.at).toISOString()}>{clockTime(entry.at)}</time>
+              <span className="trail__text">
+                {verdict ? entry.text.slice(0, verdict.index + 1) : entry.text}
+                {verdict && <span className={`trail__verdict trail__verdict--${verdict[1].toLowerCase()}`}>{verdict[1]}</span>}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 export interface RunPanelProps {
   jobId: string;
+  portalId: string;
   portalName: string;
+  /** After the last date: finish this sign-in and search these dates on another website. */
+  onSwitchPortal: (portalId: string, from: string, to: string, runAgain: boolean) => Promise<void>;
   update: AuthJobUpdate | null;
   /** A website searched without signing in (GeM): no sign-in step. */
   noSignIn?: boolean;
 }
 
 /** The left side of a running search: what to do now, where the run is, and its controls. */
-export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPanelProps) {
+export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, noSignIn = false }: RunPanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signerSlow, setSignerSlow] = useState(false);
   const [moreFrom, setMoreFrom] = useState(todayIso());
   const [moreTo, setMoreTo] = useState(todayIso());
   const [moreAgain, setMoreAgain] = useState(false);
+  const [morePortal, setMorePortal] = useState(portalId);
+  const switching = morePortal !== portalId;
   const [confirmStop, setConfirmStop] = useState(false);
   // Answers given in this run stay on screen, so a click is never in doubt.
   const [answers, setAnswers] = useState<Array<{ title: string; answer: 'KEEP' | 'SKIP' }>>([]);
+  // Every distinct step the run reports, newest first (the last 40), and when it last spoke.
+  const [trail, setTrail] = useState<TrailEntry[]>([]);
+  const [lastAt, setLastAt] = useState(Date.now());
+  useEffect(() => {
+    setLastAt(Date.now());
+    const text = update?.statusMessage?.trim();
+    if (!text) return;
+    setTrail((entries) => {
+      if (entries[0]?.text === text) return entries;
+      // "Reading bid 3 of 45..." then "Read bid 3 of 45: ... Kept." is one step: the result replaces the line.
+      const step = (line: string | undefined) => /(\d+) of (\d+)/.exec(line ?? '')?.[0];
+      // A running count ("Finding GeM services...: 120 found, 3 pages read") updates its own line too.
+      const head = (line: string | undefined) => (line ?? '').split(':')[0];
+      const sameStep = (step(text) !== undefined && step(text) === step(entries[0]?.text) && /^Read(ing)? /.test(entries[0]?.text ?? ''))
+        || (text.includes(':') && head(text) === head(entries[0]?.text) && /^Finding /.test(text));
+      return [{ at: Date.now(), text }, ...(sameStep ? entries.slice(1) : entries)].slice(0, 40);
+    });
+  }, [update]);
 
   const signerLaunched = update?.authStep === 'DSC_LAUNCHED';
   useEffect(() => {
@@ -240,8 +326,12 @@ export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPan
 
       {update?.awaitingMoreDates && (
         <section className="more" aria-labelledby="more-title">
-          <h3 id="more-title">Search other dates now?</h3>
-          <p>The portal is still signed in, so there is no new CAPTCHA or DSC.</p>
+          <h3 id="more-title">What next?</h3>
+          <p>Search more dates on {portalName} without a new CAPTCHA or DSC, or switch to another website.</p>
+          <label className="field">
+            <span>Website</span>
+            <PortalSelect id="more-portal" value={morePortal} onChange={setMorePortal} disabled={busy} />
+          </label>
           <div className="more__dates">
             <label className="field"><span>From</span>
               <input type="date" value={moreFrom} max={todayIso()} disabled={busy} onChange={(event) => {
@@ -250,7 +340,7 @@ export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPan
                 setMoreFrom(next);
               }} />
             </label>
-            <label className="field"><span>to</span>
+            <label className="field"><span>To</span>
               <input type="date" value={moreTo} min={moreFrom} max={todayIso()} disabled={busy} onChange={(event) => setMoreTo(event.target.value)} />
             </label>
           </div>
@@ -258,9 +348,18 @@ export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPan
             <input type="checkbox" checked={moreAgain} disabled={busy} onChange={(event) => setMoreAgain(event.target.checked)} />
             Search already-run dates again
           </label>
+          {switching && (
+            <p className="more__note">
+              {portalName} is signed out first and its report is saved. {getPortalDefinition(morePortal).name}
+              {isGemPortal(getPortalDefinition(morePortal)) ? ' needs no sign-in.' : ' then opens for its own CAPTCHA and DSC.'}
+            </p>
+          )}
           <div className="more__actions">
-            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => act(() => window.tenderAssist.runMoreDates(moreFrom, moreTo, { runAgain: moreAgain }))}>
-              Search these dates
+            <button type="button" className="btn btn--red" disabled={busy}
+              onClick={() => act(() => switching
+                ? onSwitchPortal(morePortal, moreFrom, moreTo, moreAgain)
+                : window.tenderAssist.runMoreDates(moreFrom, moreTo, { runAgain: moreAgain }))}>
+              {switching ? `Switch to ${getPortalDefinition(morePortal).name}` : 'Search these dates'}
             </button>
             <button type="button" className="btn btn--quiet" disabled={busy} onClick={() => act(() => window.tenderAssist.finishRun())}>
               Finish and sign out
@@ -293,10 +392,15 @@ export function RunPanel({ jobId, portalName, update, noSignIn = false }: RunPan
         <ol className="steps" aria-label="Steps for this date">
           {steps.map((step, index) => (
             <li key={step.phase} className={index < current ? 'step is-done' : index === current ? 'step is-now' : 'step'} aria-current={index === current ? 'step' : undefined}>
-              {step.label}
+              <span className="step__dot" aria-hidden="true">{index < current ? <CheckIcon /> : index + 1}</span>
+              <span className="step__label">{step.label}</span>
             </li>
           ))}
         </ol>
+      )}
+
+      {!update?.awaitingMoreDates && (
+        <Trail entries={trail} lastAt={lastAt} active={!instruction.needsYou} />
       )}
 
       {error && <p className="notice notice--stop" role="alert"><AlertIcon /><span>{error}</span></p>}

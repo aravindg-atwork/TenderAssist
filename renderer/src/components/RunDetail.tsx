@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { FilterPills, Pager, usePage } from './Pager';
 import type { JobDetail, SettingsSection, TenderDetailItem } from '../../../src/electron/ipcTypes';
 import type { ClassificationGateRow } from '../../../src/persistence/repositories/classificationRepository';
 import { describePortalError } from '../../../src/orchestration/transientRetry';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { plainError, plural, publishedLabel, runStatus } from '../words';
 import { NoMatchesSummary } from './NoMatchesSummary';
-import { BackIcon, FolderIcon } from './icons';
+import { BackIcon, FolderIcon, SearchIcon } from './icons';
 
 export interface RunDetailProps {
   jobId: string;
@@ -55,6 +56,8 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [decisionFilter, setDecisionFilter] = useState<'ALL' | 'KEEP' | 'UNCERTAIN' | 'REJECT' | 'NOT_RUN'>('ALL');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     const load = () => window.tenderAssist.getJobDetail(jobId).then((next) => { setDetail(next); setError(null); })
@@ -62,6 +65,13 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
     void load();
     return window.tenderAssist.onJobUpdate((update) => { if (update.jobId === jobId) void load(); });
   }, [jobId]);
+
+  const order: Record<string, number> = { KEEP: 0, UNCERTAIN: 1, REJECT: 2, NOT_RUN: 3 };
+  const sorted = detail ? [...detail.tenders].sort((a, b) => order[a.effectiveClassification] - order[b.effectiveClassification]) : [];
+  const needle = query.trim().toLocaleLowerCase();
+  const filtered = sorted.filter((tender) => (decisionFilter === 'ALL' || tender.effectiveClassification === decisionFilter)
+    && (!needle || tender.title.toLocaleLowerCase().includes(needle)));
+  const { page, pages, shown, setPage } = usePage(filtered, `${decisionFilter}|${needle}`);
 
   const back = <button type="button" className="btn btn--quiet btn--small page__back" onClick={onBack}><BackIcon /> All runs</button>;
   if (error) return <div className="page">{back}<p className="notice notice--stop" role="alert">{error}</p></div>;
@@ -71,8 +81,6 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
   const count = (decision: string) => detail.tenders.filter((tender) => tender.effectiveClassification === decision).length;
   const kept = count('KEEP');
   const failedSearches = detail.searches.filter((search) => search.state === 'FAILED');
-  const order: Record<string, number> = { KEEP: 0, UNCERTAIN: 1, REJECT: 2, NOT_RUN: 3 };
-  const sorted = [...detail.tenders].sort((a, b) => order[a.effectiveClassification] - order[b.effectiveClassification]);
   const config = detail.runConfiguration;
   const documentRun = detail.purpose === 'DOCUMENTS';
 
@@ -119,17 +127,17 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
       )}
 
       {detail.searches.length > 0 && (
-        <section className="block">
-          <h2>Categories searched</h2>
+        <details className="disclosure" open={detail.searches.length <= 8}>
+          <summary>Categories searched ({detail.searches.length})</summary>
           <ul className="register">
             {detail.searches.map((search) => (
               <li key={search.id} className={search.state === 'FAILED' ? 'is-failed' : undefined}>
-                <span>{search.product_category}</span>
+                <span className="register__name" title={search.product_category}>{search.product_category}</span>
                 <span className="num">{search.state === 'FAILED' ? 'could not be searched' : plural(search.result_count ?? 0, 'tender')}</span>
               </li>
             ))}
           </ul>
-        </section>
+        </details>
       )}
 
       {kept === 0 && count('UNCERTAIN') === 0 && detail.jobState === 'COMPLETE' && (
@@ -139,22 +147,43 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
       {sorted.length > 0 && (
         <section className="block">
           <h2>Tenders and why</h2>
-          <ul className="verdicts">
-            {sorted.map((tender) => {
-              const decision = DECISION_WORDS[tender.effectiveClassification] ?? DECISION_WORDS.NOT_RUN;
-              const saved = tender.documents.filter((document) => document.state === 'DOWNLOADED').length;
-              return (
-                <li key={tender.id} className="verdict">
-                  <span className={`mark mark--${decision.tone}`}>{decision.text}</span>
-                  <span className="verdict__title">{tender.title}</span>
-                  <span className="verdict__reason">{reasonFor(tender)}</span>
-                  {tender.documents.length > 0 && (
-                    <span className="verdict__files">{saved} of {plural(tender.documents.length, 'file')} saved</span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <div className="toolbar">
+            <FilterPills label="Decision" value={decisionFilter} onChange={setDecisionFilter} options={[
+              { id: 'ALL' as const, label: 'All', count: sorted.length },
+              { id: 'KEEP' as const, label: 'Kept', count: kept },
+              { id: 'UNCERTAIN' as const, label: 'Needs a look', count: count('UNCERTAIN') },
+              { id: 'REJECT' as const, label: 'Rejected', count: count('REJECT') },
+              { id: 'NOT_RUN' as const, label: 'Not checked', count: count('NOT_RUN') },
+            ].filter((option) => option.id === 'ALL' || option.count > 0)} />
+            <div className="toolbar__right">
+              <label className="search">
+                <SearchIcon />
+                <span className="visually-hidden">Find a tender</span>
+                <input type="search" value={query} placeholder="Find a tender by title" onChange={(event) => setQuery(event.target.value)} />
+              </label>
+            </div>
+          </div>
+          {filtered.length === 0 ? <p className="page__empty">No tenders match.</p> : (
+            <div className="table-card">
+              <ul className="verdicts verdicts--flat">
+                {shown.map((tender) => {
+                  const decision = DECISION_WORDS[tender.effectiveClassification] ?? DECISION_WORDS.NOT_RUN;
+                  const saved = tender.documents.filter((document) => document.state === 'DOWNLOADED').length;
+                  return (
+                    <li key={tender.id} className="verdict">
+                      <span className={`mark mark--${decision.tone}`}>{decision.text}</span>
+                      <span className="verdict__title">{tender.title}</span>
+                      <span className="verdict__reason">{reasonFor(tender)}</span>
+                      {tender.documents.length > 0 && (
+                        <span className="verdict__files">{saved} of {plural(tender.documents.length, 'file')} saved</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              <Pager page={page} pages={pages} total={filtered.length} onPage={setPage} noun="tenders" />
+            </div>
+          )}
         </section>
       )}
 

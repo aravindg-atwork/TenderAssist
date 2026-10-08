@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DocumentsWaiting, InboxItem, InboxView, OperatorDecision, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
 import type { PreflightReport } from '../../../src/system/preflight';
-import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
-import { LIFECYCLE_LABELS } from '../format';
+import { getPortalDefinition, isGemPortal, PORTALS } from '../../../src/config/portalRegistry';
+import { absoluteDateTime, LIFECYCLE_LABELS } from '../format';
 import { PortalSelect } from './PortalSelect';
 import { TenderFile, type FileAction } from './TenderFile';
 import { TenderTray, type TrayGroup } from './TenderTray';
-import { AlertIcon, ArrowRightIcon } from './icons';
+import { Tracking } from './Tracking';
+import { compactRupees, deadline, portalMark } from './TenderCard';
+import { AlertIcon, ArrowRightIcon, CheckIcon, ClockIcon, CrossIcon, ListIcon, NoteIcon } from './icons';
 import { plainError } from '../words';
 
 export interface FinishedRun { jobId: string; message: string }
@@ -23,41 +25,59 @@ export interface TodayPageProps {
   onDismissFinished: () => void;
 }
 
-const todayIso = (): string => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-};
+const isoOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const todayIso = () => isoOf(new Date());
+const daysAgo = (days: number) => { const date = new Date(); date.setDate(date.getDate() - days); return isoOf(date); };
+const shortDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
 function daysBetween(from: string, to: string): number {
   return Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86_400_000) + 1;
 }
 
-const shortDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-
-const DONE_MESSAGES: Record<OperatorDecision, string> = {
-  APPROVE: 'Approved.',
-  REJECT: 'Rejected.',
-  DEFER: 'Moved to Later.',
-  REOPEN: 'Moved back to review.',
-};
-
-const KEYS: Record<string, OperatorDecision> = { a: 'APPROVE', r: 'REJECT', d: 'DEFER' };
-
-function isTyping(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+/** One-click date ranges, so the common runs need no date picking. */
+function datePresets(missed: string[]): Array<{ label: string; from: string; to: string }> {
+  const presets = [
+    { label: 'Today', from: todayIso(), to: todayIso() },
+    { label: 'Yesterday', from: daysAgo(1), to: daysAgo(1) },
+    { label: 'Last 3 days', from: daysAgo(2), to: todayIso() },
+    { label: 'Last 7 days', from: daysAgo(6), to: todayIso() },
+  ];
+  if (missed.length > 0) presets.push({ label: `Not searched yet (${missed.length})`, from: missed[0], to: missed[missed.length - 1] });
+  return presets;
 }
 
+const KEYS: Record<string, OperatorDecision> = { a: 'APPROVE', r: 'REJECT', d: 'DEFER' };
+const STAMP: Record<OperatorDecision, { text: string; tone: string }> = {
+  APPROVE: { text: 'Approved', tone: 'keep' },
+  REJECT: { text: 'Rejected', tone: 'reject' },
+  DEFER: { text: 'Later', tone: 'later' },
+  REOPEN: { text: 'Back to review', tone: 'later' },
+};
+const GROUP_WORDS: Record<string, { text: string; tone: string }> = {
+  RECOMMENDED: { text: 'Kept by TenderAssist', tone: 'keep' },
+  UNCERTAIN: { text: 'TenderAssist is unsure', tone: 'look' },
+  CHANGED: { text: 'Changed since you decided', tone: 'later' },
+  AUTO_REJECTED: { text: 'Rejected by your rules', tone: 'reject' },
+};
 // A tender that changed after a decision can switch call, or keep its own.
 const CHANGED_ALTERNATIVES: Record<string, OperatorDecision[]> = {
   APPROVED: ['REJECT'], DOCUMENTS_COLLECTED: ['REJECT'], DEFERRED: ['APPROVE', 'REJECT'], REJECTED: ['APPROVE'],
 };
 
-/** Today: find tenders for dates, and decide what is waiting, one file at a time. */
+function isTyping(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+}
+
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+/** Today: one next step at a time. Decide what is waiting, or find new tenders. */
 export function TodayPage({
   settings, selectedPortalId, onPortalChange, onOpenSettings, onRunStarted, onOpenRun, onInboxCount, finishedRun, onDismissFinished,
 }: TodayPageProps) {
+  const [mode, setMode] = useState<'decide' | 'find' | null>(null);
   const [from, setFrom] = useState(todayIso());
   const [to, setTo] = useState(todayIso());
+  const [customDates, setCustomDates] = useState(false);
   const [runAgain, setRunAgain] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -67,19 +87,21 @@ export function TodayPage({
   const [recovery, setRecovery] = useState<RecoveryJob | null>(null);
   const [inbox, setInbox] = useState<InboxView | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [decideError, setDecideError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
+  const [stamp, setStamp] = useState<{ text: string; tone: string } | null>(null);
+  const [checkRejectsOneByOne, setCheckRejectsOneByOne] = useState(false);
+  const [drawer, setDrawer] = useState<'queue' | 'details' | null>(null);
   const [documentsWaiting, setDocumentsWaiting] = useState<DocumentsWaiting | null>(null);
-  // Whether approved tenders are copied to a Drive folder, so the message after approving is true.
   const [driveSet, setDriveSet] = useState(false);
-  useEffect(() => {
-    Promise.all([window.tenderAssist.getPublishingSettings(selectedPortalId), window.tenderAssist.getGoogleDrive()])
-      .then(([settings, drive]) => setDriveSet(Boolean(settings.driveOutputRoot.trim()) || drive.signedIn))
-      .catch(() => setDriveSet(false));
-  }, [selectedPortalId]);
   const portal = getPortalDefinition(selectedPortalId);
   const gem = isGemPortal(portal);
+
+  useEffect(() => {
+    Promise.all([window.tenderAssist.getPublishingSettings(selectedPortalId), window.tenderAssist.getGoogleDrive()])
+      .then(([publishing, drive]) => setDriveSet(Boolean(publishing.driveOutputRoot.trim()) || drive.signedIn))
+      .catch(() => setDriveSet(false));
+  }, [selectedPortalId]);
 
   const loadDocumentsWaiting = useCallback(() => {
     window.tenderAssist.getDocumentsWaiting(selectedPortalId).then(setDocumentsWaiting).catch(() => {});
@@ -89,15 +111,10 @@ export function TodayPage({
     return window.tenderAssist.onJobUpdate((update) => { if (update.outcome) loadDocumentsWaiting(); });
   }, [loadDocumentsWaiting]);
 
-  const applyInbox = useCallback((view: InboxView) => {
-    setInbox(view);
-    onInboxCount(view.attentionCount);
-  }, [onInboxCount]);
-
+  const applyInbox = useCallback((view: InboxView) => { setInbox(view); onInboxCount(view.attentionCount); }, [onInboxCount]);
   const loadInbox = useCallback(() => {
     window.tenderAssist.getInbox().then(applyInbox).catch((err) => setDecideError(plainError(err)));
   }, [applyInbox]);
-
   useEffect(() => {
     loadInbox();
     window.tenderAssist.getRecoveryJob().then(setRecovery).catch(() => {});
@@ -112,57 +129,61 @@ export function TodayPage({
     return () => { current = false; };
   }, [selectedPortalId]);
 
-  // Waiting files in reading order: kept first, then needs a look, then changed, then rejects to check.
-  const groups: TrayGroup[] = useMemo(() => inbox ? [
-    { id: 'recommended', title: 'Kept by TenderAssist', hint: 'Matched your intent. Approve to keep working on them.', items: inbox.recommended },
-    { id: 'uncertain', title: 'Needs a look', hint: 'TenderAssist could not decide.', items: inbox.uncertain },
-    { id: 'changed', title: 'Changed since you decided', hint: 'Dates, value or a corrigendum changed.', items: inbox.changed },
-    {
-      id: 'rejected', title: 'Rejected by TenderAssist', hint: 'Check the rules caught the right ones.', items: inbox.autoRejected, quietClosing: true,
-      footer: (
-        <button type="button" className="btn btn--quiet btn--small" onClick={async () => {
-          const runIds = [...new Set(inbox.autoRejected.map((item) => item.screeningJobId).filter((id): id is string => Boolean(id)))];
-          applyInbox(await window.tenderAssist.acknowledgeRuns(runIds));
-          setDone('Rejected tenders checked. They stay under Tenders → Rejected.');
-        }}>These are right, clear them</button>
-      ),
-    },
-  ] : [], [inbox, applyInbox]);
-
+  // Reading order: kept first, then unsure, then changed, then rule rejects to check.
   const ordered: InboxItem[] = useMemo(() => inbox ? [...inbox.recommended, ...inbox.uncertain, ...inbox.changed, ...inbox.autoRejected] : [], [inbox]);
-  const selected = ordered.find((item) => item.id === selectedId) ?? ordered[0] ?? null;
+  const personal = ordered.filter((item) => item.group !== 'AUTO_REJECTED');
+  const rejects = inbox?.autoRejected ?? [];
+  // Rule rejects are checked as one step ("these are right") unless asked one by one.
+  const walk = checkRejectsOneByOne ? ordered : personal;
+  const selected = walk.find((item) => item.id === selectedId) ?? walk[0] ?? null;
+  const position = selected ? walk.findIndex((item) => item.id === selected.id) + 1 : 0;
+  const showRejectStep = !selected && rejects.length > 0 && !checkRejectsOneByOne;
+
+  // Open on the step that needs the operator: deciding when something waits, otherwise finding.
+  useEffect(() => {
+    if (mode === null && inbox) setMode(ordered.length > 0 ? 'decide' : 'find');
+  }, [inbox, mode, ordered.length]);
+
+  const stampThen = useCallback((next: () => void, decision: OperatorDecision) => {
+    if (reducedMotion()) { next(); return; }
+    setStamp(STAMP[decision]);
+    window.setTimeout(() => { next(); setStamp(null); }, 720);
+  }, []);
 
   const decide = useCallback(async (item: InboxItem, decision: OperatorDecision, note?: string) => {
-    const index = ordered.findIndex((entry) => entry.id === item.id);
-    setBusyId(item.id);
+    const index = walk.findIndex((entry) => entry.id === item.id);
+    setBusy(true);
     setDecideError(null);
     try {
       const next = await window.tenderAssist.decideTenders([item.id], decision, note);
-      applyInbox(next);
       if (decision === 'APPROVE') loadDocumentsWaiting();
-      const message = decision === 'APPROVE' && driveSet ? 'Approved. Its folder is copied to Drive.' : DONE_MESSAGES[decision];
-      setDone(`${message} ${item.title.length > 60 ? `${item.title.slice(0, 60)}…` : item.title}`);
-      // Open whatever now sits where the decided file was.
-      const nextOrdered = [...next.recommended, ...next.uncertain, ...next.changed, ...next.autoRejected];
-      setSelectedId(nextOrdered[Math.min(index, nextOrdered.length - 1)]?.id ?? null);
+      stampThen(() => {
+        applyInbox(next);
+        const nextAll = [...next.recommended, ...next.uncertain, ...next.changed, ...next.autoRejected];
+        const nextWalk = checkRejectsOneByOne ? nextAll : nextAll.filter((entry) => entry.group !== 'AUTO_REJECTED');
+        setSelectedId(nextWalk[Math.min(index, nextWalk.length - 1)]?.id ?? null);
+      }, decision);
     } catch (err) {
       setDecideError(plainError(err));
     } finally {
-      setBusyId(null);
+      setBusy(false);
     }
-  }, [applyInbox, ordered, driveSet]);
+  }, [applyInbox, checkRejectsOneByOne, loadDocumentsWaiting, stampThen, walk]);
 
   const keepDecision = useCallback(async (item: InboxItem) => {
-    setBusyId(item.id);
-    try {
-      applyInbox(await window.tenderAssist.acknowledgeTenderChanges([item.id]));
-      setDone('Decision kept. The change is in the tender’s history.');
-    } catch (err) {
-      setDecideError(plainError(err));
-    } finally {
-      setBusyId(null);
-    }
+    setBusy(true);
+    try { applyInbox(await window.tenderAssist.acknowledgeTenderChanges([item.id])); }
+    catch (err) { setDecideError(plainError(err)); }
+    finally { setBusy(false); }
   }, [applyInbox]);
+
+  const clearRejects = async () => {
+    const runIds = [...new Set(rejects.map((item) => item.screeningJobId).filter((id): id is string => Boolean(id)))];
+    setBusy(true);
+    try { applyInbox(await window.tenderAssist.acknowledgeRuns(runIds)); }
+    catch (err) { setDecideError(plainError(err)); }
+    finally { setBusy(false); }
+  };
 
   const actionsFor = (item: InboxItem): FileAction[] => {
     if (item.group === 'AUTO_REJECTED') {
@@ -181,32 +202,33 @@ export function TodayPage({
     }
     return [
       { id: 'approve', label: 'Approve', kind: 'approve', run: (note) => void decide(item, 'APPROVE', note) },
-      { id: 'later', label: 'Later', kind: 'later', run: (note) => void decide(item, 'DEFER', note) },
       { id: 'reject', label: 'Reject', kind: 'reject', run: (note) => void decide(item, 'REJECT', note) },
+      { id: 'later', label: 'Decide later', kind: 'later', run: (note) => void decide(item, 'DEFER', note) },
     ];
   };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target) || !selected) return;
+      if (mode !== 'decide' || drawer || event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target) || !selected) return;
       const key = event.key.toLowerCase();
-      const index = ordered.findIndex((item) => item.id === selected.id);
+      const index = walk.findIndex((item) => item.id === selected.id);
       if (key === 'j' || key === 'k') {
         event.preventDefault();
-        const next = ordered[key === 'j' ? Math.min(index + 1, ordered.length - 1) : Math.max(index - 1, 0)];
+        const next = walk[key === 'j' ? Math.min(index + 1, walk.length - 1) : Math.max(index - 1, 0)];
         if (next) setSelectedId(next.id);
-      } else if (KEYS[key] && (selected.group === 'RECOMMENDED' || selected.group === 'UNCERTAIN') && busyId !== selected.id) {
+      } else if (KEYS[key] && (selected.group === 'RECOMMENDED' || selected.group === 'UNCERTAIN') && !busy) {
         event.preventDefault();
         void decide(selected, KEYS[key]);
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [busyId, decide, ordered, selected]);
+  }, [busy, decide, drawer, mode, selected, walk]);
 
   const dateCount = to >= from ? daysBetween(from, to) : 1;
   const blocker = preflight?.checks.find((check) => check.level === 'BLOCKED') ?? null;
   const warnings = preflight?.checks.filter((check) => check.level === 'WARNING') ?? [];
+  const missed = history.missedDates;
 
   const start = async () => {
     if (!settings?.configured) { onOpenSettings('relevance'); return; }
@@ -220,9 +242,7 @@ export function TodayPage({
       const block = report.checks.find((check) => check.level === 'BLOCKED');
       if (block) throw new Error(block.message);
       const { jobId, skipped } = await window.tenderAssist.startJob(
-        { searchDate: from, portalId: selectedPortalId, ...settings.defaults },
-        to > from ? to : from,
-        { runAgain },
+        { searchDate: from, portalId: selectedPortalId, ...settings.defaults }, to > from ? to : from, { runAgain },
       );
       if (skipped.length > 0) setSkippedNote(`Already searched, skipped: ${skipped.map(shortDate).join(', ')}.`);
       onRunStarted(jobId);
@@ -233,13 +253,13 @@ export function TodayPage({
     }
   };
 
-  const continueRecovery = async (mode: 'resume' | 'restart' | 'end') => {
+  const continueRecovery = async (choice: 'resume' | 'restart' | 'end') => {
     if (!recovery) return;
     setStartError(null);
     try {
-      if (mode === 'end') {
+      if (choice === 'end') {
         await window.tenderAssist.dismissRecoveryJob(recovery.jobId);
-      } else if (mode === 'resume') {
+      } else if (choice === 'resume') {
         onPortalChange(recovery.config.portalId ?? selectedPortalId);
         const { jobId } = await window.tenderAssist.resumeJob(recovery.jobId);
         onRunStarted(jobId);
@@ -254,8 +274,6 @@ export function TodayPage({
       setStartError(plainError(err));
     }
   };
-
-  const missed = history.missedDates;
 
   const collectDocuments = async () => {
     setStarting(true);
@@ -273,146 +291,341 @@ export function TodayPage({
   const notInMyTenders = documentsWaiting?.notInMyTenders ?? [];
   const searchAgainDates = [...new Set(notInMyTenders.map((tender) => tender.foundOnDate).filter((date): date is string => Boolean(date)))].sort();
 
+  // The websites shown as one-click choices: the chosen one, Tamil Nadu and GeM.
+  const quickPortals = [...new Set([selectedPortalId, 'tamil-nadu', 'gem'])].map((id) => getPortalDefinition(id));
+
+  const rangeLabel = from === to ? shortDate(from) : `${shortDate(from)} to ${shortDate(to)}`;
+
+  const queueGroups: TrayGroup[] = inbox ? [
+    { id: 'recommended', title: 'Kept by TenderAssist', items: inbox.recommended },
+    { id: 'uncertain', title: 'TenderAssist is unsure', items: inbox.uncertain },
+    { id: 'changed', title: 'Changed since you decided', items: inbox.changed },
+    { id: 'rejected', title: 'Rejected by your rules', items: inbox.autoRejected, quietClosing: true },
+  ] : [];
+
   return (
     <div className="today">
-      <form className="find" onSubmit={(event) => { event.preventDefault(); void start(); }}>
-        <h1 className="find__title">Find tenders</h1>
-        <label className="field">
-          <span>Website</span>
-          <PortalSelect id="find-portal" value={selectedPortalId} onChange={onPortalChange} disabled={starting} />
-        </label>
-        <label className="field">
-          <span>{gem ? 'Bids started from' : 'Published from'}</span>
-          <input type="date" value={from} max={todayIso()} disabled={starting} onChange={(event) => {
-            const next = event.target.value;
-            if (to === from || to < next) setTo(next);
-            setFrom(next);
-          }} />
-        </label>
-        <label className="field">
-          <span>to</span>
-          <input type="date" value={to} min={from} max={todayIso()} disabled={starting} onChange={(event) => setTo(event.target.value)} />
-        </label>
-        <label className="check" title="Search dates that already have a finished run again">
-          <input type="checkbox" checked={runAgain} disabled={starting} onChange={(event) => setRunAgain(event.target.checked)} />
-          Search already-run dates again
-        </label>
-        <button className="btn btn--primary btn--large" type="submit" disabled={starting || !settings || Boolean(blocker)}>
-          {starting ? (gem ? 'Starting…' : 'Opening the portal…') : dateCount > 1 ? `Find tenders for ${dateCount} dates` : 'Find tenders'}
-          {!starting && <ArrowRightIcon />}
-        </button>
-      </form>
+      <header className="today__head">
+        <h1 className="visually-hidden">{mode === 'find' ? 'Find new tenders' : selected || showRejectStep ? 'Decide what is waiting' : 'All decided'}</h1>
+        <div className="switch" role="tablist" aria-label="Today">
+          <button type="button" role="tab" aria-selected={mode !== 'find'} className="switch__opt" onClick={() => setMode('decide')}>
+            Decide
+          </button>
+          <button type="button" role="tab" aria-selected={mode === 'find'} className="switch__opt" onClick={() => setMode('find')}>Find tenders</button>
+        </div>
+      </header>
 
-      <div className="notices" aria-live="polite">
-        {settings && !settings.configured && (
-          <div className="notice notice--attention">
-            <AlertIcon />
-            <span>Tell TenderAssist what to look for before your first search.</span>
-            <button type="button" className="btn btn--quiet btn--small" onClick={() => onOpenSettings('relevance')}>Open settings</button>
-          </div>
-        )}
-        {blocker && (
-          <div className="notice notice--stop" role="alert">
-            <AlertIcon />
-            <span><strong>{blocker.label}.</strong> {blocker.message}</span>
-            {blocker.helpUrl && (
-              <button type="button" className="btn btn--quiet btn--small" onClick={() => void window.tenderAssist.openHelpLink(blocker.helpUrl!)}>
-                {blocker.id === 'jnlp' ? 'Download OpenWebStart' : 'Get help'}
-              </button>
-            )}
-          </div>
-        )}
-        {!blocker && warnings.map((warning) => (
-          <div key={warning.id} className="notice notice--quiet"><AlertIcon /><span><strong>{warning.label}:</strong> {warning.message}</span></div>
-        ))}
-        {startError && <div className="notice notice--stop" role="alert"><AlertIcon /><span>{startError}</span></div>}
-        {skippedNote && <div className="notice notice--quiet"><span>{skippedNote}</span></div>}
-        {recovery && (
-          <div className="notice notice--attention">
-            <AlertIcon />
-            <span>
-              The search for {shortDate(recovery.config.searchDate)} stopped before it finished. {recovery.resumeDescription}
-            </span>
-            {recovery.resume !== 'START_OVER' && <button type="button" className="btn btn--primary btn--small" onClick={() => void continueRecovery('resume')}>Continue it</button>}
-            <button type="button" className="btn btn--quiet btn--small" onClick={() => void continueRecovery('restart')}>Start it again</button>
-            <button type="button" className="btn btn--quiet btn--small" onClick={() => void continueRecovery('end')}>Leave it</button>
-          </div>
-        )}
-        {finishedRun && (
-          <div className="notice notice--done">
-            <span>{finishedRun.message}</span>
-            <button type="button" className="btn btn--quiet btn--small" onClick={() => onOpenRun(finishedRun.jobId)}>See what was checked</button>
-            <button type="button" className="btn btn--quiet btn--small" onClick={onDismissFinished}>Dismiss</button>
-          </div>
-        )}
-        {documentsWaiting && documentsWaiting.ready > 0 && (
-          <div className="notice notice--attention">
-            <AlertIcon />
-            <span>
-              <strong>{documentsWaiting.ready} approved {documentsWaiting.ready === 1 ? 'tender is' : 'tenders are'} waiting for {documentsWaiting.ready === 1 ? 'its' : 'their'} documents.</strong>{' '}
-              {gem
-                ? `TenderAssist saves the bid document and the buyer’s attachments straight from GeM. No sign-in, and nothing is searched again.`
-                : <>TenderAssist signs in, opens only {documentsWaiting.ready === 1 ? 'that tender' : 'those tenders'} in My Tenders, and saves the documents and zip file. Nothing is searched again.</>}
-            </span>
-            <button type="button" className="btn btn--primary btn--small" disabled={starting || Boolean(blocker)} onClick={() => void collectDocuments()}>
-              Collect their documents
-            </button>
-          </div>
-        )}
-        {notInMyTenders.length > 0 && (
-          <div className="notice notice--quiet">
-            <span>
-              {notInMyTenders.length} approved {notInMyTenders.length === 1 ? 'tender never' : 'tenders never'} reached My Tenders, so {notInMyTenders.length === 1 ? 'its' : 'their'} documents cannot be collected yet.
-              {searchAgainDates.length > 0 && ` Search ${searchAgainDates.map(shortDate).join(', ')} again to read ${notInMyTenders.length === 1 ? 'it' : 'them'}.`}
-            </span>
-            {searchAgainDates.length > 0 && (
-              <button type="button" className="btn btn--quiet btn--small" onClick={() => { setFrom(searchAgainDates[0]); setTo(searchAgainDates[searchAgainDates.length - 1]); setRunAgain(true); }}>
-                Use these dates
-              </button>
-            )}
-          </div>
-        )}
-        {missed.length > 0 && !finishedRun && (
-          <div className="notice notice--quiet">
-            <span>Not searched yet: {missed.slice(0, 6).map(shortDate).join(', ')}{missed.length > 6 ? ` and ${missed.length - 6} more` : ''}.</span>
-            <button type="button" className="btn btn--quiet btn--small" onClick={() => { setFrom(missed[0]); setTo(missed[missed.length - 1] ?? missed[0]); }}>
-              Use these dates
-            </button>
-          </div>
-        )}
-      </div>
+      {mode === 'find' ? (
+        <div className="find">
+          <form className="guide" onSubmit={(event) => { event.preventDefault(); void start(); }}>
+            <section className="guide__step">
+              <h2 className="guide__q">Which website?</h2>
+              <div className="tiles" role="radiogroup" aria-label="Website">
+                {quickPortals.map((entry) => (
+                  <button key={entry.id} type="button" role="radio" aria-checked={entry.id === selectedPortalId}
+                    className={entry.id === selectedPortalId ? 'tile is-on' : 'tile'} disabled={starting} onClick={() => onPortalChange(entry.id)}>
+                    <span className="tile__mark">{portalMark(entry.id)}</span>
+                    <span className="tile__name">{isGemPortal(entry) ? 'GeM' : entry.name}</span>
+                    <span className="tile__hint">{isGemPortal(entry) ? 'No sign-in' : 'CAPTCHA and DSC'}</span>
+                  </button>
+                ))}
+                <label className="tile tile--other">
+                  <span className="tile__hint">Another website</span>
+                  <PortalSelect id="find-portal" value={quickPortals.some((entry) => entry.id === selectedPortalId) ? '' : selectedPortalId}
+                    onChange={(next) => { if (next) onPortalChange(next); }} disabled={starting} placeholder={`${PORTALS.length} websites`} />
+                </label>
+              </div>
+            </section>
 
-      <div className="desk">
-        <TenderTray
-          label="Tenders waiting for you"
-          groups={groups}
-          selectedId={selected?.id ?? null}
-          onSelect={setSelectedId}
-          emptyText="Nothing is waiting for you."
-        />
-        <div className="desk__open">
-          {decideError && <p className="notice notice--stop" role="alert"><AlertIcon /><span>{decideError}</span></p>}
-          {done && <p className="decided" role="status">{done}</p>}
-          {selected ? (
-            <TenderFile
-              key={selected.id}
-              tender={selected}
-              busy={busyId === selected.id}
-              actions={actionsFor(selected)}
+            <section className="guide__step">
+              <h2 className="guide__q">{gem ? 'Bids started on which days?' : 'Published on which days?'}</h2>
+              <div className="presets" role="group" aria-label="Quick dates">
+                {datePresets(missed).map((preset) => (
+                  <button key={preset.label} type="button" className={!customDates && preset.from === from && preset.to === to ? 'preset is-on' : 'preset'} disabled={starting}
+                    onClick={() => { setFrom(preset.from); setTo(preset.to); setCustomDates(false); }}>
+                    {preset.label}
+                  </button>
+                ))}
+                <button type="button" className={customDates ? 'preset is-on' : 'preset'} onClick={() => setCustomDates(!customDates)}>Choose dates</button>
+              </div>
+              {customDates && (
+                <div className="dates-pick">
+                  <label className="field"><span>From</span>
+                    <input type="date" value={from} max={todayIso()} disabled={starting} onChange={(event) => {
+                      const next = event.target.value;
+                      if (to === from || to < next) setTo(next);
+                      setFrom(next);
+                    }} />
+                  </label>
+                  <label className="field"><span>To</span>
+                    <input type="date" value={to} min={from} max={todayIso()} disabled={starting} onChange={(event) => setTo(event.target.value)} />
+                  </label>
+                </div>
+              )}
+              <label className="check">
+                <input type="checkbox" checked={runAgain} disabled={starting} onChange={(event) => setRunAgain(event.target.checked)} />
+                Also search days already searched
+              </label>
+            </section>
+
+            <footer className="guide__go">
+              <div className="guide__summary">
+                <span className="guide__big">{rangeLabel}</span>
+                <span className="guide__small">{dateCount > 1 ? `${dateCount} days on ` : 'On '}{isGemPortal(portal) ? 'GeM' : portal.name}{gem ? ', no sign-in needed' : '. You type the CAPTCHA and DSC PIN'}</span>
+              </div>
+              <button className="btn btn--red btn--xl" type="submit" disabled={starting || !settings || Boolean(blocker)}>
+                {starting ? (gem ? 'Starting' : 'Opening the website') : 'Start'}
+                {!starting && <ArrowRightIcon />}
+              </button>
+            </footer>
+          </form>
+
+          <aside className="alerts" aria-live="polite">
+            {settings && !settings.configured && (
+              <div className="alert alert--look">
+                <AlertIcon /><p>Tell TenderAssist what to look for before the first search.</p>
+                <button type="button" className="btn btn--line btn--sm" onClick={() => onOpenSettings('relevance')}>Open settings</button>
+              </div>
+            )}
+            {blocker && (
+              <div className="alert alert--stop" role="alert">
+                <AlertIcon /><p><strong>{blocker.label}.</strong> {blocker.message}</p>
+                {blocker.helpUrl && (
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => void window.tenderAssist.openHelpLink(blocker.helpUrl!)}>
+                    {blocker.id === 'jnlp' ? 'Download OpenWebStart' : 'Get help'}
+                  </button>
+                )}
+              </div>
+            )}
+            {startError && <div className="alert alert--stop" role="alert"><AlertIcon /><p>{startError}</p></div>}
+            {skippedNote && <div className="alert"><p>{skippedNote}</p></div>}
+            {recovery && (
+              <div className="alert alert--look">
+                <AlertIcon />
+                <p>The search for {shortDate(recovery.config.searchDate)} stopped before it finished. {recovery.resumeDescription}</p>
+                <div className="alert__actions">
+                  {recovery.resume !== 'START_OVER' && <button type="button" className="btn btn--red btn--sm" onClick={() => void continueRecovery('resume')}>Continue it</button>}
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => void continueRecovery('restart')}>Start again</button>
+                  <button type="button" className="btn btn--text btn--sm" onClick={() => void continueRecovery('end')}>Leave it</button>
+                </div>
+              </div>
+            )}
+            {documentsWaiting && documentsWaiting.ready > 0 && (
+              <div className="alert alert--blue">
+                <p><strong>{documentsWaiting.ready} approved {documentsWaiting.ready === 1 ? 'tender needs' : 'tenders need'} {documentsWaiting.ready === 1 ? 'its' : 'their'} documents.</strong> {gem ? 'Saved straight from GeM, no sign-in.' : 'TenderAssist opens only those in My Tenders.'}</p>
+                <button type="button" className="btn btn--line btn--sm" disabled={starting || Boolean(blocker)} onClick={() => void collectDocuments()}>Collect documents</button>
+              </div>
+            )}
+            {notInMyTenders.length > 0 && (
+              <div className="alert">
+                <p>{notInMyTenders.length} approved {notInMyTenders.length === 1 ? 'tender never' : 'tenders never'} reached My Tenders.{searchAgainDates.length > 0 && ` Search ${searchAgainDates.map(shortDate).join(', ')} again to read ${notInMyTenders.length === 1 ? 'it' : 'them'}.`}</p>
+                {searchAgainDates.length > 0 && (
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => { setFrom(searchAgainDates[0]); setTo(searchAgainDates[searchAgainDates.length - 1]); setRunAgain(true); setCustomDates(true); }}>Use these days</button>
+                )}
+              </div>
+            )}
+            {finishedRun && (
+              <div className="alert alert--keep">
+                <CheckIcon /><p>{finishedRun.message}</p>
+                <div className="alert__actions">
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => onOpenRun(finishedRun.jobId)}>See the run</button>
+                  <button type="button" className="btn btn--text btn--sm" onClick={onDismissFinished}>Dismiss</button>
+                </div>
+              </div>
+            )}
+            {!blocker && warnings.map((warning) => (
+              <div key={warning.id} className="alert"><AlertIcon /><p><strong>{warning.label}:</strong> {warning.message}</p></div>
+            ))}
+          </aside>
+        </div>
+      ) : (
+        <div className="decide">
+          {decideError && <div className="alert alert--stop" role="alert"><AlertIcon /><p>{decideError}</p></div>}
+          {!inbox && <div className="consignment consignment--loading" aria-busy="true"><span /><span /><span /></div>}
+
+          {inbox && selected && (
+            <>
+              <div className="decide__bar">
+                <span className="decide__count"><strong>{position}</strong> of {walk.length}</span>
+                <span className="decide__progress" aria-hidden="true"><span style={{ transform: `scaleX(${position / walk.length})` }} /></span>
+                <button type="button" className="btn btn--text btn--sm" onClick={() => setDrawer('queue')}><ListIcon /> See all</button>
+              </div>
+              <Consignment
+                key={selected.id}
+                item={selected}
+                busy={busy}
+                stamp={stamp}
+                actions={actionsFor(selected)}
+                driveSet={driveSet}
+                onDetails={() => setDrawer('details')}
+              />
+              <p className="decide__keys"><kbd>A</kbd> approve <kbd>R</kbd> reject <kbd>D</kbd> later <kbd>J</kbd><kbd>K</kbd> next, previous</p>
+            </>
+          )}
+
+          {inbox && showRejectStep && (
+            <section className="rulecheck">
+              <h2>Your rules rejected {rejects.length} {rejects.length === 1 ? 'tender' : 'tenders'}</h2>
+              <p>A quick look keeps the rules honest. If these are right, clear them in one go.</p>
+              <ul className="rulecheck__list">
+                {rejects.slice(0, 5).map((item) => (
+                  <li key={item.id}><span className="rulecheck__title">{item.title}</span><span className="rulecheck__why">{item.matchedExclusions.length > 0 ? `Has “${item.matchedExclusions.join('”, “')}”` : item.explanation}</span></li>
+                ))}
+                {rejects.length > 5 && <li className="rulecheck__more">and {rejects.length - 5} more</li>}
+              </ul>
+              <div className="rulecheck__actions">
+                <button type="button" className="btn btn--red btn--lg" disabled={busy} onClick={() => void clearRejects()}><CheckIcon /> These are right</button>
+                <button type="button" className="btn btn--line btn--lg" onClick={() => { setCheckRejectsOneByOne(true); setSelectedId(rejects[0]?.id ?? null); }}>Check one by one</button>
+              </div>
+            </section>
+          )}
+
+          {inbox && !selected && !showRejectStep && (
+            <section className="alldone">
+              <Postmark text="All done" tone="done" still />
+              <h2>Nothing is waiting for you</h2>
+              <p>Every tender found so far is decided.</p>
+              <button type="button" className="btn btn--primary btn--lg" onClick={() => setMode('find')}>Find new tenders <ArrowRightIcon /></button>
+            </section>
+          )}
+        </div>
+      )}
+
+      {drawer && (
+        <Drawer title={drawer === 'queue' ? 'Waiting for you' : selected?.title ?? 'Tender'} onClose={() => setDrawer(null)}>
+          {drawer === 'queue' ? (
+            <TenderTray label="Waiting for you" groups={queueGroups} selectedId={selected?.id ?? null}
+              onSelect={(id) => { if (rejects.some((item) => item.id === id)) setCheckRejectsOneByOne(true); setSelectedId(id); setDrawer(null); setMode('decide'); }}
+              emptyText="Nothing is waiting." />
+          ) : selected && (
+            <TenderFile tender={selected} actions={[]}
               waitingNote={selected.group === 'CHANGED' ? selected.explanation : undefined}
               onDismissRelated={async (otherId) => { await window.tenderAssist.dismissRelatedTender(selected.id, otherId); loadInbox(); }}
-              onSearchDate={(date) => { setFrom(date); setTo(date); setRunAgain(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-            />
-          ) : inbox && (
-            <div className="desk__empty">
-              <h2>You are up to date</h2>
-              <p>Tenders TenderAssist finds appear here, one file at a time. Choose published dates above and select Find tenders.</p>
-              <p className="desk__keys">Tip: <kbd>J</kbd>/<kbd>K</kbd> move between files, <kbd>A</kbd> approve, <kbd>R</kbd> reject, <kbd>D</kbd> later.</p>
-            </div>
+              onSearchDate={(date) => { setFrom(date); setTo(date); setRunAgain(true); setCustomDates(true); setDrawer(null); setMode('find'); }} />
           )}
-          {!selected && !inbox && <p className="file-empty">Loading…</p>}
-          {selected && <p className="desk__keys">Keys: <kbd>J</kbd>/<kbd>K</kbd> next or previous, <kbd>A</kbd> approve, <kbd>R</kbd> reject, <kbd>D</kbd> later.</p>}
+        </Drawer>
+      )}
+    </div>
+  );
+}
+
+/** One tender to decide, shown like a tracked consignment, stamped when decided. */
+function Consignment({ item, busy, stamp, actions, driveSet, onDetails }: {
+  item: InboxItem; busy: boolean; stamp: { text: string; tone: string } | null; actions: FileAction[]; driveSet: boolean; onDetails: () => void;
+}) {
+  const [note, setNote] = useState('');
+  const [noting, setNoting] = useState(false);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (noting) noteRef.current?.focus(); }, [noting]);
+  const time = deadline(item.closingAt, item.publishedDate);
+  const value = compactRupees(item.value);
+  const group = GROUP_WORDS[item.group] ?? GROUP_WORDS.RECOMMENDED;
+  const department = item.department || item.organisation?.split('||')[0] || 'Department not stated';
+  const trimmed = note.trim() || undefined;
+  const primary = actions.find((action) => action.kind === 'approve');
+  const rejects = actions.filter((action) => action.kind === 'reject');
+  const others = actions.filter((action) => action.kind === 'plain' || action.kind === 'later');
+
+  return (
+    <article className={`consignment${stamp ? ' is-stamped' : ''}`} aria-busy={busy} aria-label={item.title}>
+      <header className="consignment__top">
+        <span className="consignment__id"><span className="consignment__site">{portalMark(item.portalId)}</span>{item.tenderId}</span>
+        {(item.group === 'CHANGED' || item.group === 'AUTO_REJECTED') && <span className={`tag tag--${group.tone}`}>{group.text}</span>}
+      </header>
+      <Tracking tender={item} />
+      <h2 className="consignment__title">{item.title}</h2>
+      <p className="consignment__dept">{department}</p>
+
+      <dl className="facts3">
+        <div><dt>Value</dt><dd title={value?.full}>{value?.short ?? 'Not stated'}</dd></div>
+        <div className={`facts3__time facts3__time--${time.urgency}`}>
+          <dt>Closes</dt>
+          <dd title={item.closingAt ? absoluteDateTime(item.closingAt) : item.closingDate ?? undefined}>
+            {time.urgency === 'unknown' ? (item.closingDate ?? 'Not captured') : time.left}
+          </dd>
         </div>
+        <div><dt>Published</dt><dd>{item.publishedDate ? new Date(item.publishedDate.length <= 10 ? `${item.publishedDate}T00:00:00` : item.publishedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'Not recorded'}</dd></div>
+      </dl>
+
+      <p className="consignment__why"><span>Why</span>{item.explanation}</p>
+
+      <div className="consignment__more">
+        <button type="button" className="btn btn--text btn--sm" onClick={onDetails}>Read the full tender</button>
+        {!noting && <button type="button" className="btn btn--text btn--sm" onClick={() => setNoting(true)}><NoteIcon /> Add a note</button>}
+      </div>
+      {noting && (
+        <textarea ref={noteRef} className="consignment__note" value={note} onChange={(event) => setNote(event.target.value)} rows={2} maxLength={1000}
+          placeholder="Why you decided this (optional)" aria-label="Your note" />
+      )}
+
+      <footer className="consignment__act">
+        {primary && (
+          <button type="button" className="btn btn--red btn--xl" disabled={busy} onClick={() => primary.run(trimmed)}>
+            <CheckIcon /> {primary.label}
+          </button>
+        )}
+        {rejects.map((action) => (
+          <button key={action.id} type="button" className="btn btn--quietline" disabled={busy} onClick={() => action.run(trimmed)}>
+            <CrossIcon /> {action.label}
+          </button>
+        ))}
+        {others.map((action) => (
+          <button key={action.id} type="button" className={action.kind === 'later' ? 'btn btn--text' : 'btn btn--line btn--xl'} disabled={busy} onClick={() => action.run(trimmed)}>
+            {action.kind === 'later' && <ClockIcon />} {action.label}
+          </button>
+        ))}
+        {primary?.id === 'approve' && <span className="consignment__hint">{driveSet ? 'Approving saves its files and copies them to Drive.' : 'Approving saves its files.'}</span>}
+      </footer>
+
+      {stamp && <Postmark text={stamp.text} tone={stamp.tone} />}
+    </article>
+  );
+}
+
+/**
+ * A round date postmark, drawn like India Post's cancellation: the office
+ * name around the ring, a date bar across the middle, wavy cancel lines.
+ */
+function Postmark({ text, tone, still = false }: { text: string; tone: string; still?: boolean }) {
+  const date = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase();
+  return (
+    <span className={`postmark postmark--${tone}${still ? ' postmark--still' : ''}`} aria-hidden="true">
+      <svg viewBox="0 0 260 160" width="260" height="160">
+        <defs><path id="pm-ring" d="M 80 80 m -50 0 a 50 50 0 1 1 100 0 a 50 50 0 1 1 -100 0" /></defs>
+        <circle cx="80" cy="80" r="66" fill="none" stroke="currentColor" strokeWidth="4" />
+        <circle cx="80" cy="80" r="40" fill="none" stroke="currentColor" strokeWidth="2" />
+        <text fontFamily="'Barlow Condensed', sans-serif" fontWeight="600" fontSize="15" letterSpacing="3" fill="currentColor">
+          <textPath href="#pm-ring" startOffset="0">TENDERASSIST · SPEED POST ·</textPath>
+        </text>
+        <rect x="34" y="66" width="92" height="28" fill="var(--sheet)" />
+        <line x1="34" y1="66" x2="126" y2="66" stroke="currentColor" strokeWidth="2" />
+        <line x1="34" y1="94" x2="126" y2="94" stroke="currentColor" strokeWidth="2" />
+        <text x="80" y="87" textAnchor="middle" fontFamily="'Barlow Condensed', sans-serif" fontWeight="700" fontSize="19" letterSpacing="1" fill="currentColor">{date}</text>
+        {[52, 68, 92, 108].map((y) => (
+          <path key={y} d={`M 152 ${y} q 13 -9 26 0 t 26 0 t 26 0 t 26 0`} fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" />
+        ))}
+      </svg>
+      <span className="postmark__word">{text}</span>
+    </span>
+  );
+}
+
+/** A panel that slides in from the right, over the page, for the queue or a tender's full details. */
+function Drawer({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="drawer" role="dialog" aria-modal="true" aria-label={title}>
+      <button type="button" className="drawer__scrim" aria-label="Close" onClick={onClose} />
+      <div className="drawer__panel">
+        <header className="drawer__head">
+          <h2>{title}</h2>
+          <button type="button" className="btn btn--text btn--sm" onClick={onClose}><CrossIcon /> Close</button>
+        </header>
+        <div className="drawer__body">{children}</div>
       </div>
     </div>
   );

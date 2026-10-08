@@ -1,0 +1,698 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-08T07:45:37.444Z",
+  "title": "Design System: TenderAssist",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Inland Letter Blue",
+        "canonical": "oklch(92.6% 0.026 231.6)",
+        "tonalRamp": [
+          "#010d14",
+          "#182730",
+          "#34454e",
+          "#53646e",
+          "#73858f",
+          "#95a8b3",
+          "#b9cdd7",
+          "#def2fd"
+        ]
+      },
+      "ground-2": {
+        "role": "neutral",
+        "displayName": "Deeper Letter",
+        "canonical": "oklch(88.8% 0.035 232.1)",
+        "tonalRamp": [
+          "#000d16",
+          "#122833",
+          "#2f4652",
+          "#4d6572",
+          "#6e8794",
+          "#90a9b8",
+          "#b3cedd",
+          "#dcf2ff"
+        ]
+      },
+      "sheet": {
+        "role": "neutral",
+        "displayName": "Sheet White",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ]
+      },
+      "sheet-2": {
+        "role": "neutral",
+        "displayName": "Sheet Tint",
+        "canonical": "oklch(97.5% 0.009 232.4)",
+        "tonalRamp": [
+          "#080c0e",
+          "#212629",
+          "#3d4346",
+          "#5c6266",
+          "#7d8387",
+          "#a0a6aa",
+          "#c4cace",
+          "#e9f0f4"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(89.8% 0.025 238.4)",
+        "tonalRamp": [
+          "#030d14",
+          "#1a2730",
+          "#36444e",
+          "#55646e",
+          "#758590",
+          "#97a8b3",
+          "#bbccd8",
+          "#e0f1fe"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Firm Hairline",
+        "canonical": "oklch(80.7% 0.041 240.1)",
+        "tonalRamp": [
+          "#000d18",
+          "#112837",
+          "#2e4556",
+          "#4c6576",
+          "#6d8699",
+          "#8fa9bc",
+          "#b2cde2",
+          "#e0f1fe"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(22.4% 0.051 260.5)",
+        "tonalRamp": [
+          "#010a20",
+          "#16253e",
+          "#32425d",
+          "#51627f",
+          "#7183a1",
+          "#93a6c6",
+          "#b6caeb",
+          "#e6efff"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink Two",
+        "canonical": "oklch(39.9% 0.054 259.7)",
+        "tonalRamp": [
+          "#010a21",
+          "#15253f",
+          "#31425f",
+          "#4f6280",
+          "#6f83a3",
+          "#91a6c8",
+          "#b5cbed",
+          "#e6effe"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink Three",
+        "canonical": "oklch(47.5% 0.051 259.1)",
+        "tonalRamp": [
+          "#010a20",
+          "#15253d",
+          "#32435d",
+          "#50627e",
+          "#7083a1",
+          "#92a6c5",
+          "#b6cbeb",
+          "#e5efff"
+        ]
+      },
+      "navy": {
+        "role": "secondary",
+        "displayName": "Speed Post Navy",
+        "canonical": "oklch(26.5% 0.090 262.2)",
+        "tonalRamp": [
+          "#000729",
+          "#0b2250",
+          "#274071",
+          "#456094",
+          "#6582b8",
+          "#87a5de",
+          "#adcaff",
+          "#e6efff"
+        ]
+      },
+      "navy-2": {
+        "role": "secondary",
+        "displayName": "Rail Lift",
+        "canonical": "oklch(33.9% 0.115 262.4)",
+        "tonalRamp": [
+          "#00062a",
+          "#031e5c",
+          "#1e3e7e",
+          "#3c5fa2",
+          "#5c81c7",
+          "#7ea4ed",
+          "#adcafe",
+          "#e6efff"
+        ]
+      },
+      "rail-ink": {
+        "role": "neutral",
+        "displayName": "Rail Ink",
+        "canonical": "oklch(86.5% 0.040 263.6)",
+        "tonalRamp": [
+          "#040a1c",
+          "#1b2539",
+          "#374258",
+          "#556179",
+          "#76839b",
+          "#98a5bf",
+          "#bccae4",
+          "#e7efff"
+        ]
+      },
+      "rail-muted": {
+        "role": "neutral",
+        "displayName": "Rail Muted",
+        "canonical": "oklch(71.3% 0.061 262.2)",
+        "tonalRamp": [
+          "#010824",
+          "#142442",
+          "#304262",
+          "#4e6184",
+          "#6f83a7",
+          "#91a6cc",
+          "#b4caf2",
+          "#e6effe"
+        ]
+      },
+      "blue": {
+        "role": "secondary",
+        "displayName": "Transit Blue",
+        "canonical": "oklch(52.4% 0.183 260.0)",
+        "tonalRamp": [
+          "#000925",
+          "#012156",
+          "#043b8f",
+          "#1459c6",
+          "#3a7dee",
+          "#6fa5fd",
+          "#abcbfe",
+          "#e5efff"
+        ]
+      },
+      "blue-soft": {
+        "role": "secondary",
+        "displayName": "Blue Wash",
+        "canonical": "oklch(92.5% 0.029 233.6)",
+        "tonalRamp": [
+          "#010d15",
+          "#162831",
+          "#33454f",
+          "#516470",
+          "#728691",
+          "#94a9b5",
+          "#b7cdda",
+          "#ddf2ff"
+        ]
+      },
+      "blue-ink": {
+        "role": "secondary",
+        "displayName": "Blue Ink",
+        "canonical": "oklch(40.4% 0.133 259.3)",
+        "tonalRamp": [
+          "#000924",
+          "#002156",
+          "#0d3e87",
+          "#2f5fab",
+          "#5082d1",
+          "#71a5f8",
+          "#abcbfe",
+          "#e5efff"
+        ]
+      },
+      "red": {
+        "role": "primary",
+        "displayName": "Postbox Red",
+        "canonical": "oklch(56.5% 0.206 28.6)",
+        "tonalRamp": [
+          "#1f0000",
+          "#4c0202",
+          "#800505",
+          "#b60e0d",
+          "#e33c30",
+          "#fc7666",
+          "#ffb3a8",
+          "#fee9e5"
+        ]
+      },
+      "red-hover": {
+        "role": "primary",
+        "displayName": "Pillar-Box Shadow",
+        "canonical": "oklch(50.2% 0.186 28.5)",
+        "tonalRamp": [
+          "#1f0000",
+          "#4c0202",
+          "#800506",
+          "#b31c17",
+          "#db483c",
+          "#fc7666",
+          "#ffb3a8",
+          "#fee9e6"
+        ]
+      },
+      "red-soft": {
+        "role": "primary",
+        "displayName": "Red Wash",
+        "canonical": "oklch(94.7% 0.023 24.1)",
+        "tonalRamp": [
+          "#140707",
+          "#302120",
+          "#4e3d3c",
+          "#6e5c5b",
+          "#907d7c",
+          "#b3a09e",
+          "#d8c4c2",
+          "#fee9e7"
+        ]
+      },
+      "red-ink": {
+        "role": "primary",
+        "displayName": "Red Ink",
+        "canonical": "oklch(45.5% 0.168 28.7)",
+        "tonalRamp": [
+          "#1f0000",
+          "#4c0202",
+          "#800505",
+          "#ac2a22",
+          "#d45144",
+          "#fc7666",
+          "#ffb3a8",
+          "#fee9e5"
+        ]
+      },
+      "amber": {
+        "role": "tertiary",
+        "displayName": "Speed Post Amber",
+        "canonical": "oklch(80.4% 0.156 82.5)",
+        "tonalRamp": [
+          "#120a00",
+          "#322201",
+          "#563d03",
+          "#7c5b09",
+          "#a57a11",
+          "#d29a03",
+          "#fbbe38",
+          "#ffeccb"
+        ]
+      },
+      "amber-soft": {
+        "role": "tertiary",
+        "displayName": "Amber Wash",
+        "canonical": "oklch(96.6% 0.042 89.4)",
+        "tonalRamp": [
+          "#100a00",
+          "#2d240a",
+          "#4b4127",
+          "#6b6045",
+          "#8c8265",
+          "#b0a487",
+          "#d4c8aa",
+          "#faeecf"
+        ]
+      },
+      "amber-ink": {
+        "role": "tertiary",
+        "displayName": "Amber Ink",
+        "canonical": "oklch(47.5% 0.100 74.2)",
+        "tonalRamp": [
+          "#130900",
+          "#342001",
+          "#5a3b04",
+          "#83570a",
+          "#a67936",
+          "#cb9b5a",
+          "#f0c07e",
+          "#feebd3"
+        ]
+      },
+      "green": {
+        "role": "tertiary",
+        "displayName": "Delivered Green",
+        "canonical": "oklch(56.1% 0.119 162.1)",
+        "tonalRamp": [
+          "#000f07",
+          "#032d1d",
+          "#074f35",
+          "#00744e",
+          "#28986c",
+          "#54bc8e",
+          "#7ae2b1",
+          "#c4fee0"
+        ]
+      },
+      "green-soft": {
+        "role": "tertiary",
+        "displayName": "Green Wash",
+        "canonical": "oklch(94.7% 0.028 165.5)",
+        "tonalRamp": [
+          "#010f08",
+          "#172922",
+          "#34473e",
+          "#53675d",
+          "#73887e",
+          "#95aba1",
+          "#b9cfc5",
+          "#def5ea"
+        ]
+      },
+      "green-ink": {
+        "role": "tertiary",
+        "displayName": "Green Ink",
+        "canonical": "oklch(44.3% 0.094 161.9)",
+        "tonalRamp": [
+          "#000f07",
+          "#022d1c",
+          "#064f34",
+          "#217150",
+          "#479471",
+          "#6bb893",
+          "#90ddb6",
+          "#c3fee0"
+        ]
+      },
+      "slate": {
+        "role": "neutral",
+        "displayName": "Franked Slate",
+        "canonical": "oklch(52.6% 0.043 262.0)",
+        "tonalRamp": [
+          "#030a1d",
+          "#19253a",
+          "#354259",
+          "#54627a",
+          "#74839d",
+          "#96a6c1",
+          "#bacae6",
+          "#e6efff"
+        ]
+      },
+      "slate-soft": {
+        "role": "neutral",
+        "displayName": "Slate Wash",
+        "canonical": "oklch(94.5% 0.009 258.3)",
+        "tonalRamp": [
+          "#090b0f",
+          "#22252a",
+          "#3f4247",
+          "#5e6167",
+          "#7f8388",
+          "#a2a5ab",
+          "#c5c9cf",
+          "#ebeff5"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Consignment Title",
+        "purpose": "The consignment title on Decide; the largest type on any screen."
+      },
+      "headline": {
+        "displayName": "Page Title",
+        "purpose": "Page titles: Today, Tenders, Runs, Settings."
+      },
+      "title": {
+        "displayName": "Sheet Title",
+        "purpose": "Full-tender cover title, the run now sheet, rule-check and all-done headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "All UI text, with tabular numerals."
+      },
+      "numeral": {
+        "displayName": "Postal Numeral",
+        "purpose": "Facts, tallies, values, run dates in Barlow Condensed."
+      },
+      "label": {
+        "displayName": "Postal Capitals",
+        "purpose": "Tags, statuses, tracking stops, fact and column labels."
+      }
+    },
+    "shadows": [
+      {
+        "name": "rest",
+        "value": "0 1px 2px rgba(13, 34, 80, 0.06), 0 1px 1px rgba(13, 34, 80, 0.04)",
+        "purpose": "List sheets, tables, chips, fields, outline buttons, the selected shelf."
+      },
+      {
+        "name": "raised",
+        "value": "0 6px 16px -6px rgba(13, 34, 80, 0.16), 0 2px 4px -2px rgba(13, 34, 80, 0.06)",
+        "purpose": "Full tender file, settings sections, the selected switch option, tile and card hover."
+      },
+      {
+        "name": "lifted",
+        "value": "0 24px 48px -20px rgba(13, 34, 80, 0.32), 0 6px 12px -6px rgba(13, 34, 80, 0.1)",
+        "purpose": "The consignment and the Find guide: the one sheet the screen is about."
+      },
+      {
+        "name": "act-drop",
+        "value": "inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 6px 14px -8px rgba(212, 42, 34, 0.7)",
+        "purpose": "Under the red act button."
+      },
+      {
+        "name": "navy-drop",
+        "value": "inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 6px 14px -8px rgba(11, 34, 80, 0.6)",
+        "purpose": "Under the navy primary button."
+      },
+      {
+        "name": "field-focus",
+        "value": "0 0 0 4px rgba(31, 99, 209, 0.18)",
+        "purpose": "Field focus only; the one sanctioned zero-offset ring."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "All transitions and the authored motion."
+      },
+      {
+        "name": "state",
+        "value": "140-180ms",
+        "purpose": "Hover, selection, and border transitions."
+      },
+      {
+        "name": "arrive",
+        "value": "420ms, from opacity 0.55 and translateX(24px)",
+        "purpose": "The next consignment arrives from the right. Half of the one authored motion."
+      },
+      {
+        "name": "stamp",
+        "value": "380ms, from opacity 0 rotate(-20deg) scale(1.6) to rotate(-11deg) scale(1)",
+        "purpose": "The postmark lands on a decision; the sheet content then dims to 0.28 and slides 16px left over 360ms after a 280ms delay."
+      },
+      {
+        "name": "drawer-open",
+        "value": "panel slide 320ms from translateX(40px); scrim fade 240ms",
+        "purpose": "Opening the queue or full-tender drawer; functional, not decoration."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "all animation and transition durations 1ms",
+        "purpose": "prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "min-window",
+        "value": "900px"
+      },
+      {
+        "name": "narrow",
+        "value": "max-width: 1040px"
+      },
+      {
+        "name": "medium",
+        "value": "max-width: 1200px"
+      },
+      {
+        "name": "short",
+        "value": "max-height: 800px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Act Button (red)",
+      "kind": "button",
+      "refersTo": "button-act",
+      "description": "The act the operator takes: Approve, Start, Search these dates, continue a stopped run, confirm rule rejects.",
+      "html": "<button class=\"ds-btn ds-btn-act\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M232.49 80.49l-128 128a12 12 0 0 1-17 0l-56-56a12 12 0 1 1 17-17L96 183 215.51 63.51a12 12 0 0 1 17 17z\"/></svg> Approve</button>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0 16px; border:1px solid transparent; border-radius:10px; font:650 0.9375rem/1.1 var(--font); cursor:pointer; transition:background-color 150ms var(--ease), border-color 150ms var(--ease), transform 100ms var(--ease); } .ds-btn:active { transform:translateY(1px) scale(0.99); } .ds-btn:focus-visible { outline:2.5px solid var(--blue); outline-offset:2px; } .ds-btn-act { min-height:54px; padding:0 28px; border-radius:12px; font-size:1.0625rem; min-width:180px; background:var(--red); color:#fff; box-shadow:inset 0 1px 0 rgba(255,255,255,.18), 0 6px 14px -8px rgba(212,42,34,.7); } .ds-btn-act:hover { background:var(--red-hover); }"
+    },
+    {
+      "name": "Primary Button (navy)",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "A main button that is not the act: save, update, go somewhere.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Save changes</button>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0 16px; border:1px solid transparent; border-radius:10px; font:650 0.9375rem/1.1 var(--font); cursor:pointer; transition:background-color 150ms var(--ease), border-color 150ms var(--ease), transform 100ms var(--ease); } .ds-btn:active { transform:translateY(1px) scale(0.99); } .ds-btn:focus-visible { outline:2.5px solid var(--blue); outline-offset:2px; } .ds-btn-primary { background:var(--navy); color:#fff; box-shadow:inset 0 1px 0 rgba(255,255,255,.12), 0 6px 14px -8px rgba(11,34,80,.6); } .ds-btn-primary:hover { background:var(--navy-2); }"
+    },
+    {
+      "name": "Quiet Outline Button",
+      "kind": "button",
+      "refersTo": "button-quietline",
+      "description": "Reject beside the big red Approve: a plain outline, no lift.",
+      "html": "<button class=\"ds-btn ds-btn-quietline\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M208.49 191.51a12 12 0 0 1-17 17L128 145l-63.51 63.49a12 12 0 0 1-17-17L111 128 47.51 64.49a12 12 0 0 1 17-17L128 111l63.51-63.52a12 12 0 0 1 17 17L145 128z\"/></svg> Reject</button>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0 16px; border:1px solid transparent; border-radius:10px; font:650 0.9375rem/1.1 var(--font); cursor:pointer; transition:background-color 150ms var(--ease), border-color 150ms var(--ease), transform 100ms var(--ease); } .ds-btn:active { transform:translateY(1px) scale(0.99); } .ds-btn:focus-visible { outline:2.5px solid var(--blue); outline-offset:2px; } .ds-btn-quietline { min-height:44px; background:transparent; color:var(--ink-2); border-color:var(--line-strong); } .ds-btn-quietline:hover { background:var(--slate-soft); color:var(--ink); }"
+    },
+    {
+      "name": "Text Button",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "Decide later, Read the full tender, See all, Close.",
+      "html": "<button class=\"ds-btn ds-btn-text\">Decide later</button>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0 16px; border:1px solid transparent; border-radius:10px; font:650 0.9375rem/1.1 var(--font); cursor:pointer; transition:background-color 150ms var(--ease), border-color 150ms var(--ease), transform 100ms var(--ease); } .ds-btn:active { transform:translateY(1px) scale(0.99); } .ds-btn:focus-visible { outline:2.5px solid var(--blue); outline-offset:2px; } .ds-btn-text { min-height:36px; padding:0 10px; background:transparent; color:var(--blue-ink); } .ds-btn-text:hover { background:var(--blue-soft); }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "44px field with the label above; blue border and ring on focus.",
+      "html": "<label class=\"ds-field\"><span>Search</span><input placeholder=\"Title, department or ID\"></label>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-field { display:flex; flex-direction:column; gap:6px; font-family:var(--font); } .ds-field span { font-size:0.8125rem; font-weight:650; color:var(--ink-2); } .ds-field input { height:44px; padding:0 14px; border:1px solid var(--line-strong); border-radius:10px; background:#fff; color:var(--ink); font:inherit; box-shadow:0 1px 2px rgba(13,34,80,.06), 0 1px 1px rgba(13,34,80,.04); transition:border-color 140ms var(--ease), box-shadow 140ms var(--ease); } .ds-field input:hover { border-color:var(--ink-3); } .ds-field input:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 4px rgba(31,99,209,.18); }"
+    },
+    {
+      "name": "Status Tags",
+      "kind": "chip",
+      "refersTo": "tag",
+      "description": "Pills in postal capitals, one signal colour per meaning.",
+      "html": "<div class=\"ds-tags\"><span class=\"ds-tag ds-tag-keep\">Kept</span><span class=\"ds-tag ds-tag-look\">Unsure</span><span class=\"ds-tag\">Rejected</span><span class=\"ds-tag ds-tag-later\">Later</span></div>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-tags { display:flex; gap:8px; } .ds-tag { display:inline-flex; padding:3px 11px; border-radius:999px; font:600 0.8125rem/1.3 var(--font-post); letter-spacing:.05em; text-transform:uppercase; background:var(--slate-soft); color:var(--slate); } .ds-tag-keep { background:var(--green-soft); color:var(--green-ink); } .ds-tag-look { background:var(--amber-soft); color:var(--amber-ink); } .ds-tag-later { background:var(--blue-soft); color:var(--blue-ink); }"
+    },
+    {
+      "name": "Navy Rail",
+      "kind": "nav",
+      "refersTo": "rail",
+      "description": "88px navy rail: round red brand postmark, icon-over-label tabs, current tab on navy-2.",
+      "html": "<nav class=\"ds-rail\"><svg width=\"34\" height=\"34\" viewBox=\"0 0 34 34\" aria-hidden=\"true\"><circle cx=\"17\" cy=\"17\" r=\"15.5\" fill=\"#d42a22\"/><circle cx=\"17\" cy=\"17\" r=\"11.6\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.4\" stroke-dasharray=\"2.2 1.6\"/><text x=\"17\" y=\"21.2\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"Barlow Condensed, sans-serif\" font-weight=\"700\" font-size=\"12.5\">TA</text></svg><button class=\"ds-tab\" aria-current=\"page\">Today</button><button class=\"ds-tab\">Tenders</button><button class=\"ds-tab\">Runs</button><button class=\"ds-tab\">Settings</button></nav>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-rail { display:flex; flex-direction:column; align-items:center; gap:4px; width:88px; padding:14px 10px; background:var(--navy); } .ds-rail svg { margin-bottom:14px; } .ds-tab { width:100%; padding:10px 2px 8px; border:0; border-radius:12px; background:transparent; color:var(--rail-muted); font:600 0.75rem var(--font); cursor:pointer; transition:background-color 160ms var(--ease), color 160ms var(--ease); } .ds-tab:hover { color:#fff; background:rgba(255,255,255,.06); } .ds-tab[aria-current='page'] { color:#fff; background:var(--navy-2); } .ds-tab:focus-visible { outline:2.5px solid #9fc0ff; outline-offset:-2px; }"
+    },
+    {
+      "name": "Segmented Switch",
+      "kind": "nav",
+      "refersTo": "segmented-option-selected",
+      "description": "Decide / Find tenders: a white sheet in a Deeper Letter well; red count for the operator's turn.",
+      "html": "<div class=\"ds-switch\"><button class=\"ds-opt\" aria-selected=\"true\">Decide <span class=\"ds-count\">4</span></button><button class=\"ds-opt\">Find tenders</button></div>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-switch { display:inline-flex; padding:4px; border-radius:14px; background:var(--ground-2); box-shadow:inset 0 1px 2px rgba(13,34,80,.08); } .ds-opt { display:inline-flex; align-items:center; gap:8px; min-height:38px; padding:0 18px; border:0; border-radius:10px; background:transparent; color:var(--ink-2); font:650 0.9375rem var(--font); cursor:pointer; } .ds-opt:hover { color:var(--ink); } .ds-opt[aria-selected='true'] { background:#fff; color:var(--ink); box-shadow:0 6px 16px -6px rgba(13,34,80,.16), 0 2px 4px -2px rgba(13,34,80,.06); } .ds-opt:focus-visible { outline:2.5px solid var(--blue); outline-offset:2px; } .ds-count { min-width:22px; height:20px; padding:0 6px; border-radius:999px; background:var(--red); color:#fff; font:700 0.75rem/20px var(--font); }"
+    },
+    {
+      "name": "Tracking Strip",
+      "kind": "custom",
+      "description": "Five stops on every tender and run: reached blue, kept green, current a thick red ring.",
+      "html": "<ol class=\"ds-track\"><li class=\"ds-stop is-reached ds-done\"><span class=\"ds-dot\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M232.49 80.49l-128 128a12 12 0 0 1-17 0l-56-56a12 12 0 1 1 17-17L96 183 215.51 63.51a12 12 0 0 1 17 17z\"/></svg></span><span class=\"ds-label\">Found</span><span class=\"ds-when\">6 Oct</span></li><li class=\"ds-stop is-reached ds-done\"><span class=\"ds-dot\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M232.49 80.49l-128 128a12 12 0 0 1-17 0l-56-56a12 12 0 1 1 17-17L96 183 215.51 63.51a12 12 0 0 1 17 17z\"/></svg></span><span class=\"ds-label\">Read</span><span class=\"ds-when\">7 Oct</span></li><li class=\"ds-stop is-reached ds-keep\"><span class=\"ds-dot\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M232.49 80.49l-128 128a12 12 0 0 1-17 0l-56-56a12 12 0 1 1 17-17L96 183 215.51 63.51a12 12 0 0 1 17 17z\"/></svg></span><span class=\"ds-label\">Kept</span><span class=\"ds-when\">7 Oct</span></li><li class=\"ds-stop ds-now\"><span class=\"ds-dot\"></span><span class=\"ds-label\">You decide</span></li><li class=\"ds-stop\"><span class=\"ds-dot\"></span><span class=\"ds-label\">Files saved</span></li></ol>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-track { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); width:560px; } .ds-stop { position:relative; display:flex; flex-direction:column; gap:6px; padding-right:8px; } .ds-stop::after { content:''; position:absolute; left:22px; right:2px; top:10px; height:2px; background:var(--line); } .ds-stop:last-child::after { display:none; } .ds-stop.is-reached::after { background:var(--blue); } .ds-dot { position:relative; z-index:1; display:grid; place-items:center; width:22px; height:22px; border-radius:50%; border:2px solid var(--line-strong); background:#fff; color:#fff; box-sizing:border-box; } .ds-done .ds-dot { background:var(--blue); border-color:var(--blue); } .ds-keep .ds-dot { background:var(--green); border-color:var(--green); } .ds-now .ds-dot { border:6px solid var(--red); } .ds-label { font:600 0.8125rem/1.1 var(--font-post); letter-spacing:.05em; text-transform:uppercase; color:var(--ink-3); } .ds-keep .ds-label { color:var(--green-ink); } .ds-now .ds-label { color:var(--red-ink); } .ds-when { font:500 0.8125rem/1 var(--font-post); color:var(--ink-3); }"
+    },
+    {
+      "name": "Consignment Sheet",
+      "kind": "card",
+      "refersTo": "consignment",
+      "description": "One tender at a time: number stamp, display title, three condensed facts; arrives from the right.",
+      "html": "<article class=\"ds-cons\"><span class=\"ds-id\"><span class=\"ds-site\">TN</span>2026_DIT_540001_1</span><h2 class=\"ds-title\">Design and maintenance of the district web portal</h2><p class=\"ds-dept\">Collectorate, Coimbatore</p><dl class=\"ds-facts\"><div><dt>Value</dt><dd>&#8377;48.50 L</dd></div><div class=\"ds-soon\"><dt>Closes</dt><dd>2 days left</dd></div><div><dt>Published</dt><dd>6 Oct</dd></div></dl></article>",
+      "css": ":host, .ds-root { --ground:#d6eaf5; --ground-2:#c4dfee; --sheet:#fff; --sheet-2:#f1f8fc; --line:#cfe0ec; --line-strong:#a9c4d8; --ink:#0d1b33; --ink-2:#364865; --ink-3:#4b5d79; --navy:#0b2250; --navy-2:#143372; --rail-ink:#c5d3ee; --rail-muted:#8ea3c9; --blue:#1f63d1; --blue-soft:#d4eaf7; --blue-ink:#15458f; --red:#d42a22; --red-hover:#b6201a; --red-soft:#fde8e6; --red-ink:#9f1b15; --amber:#f0b429; --amber-soft:#fff3d4; --amber-ink:#7d5200; --green:#0f8a5f; --green-soft:#ddf4e9; --green-ink:#0a6343; --slate:#5d6b84; --slate-soft:#e9edf3; --ease:cubic-bezier(0.16,1,0.3,1); --font:'Figtree Variable','Segoe UI',system-ui,sans-serif; --font-post:'Barlow Condensed','Arial Narrow',sans-serif; } .ds-cons { display:flex; flex-direction:column; gap:16px; padding:26px 32px 28px; border-radius:20px; background:#fff; box-shadow:0 24px 48px -20px rgba(13,34,80,.32), 0 6px 12px -6px rgba(13,34,80,.1); font-family:var(--font); color:var(--ink); animation:ds-arrive 420ms var(--ease); } @keyframes ds-arrive { from { opacity:.55; transform:translateX(24px); } } .ds-id { display:inline-flex; align-self:flex-start; overflow:hidden; padding-right:10px; border:1.5px solid var(--ink); border-radius:6px; font:600 1.0625rem/1 var(--font-post); letter-spacing:.08em; } .ds-site { margin-right:10px; padding:5px 9px; background:var(--ink); color:#fff; } .ds-title { margin:0; max-width:26ch; font-size:2.5rem; font-weight:750; line-height:1.12; letter-spacing:-.03em; } .ds-dept { margin:-8px 0 0; color:var(--ink-3); font-weight:550; } .ds-facts { display:grid; grid-template-columns:repeat(3,1fr); margin:0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); } .ds-facts > div { padding:14px 18px 14px 0; } .ds-facts > div + div { padding-left:18px; border-left:1px solid var(--line); } .ds-facts dt { font:600 0.8125rem/1 var(--font-post); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); } .ds-facts dd { margin:6px 0 0; font:600 1.875rem/1.05 var(--font-post); } .ds-soon dd { color:var(--red-ink); } @media (prefers-reduced-motion: reduce) { .ds-cons { animation:none; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Speed Post Counter",
+    "overview": "TenderAssist is an India Post counter in office daylight. Inland-letter blue tints the whole ground, a deep navy rail holds the app on the left, and white sheets carry the work. Each tender is a consignment with a number stamp, a tracking strip, and a dated postmark; the operator's job is to take the one next step the counter puts in front of them, not to scan a dashboard.\n\nDensity is calm and single-minded: one large sheet per screen where a decision is due, lists of consignments where review is due, and settings shown one section at a time. Two voices carry the type. Figtree speaks the UI and the tender titles; Barlow Condensed is the postal voice for numerals, stamps, labels in postal capitals, and the postmark. Colour is semantic before it is decorative: postbox red is the act, amber needs a look, green is done, blue is in transit.\n\nThe world rejects the grey dashboard of panes, cards, and badges. It is light only; there is no dark theme.",
+    "keyCharacteristics": [
+      "Inland-letter blue ground, navy rail, white sheets with blue-grey hairlines.",
+      "Postbox red reserved for the act and the postmark.",
+      "Barlow Condensed numerals and postal-capital labels against Figtree UI text.",
+      "A five-stop tracking strip on every tender and every run.",
+      "One authored motion: the consignment arrives and the postmark stamps it."
+    ],
+    "rules": [
+      {
+        "name": "The Postbox Rule",
+        "body": "A red-filled button is the act the operator takes: Approve (and Keep when a run asks), Start, Search these dates, continue a stopped run, confirm rule rejects. Every other main button is navy.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Meaning Rule",
+        "body": "Amber means needs a look, green means done or kept, blue means in transit or selected, slate means set aside. Never use a signal colour for decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Consignment Rule",
+        "body": "The consignment title is the largest type on any screen. Numerals and the postmark may be bold, never bigger.",
+        "section": "typography"
+      },
+      {
+        "name": "The Postal Voice Rule",
+        "body": "Barlow Condensed is for numbers, stamps, and short labels in postal capitals. Sentences, buttons, and titles stay in Figtree.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Kicker Rule",
+        "body": "No eyebrow or kicker labels above headings. A postal-capital label names a value or a state beside it; it never introduces a heading.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Next Step Rule",
+        "body": "Every screen leads with the single next thing to do. The top bar always says it.",
+        "section": "layout"
+      },
+      {
+        "name": "The Border-and-Tint Rule",
+        "body": "Selected is a blue border plus a pale tint (tiles, choices) or a white sheet in a well (switches, shelves). Never a zero-offset glow halo. The only zero-offset ring is the keyboard focus ring.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Stripe Rule",
+        "body": "No coloured side stripes on cards, rows, or alerts. Urgency tints the whole footer band of a tender card; state lives in the tracking strip and the pill.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Radius Rule",
+        "body": "Controls 10px, sheets 16 to 20px, tags and chips are pills.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do put the act in Postbox Red (#d42a22) and every other main button in Speed Post Navy (#0b2250).",
+      "Do set Reject as a quiet outline beside the big red Approve, with Decide later as a text button.",
+      "Do give every tender and every run a tracking strip.",
+      "Do make the consignment title the largest type on screen (2.5rem, 2rem below 1040px).",
+      "Do set numerals, stamps, and short state labels in Barlow Condensed; keep sentences and buttons in Figtree.",
+      "Do show selection with a blue border and a pale tint, or a white sheet in a well.",
+      "Do keep radii to the rule: controls 10px, sheets 16 to 20px, tags and chips pills.",
+      "Do use Phosphor icons (regular, 18px default) beside words, never alone as a label.",
+      "Do honour reduced motion; every animation collapses to 1ms."
+    ],
+    "donts": [
+      "Don't use red fill for anything but the act, the postmark, and the operator's-turn marker.",
+      "Don't put zero-offset glow halos on selected or hovered elements.",
+      "Don't add coloured side stripes to cards, rows, or alerts.",
+      "Don't put eyebrow or kicker labels above headings.",
+      "Don't add entrance animations. The consignment arrive and postmark stamp are the one authored motion; overlays may only slide or fade in to open.",
+      "Don't use em-dashes in UI copy.",
+      "Don't use text glyphs (✓, +, ×) as icons.",
+      "Don't build a dashboard of panes, cards, and badges; put one next step on screen.",
+      "Don't add a dark theme; the world is office daylight."
+    ]
+  }
+}

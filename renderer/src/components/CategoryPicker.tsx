@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChipRemoveIcon } from './icons';
+import { CheckIcon, ChipRemoveIcon, PlusIcon } from './icons';
 import { absoluteDateTime } from '../format';
 import type { PortalCategoryList } from '../../../src/electron/ipcTypes';
 import { DEFAULT_RUN_DEFAULTS } from '../../../src/config/runConfiguration';
@@ -18,6 +18,16 @@ export interface CategoryPickerProps {
 
 // GeM with products has thousands of categories; draw only the first ones and let typing narrow them.
 const MAX_SHOWN = 150;
+
+/**
+ * GeM names run to hundreds of characters ("E-learning Content Development -
+ * Non-igot; Restructure …; Hindi, English, …"). The part before the first
+ * " - " or ";" is the name a person scans for; the rest is shown smaller.
+ */
+function splitCategory(value: string): { name: string; detail: string } {
+  const match = /^(.{3,90}?)(?:\s+-\s+|;\s*)(.+)$/.exec(value);
+  return match ? { name: match[1].trim(), detail: match[2].trim() } : { name: value, detail: '' };
+}
 
 const sameName = (a: string, b: string) => a.toLocaleLowerCase() === b.toLocaleLowerCase();
 
@@ -50,27 +60,32 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
 
   return (
     <fieldset className="settings-fieldset">
-      <legend>Categories to search</legend>
+      <legend>Categories to search <span className="count">{values.length}</span></legend>
       <p className="field-helper" id="category-picker-helper">
         {known
-          ? `Pick from the ${websiteList!.categories.length} categories on the ${portalName} website (list read ${absoluteDateTime(websiteList!.readAt!)}).`
+          ? `${portalName} only. ${websiteList!.categories.length} categories, read ${absoluteDateTime(websiteList!.readAt!)}.`
           : unknownListHint ?? `These are the starting categories. The full ${portalName} list appears here after one search.`}
       </p>
-      <div className="chip-list" aria-live="polite">
+      <ul className="cat-list" aria-live="polite" aria-label="Chosen categories">
+        {values.length === 0 && <li className="cat-list__empty">No categories chosen yet. Find one below.</li>}
         {values.map((value) => {
           const missing = known && !options.some((option) => sameName(option, value));
+          const { name, detail } = splitCategory(value);
           return (
-            <span className={missing ? 'chip chip--missing' : 'chip'} key={value.toLocaleLowerCase()}
-              title={missing ? 'Not on the website’s list. This search will fail; remove it or pick the right name.' : undefined}>
-              <span>{value}{missing && ' (not on the website)'}</span>
+            <li className={missing ? 'cat cat--missing' : 'cat'} key={value.toLocaleLowerCase()}
+              title={missing ? `${value}\n\nNot on the website’s list. This search will fail; remove it or pick the right name.` : value}>
+              <span className="cat__text">
+                <span className="cat__name">{name}</span>
+                {missing ? <span className="cat__detail">Not on the website’s list</span> : detail && <span className="cat__detail">{detail}</span>}
+              </span>
               <button type="button" className="chip__remove" aria-label={`Remove ${value}`}
                 onClick={() => onChange(values.filter((item) => item !== value))}>
                 <ChipRemoveIcon />
               </button>
-            </span>
+            </li>
           );
         })}
-      </div>
+      </ul>
       <div className="chip-entry">
         <input id="product-category-entry" type="search" value={filter} placeholder="Find a category"
           aria-describedby="category-picker-helper" aria-controls="category-picker-options"
@@ -85,20 +100,21 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
       <ul className="pick-list" id="category-picker-options" aria-label="Categories you can add">
         {chosenMatches.map((value) => (
           <li key={`chosen-${value}`} className="pick-list__chosen">
-            <span aria-hidden="true">✓</span> {value} <small>chosen</small>
+            <span aria-hidden="true"><CheckIcon /></span> {value} <small>chosen</small>
           </li>
         ))}
         {choices.slice(0, MAX_SHOWN).map((option) => (
           <li key={option}>
-            <button type="button" className="pick-list__item" onClick={() => add(option)}>
-              <span aria-hidden="true">+</span> {option}
+            <button type="button" className="pick-list__item" onClick={() => add(option)} title={option}>
+              <span aria-hidden="true"><PlusIcon /></span>
+              <span className="pick-list__text"><strong>{splitCategory(option).name}</strong>{splitCategory(option).detail && <small>{splitCategory(option).detail}</small>}</span>
             </button>
           </li>
         ))}
         {canAddTyped && (
           <li>
             <button type="button" className="pick-list__item" onClick={() => add(typed)}>
-              <span aria-hidden="true">+</span> Add “{typed}” as typed
+              <span aria-hidden="true"><PlusIcon /></span> Add “{typed}” as typed
             </button>
           </li>
         )}
