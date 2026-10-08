@@ -1,44 +1,57 @@
 # TenderAssist
 
-TenderAssist is a desktop workflow for searching TN Tenders, reviewing the resulting favorites in My Tenders, and shortlisting work against saved product categories and intent keywords.
+TenderAssist is a Windows desktop app that finds government tenders for chosen published dates, reads each candidate, keeps the ones that match the office's work, saves their documents and an eligibility sheet, and leaves the operator one decision per tender. It works on GePNIC portals (Tamil Nadu verified, other states in beta) and on GeM (no sign-in).
 
-## Assisted portal login
+Product truth lives in `PRODUCT.md`, the visual system in `DESIGN.md`, and the work log and next steps in `BACKLOG.md`.
 
-Portal credentials are configured from **Settings → TN Tenders login**. The password is encrypted with the operating system's secure storage and is never returned to the renderer, written as plaintext to SQLite, or used to solve CAPTCHA.
+## Daily use
 
-When a job starts, TenderAssist opens Chrome, fills the saved login ID and password, focuses the CAPTCHA field, and waits. The user enters CAPTCHA and submits the portal form. If TN Tenders downloads `signData.jnlp`, TenderAssist validates its HTTPS source, host, path, filename, size, and JNLP content before displaying **Launch DSC signer**. Certificate choice and the DSC PIN remain entirely manual.
+1. **Today → Find tenders.** Pick the website, pick the days (Today, Yesterday, Last 3 or 7 days, Not searched yet, or your own range), and select **Start**.
+2. **Sign in (GePNIC only).** TenderAssist fills the saved login. You type the CAPTCHA and run the DSC signer yourself; certificate choice and the PIN are always manual.
+3. **The run works on its own.** The run panel tracks every step live: each category searched, each tender read and kept, rejected or unsure, with a progress bar and a heartbeat. While it works, the portal takes no clicks from you, so a stray click cannot break the run. It opens by itself whenever you are needed, and **Let me use the portal** (two clicks) hands it over on purpose.
+4. **After the last date**, search more dates in the same sign-in, switch to another website, or finish and sign out.
+5. **Today → Decide.** One tender at a time: Approve, Reject, or Decide later (keys A, R, D; J and K move). Each decision is postmarked. Rule rejections are checked in one step.
 
-The DSC signer needs [OpenWebStart](https://openwebstart.com/download/) (Java Web Start). TenderAssist checks for it before a job starts and will not start without it, because sign-in cannot finish otherwise. If the portal page crashes or hangs during a run, TenderAssist reopens it and fills the saved login again; only CAPTCHA and DSC need you.
+Passwords are encrypted with Windows' secure storage and never reach the screen or the database in plain text.
 
-## How a run works
+## Where files go
 
-1. Choose **Published from** and **Published to**. Each date is searched on its own, with that date as the portal's published date, as a separate run in one sign-in. Dates that already have a completed run are skipped.
-2. TenderAssist searches, screens each tender against your categories and intent, and downloads the documents and zip files for shortlisted and needs-review tenders into the local output folder, one day folder per published date. It does not stop to ask.
-3. When every date is done, the portal stays signed in and TenderAssist offers **Run other published dates** or **Finish and sign out**.
-4. Decide on tenders in the **Inbox**. Approving a tender copies its saved folder from the local output folder to the Drive folder. Nothing goes to Drive without approval.
+```
+<output folder> / October-2026 / 08-10-2026 / Approved-Tenders-08-10-2026.xlsx
+                                            / 08-10-2026_1_<short title> / Documents / …
+                                                                         / Eligibility.xlsx
+```
 
-## Run for development
+Folder and file names can be changed in **Settings → Folders** (`{DD}`, `{MM}`, `{MONTH}`, `{YYYY}`, `{SNO}`, `{TITLE}`).
+
+Everything saved is copied to Google Drive in the same layout, through the built-in Google sign-in (Settings → Folders) or a Google Drive for desktop folder. A decision made later, on Today or Tenders, rewrites that day's report sheet and uploads it again. Setup: `docs/google-drive-setup.md`.
+
+## Install (end users)
+
+Run `TenderAssist-Setup-<version>.exe`:
+
+- Accept the terms (`build/license.txt`).
+- Setup checks for **OpenWebStart** and **Java 8 or newer**, which the DSC signer needs, and downloads and installs whichever is missing (Eclipse Temurin 8 and OpenWebStart 1.14.0, checksums verified). Windows asks once for permission. Automatic updates skip this step.
+- Desktop and Start Menu shortcuts are created.
+
+## Development
 
 ```powershell
 npm install
-npm run electron
+npm run electron        # build and run
+npm test                # unit tests (vitest)
+npm run typecheck
 ```
 
-## Build a Windows installer
+A development copy can run beside the installed app on its own data: set `TENDERASSIST_USER_DATA` to an empty folder. The database and DSC downloads follow it.
+
+## Build
 
 ```powershell
-npm run dist:win
+npm run dist:win        # release/TenderAssist-Setup-<version>.exe
 ```
 
-The installable desktop opener is written to `release/TenderAssist-Setup-<version>.exe`. The installer creates Desktop and Start Menu shortcuts, so end users do not need a terminal.
+- App icon: `build/icon.ico` and `build/icon.png`, generated by `npx electron build/icon-source/make-icon.cjs`.
+- Installer additions: `build/installer.nsh` runs `build/prereqs.ps1` (OpenWebStart and Java). To move to newer versions, update the URLs and SHA-256 hashes there. `-DryRun` detects and downloads only.
 
-## Build macOS disk images
-
-Run this on macOS:
-
-```bash
-npm ci
-npm run dist:mac
-```
-
-This creates x64 and Apple Silicon `.dmg` files in `release/`. Production distribution should add Windows code signing and Apple signing/notarization to remove operating-system trust warnings.
+macOS: run `npm run dist:mac` on a Mac. Production distribution should add Windows code signing and Apple notarization to remove operating-system trust warnings.

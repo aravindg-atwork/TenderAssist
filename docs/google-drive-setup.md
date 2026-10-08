@@ -59,8 +59,8 @@ The signed-in account must be able to add files to the folder, which means Edito
 - **Drive keeps the same files as this computer.** After every search, each saved tender's folder (`Documents`, `Eligibility.xlsx`) and that day's report sheet are uploaded into the Drive folder, in the same layout:
 
   ```
-  <Drive folder> / 10-2026 / 06-10-2026 / Approved-Tenders-06-10-2026.xlsx
-                                         / 06-10-2026_1_<short title> / Documents / …
+  <Drive folder> / October-2026 / 06-10-2026 / Approved-Tenders-06-10-2026.xlsx
+                                              / 06-10-2026_1_<short title> / Documents / …
                                                                       / Eligibility.xlsx
   ```
 
