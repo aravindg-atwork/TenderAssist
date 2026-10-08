@@ -10,3 +10,10 @@ release/
 
 # Google sign-in credential for Drive upload: packed into the app build, never committed.
 google-oauth-client.json
+
+# Impeccable working files: review screenshots, caches, open questions.
+.impeccable/review/
+.impeccable/hook.cache.json
+.impeccable/questions/
+# Icon previews written by build/icon-source/make-icon.cjs.
+build/icon-source/preview-*.png

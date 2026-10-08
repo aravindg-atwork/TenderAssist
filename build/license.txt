@@ -1,0 +1,42 @@
+TENDERASSIST - TERMS AND CONDITIONS OF USE
+
+Please read these terms carefully. By selecting "I Agree" and installing TenderAssist, you accept them. If you do not agree, select "Cancel" and do not install the software.
+
+1. WHAT TENDERASSIST DOES
+TenderAssist helps you find and shortlist government tenders. It works inside your own signed-in session on the tender websites you choose (such as GePNIC state portals and GeM), searches for the dates you pick, reads tender details, and saves documents and summary sheets to folders you choose.
+
+2. YOUR ACCOUNT AND YOUR DECISIONS
+2.1 You sign in to each portal yourself. CAPTCHA, your Digital Signature Certificate (DSC) and its PIN always stay with you; TenderAssist never asks for or stores your DSC PIN.
+2.2 TenderAssist suggests which tenders to keep or reject. It can be wrong. You remain responsible for checking every tender, its eligibility, documents, dates and values on the official portal before you act on it or submit a bid.
+2.3 You are responsible for using the portals in line with their own terms of use and the law that applies to you.
+
+3. NO GUARANTEE
+TenderAssist is provided "as is". We do not guarantee that it will find every relevant tender, that the information it reads or saves is complete or accurate, or that it will work when a portal changes, is slow, or is unavailable. Always rely on the official portal as the source of truth.
+
+4. LIMITATION OF LIABILITY
+To the fullest extent the law allows, the makers of TenderAssist are not liable for any loss arising from its use, including a missed tender, a missed deadline, a rejected bid, lost data, or lost business or profit.
+
+5. YOUR DATA
+5.1 Your portal login ID and password are kept in your computer's secure store (Windows Credential Manager) and are only used to fill the portal's sign-in page.
+5.2 Tenders, notes and settings are kept on this computer. Files are copied to Google Drive only if you sign in to Google and link a folder in Settings; you can sign out at any time.
+5.3 TenderAssist does not sell or share your data.
+
+6. OTHER SOFTWARE INSTALLED WITH TENDERASSIST
+To run the portal's DSC signer, setup checks for OpenWebStart and Java 8 or newer. If either is missing, it downloads and installs:
+  - OpenWebStart (by Karakun AG), licensed under the GNU General Public License v2 with the Classpath Exception; and
+  - Eclipse Temurin 8 (Java, by the Eclipse Foundation), licensed under the GNU General Public License v2 with the Classpath Exception.
+Each is downloaded from its official release page and checked against its published checksum before it is installed. By continuing you also accept their licences. Windows may ask for administrator permission to install them.
+
+7. UPDATES
+TenderAssist checks for new versions and may download and install updates automatically.
+
+8. USE AND COPYING
+You may install and use TenderAssist for your organisation's own tender work. You may not sell, sublicense, or reverse engineer it, or remove these terms.
+
+9. CHANGES TO THESE TERMS
+Later versions may come with updated terms, shown when you install them.
+
+10. GOVERNING LAW
+These terms are governed by the laws of India. Any dispute is subject to the jurisdiction of the courts of Chennai, Tamil Nadu.
+
+By selecting "I Agree" you confirm that you have read and accept these terms.

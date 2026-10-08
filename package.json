@@ -1,6 +1,6 @@
 {
   "name": "tenderassist",
-  "version": "0.4.12",
+  "version": "0.5.0",
   "description": "Desktop automation for finding and shortlisting relevant government tenders",
   "author": "TenderAssist",
   "private": true,
@@ -27,6 +27,9 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@phosphor-icons/react": "^2.1.10",
     "@types/node": "^26.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -44,7 +47,8 @@
     "appId": "in.tenderassist.desktop",
     "productName": "TenderAssist",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
@@ -70,14 +74,22 @@
           ]
         }
       ],
-      "artifactName": "TenderAssist-Setup-${version}.${ext}"
+      "artifactName": "TenderAssist-Setup-${version}.${ext}",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "TenderAssist"
+      "shortcutName": "TenderAssist",
+      "license": "build/license.txt",
+      "include": "build/installer.nsh",
+      "perMachine": false,
+      "warningsAsErrors": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "mac": {
       "category": "public.app-category.business",
