@@ -48,6 +48,8 @@ export interface GemRunDeps {
   client: Pick<GemClient, 'listBids' | 'fetchFile'>;
   /** Product bids are searched as well as service bids. */
   includeProducts: boolean;
+  /** Every bid that started on the day, counted per GeM category, for the daily report. Only when every list was read. */
+  onDayCounts?: (day: string, total: number, categories: Record<string, number>) => void;
   /** GeM's code for each category name in its dropdown (lower-case names). */
   categoryCodes?: ReadonlyMap<string, string>;
   signal?: AbortSignal;
@@ -296,6 +298,11 @@ export async function runGemDate(
     return final;
   }
   jobMachine.transition(jobId, 'CLASSIFYING', failed.length > 0 ? `GeM search finished; not searched: ${failed.join(', ')}` : 'GeM search finished');
+  if (failed.length === 0 && deps.onDayCounts) {
+    const categories: Record<string, number> = {};
+    for (const bid of found.values()) categories[bid.category || 'Not stated'] = (categories[bid.category || 'Not stated'] ?? 0) + 1;
+    try { deps.onDayCounts(day, found.size, categories); } catch { /* the report count is a bonus; never stop the run */ }
+  }
 
   // Screen every bid on its list record; read only the ones in your categories.
   phase = 'CLASSIFICATION';

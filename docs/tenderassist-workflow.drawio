@@ -1,0 +1,280 @@
+<?xml version="1.0" ?>
+<mxfile host="app.diagrams.net" agent="TenderAssist" version="24.7.17">
+  <diagram id="tenderassist-workflow" name="TenderAssist workflow">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="2400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="&lt;b style=&quot;font-size:22px&quot;&gt;How TenderAssist finds, reads and files tenders&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:13px&quot;&gt;Read top to bottom. Yellow is what you do, blue is what TenderAssist does on its own, grey is the tender website (Tamil Nadu or GeM), green is what ends up in your folders and on Google Drive.&lt;/span&gt;" style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontFamily=Helvetica;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1320" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_you" value="&lt;b&gt;You&lt;/b&gt;" style="swimlane;html=1;startSize=40;horizontal=1;collapsible=0;fillColor=#FFF4D6;strokeColor=#C9A227;swimlaneFillColor=#FFFFFF;fontSize=15;fontStyle=1;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="300" height="2190" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_ta" value="&lt;b&gt;TenderAssist&lt;/b&gt;" style="swimlane;html=1;startSize=40;horizontal=1;collapsible=0;fillColor=#E3EEFB;strokeColor=#2F6FC6;swimlaneFillColor=#FFFFFF;fontSize=15;fontStyle=1;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="340" y="80" width="420" height="2190" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_web" value="&lt;b&gt;The tender website&lt;/b&gt;" style="swimlane;html=1;startSize=40;horizontal=1;collapsible=0;fillColor=#EEF0F3;strokeColor=#7A8597;swimlaneFillColor=#FFFFFF;fontSize=15;fontStyle=1;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="760" y="80" width="300" height="2190" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane_drive" value="&lt;b&gt;Your folders and Google Drive&lt;/b&gt;" style="swimlane;html=1;startSize=40;horizontal=1;collapsible=0;fillColor=#E3F4E8;strokeColor=#2E8B57;swimlaneFillColor=#FFFFFF;fontSize=15;fontStyle=1;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="80" width="300" height="2190" as="geometry"/>
+        </mxCell>
+        <mxCell id="n1" value="&lt;b&gt;1. Set up once (Settings)&lt;/b&gt;&lt;br&gt;Choose the website, the categories to search, the words that describe your work, and the words that mean &quot;not for us&quot;. Pick your folders and sign in to Google Drive." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;" vertex="1" parent="1">
+          <mxGeometry x="60" y="140" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="n2" value="&lt;b&gt;2. Find tenders (Today)&lt;/b&gt;&lt;br&gt;Choose the website and the days, then press Start." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;" vertex="1" parent="1">
+          <mxGeometry x="60" y="290" width="260" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="d1" value="Are all your categories still on the website's list?" style="rhombus;whiteSpace=wrap;html=1;spacing=4;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="430" y="280" width="240" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="n2b" value="Pick a replacement category, or skip it for now and change it later in Settings." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;" vertex="1" parent="1">
+          <mxGeometry x="60" y="410" width="260" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n3" value="&lt;b&gt;3. Open the website&lt;/b&gt;&lt;br&gt;TenderAssist opens it and types your login name." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="430" width="360" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="w1" value="Tamil Nadu: sign-in page&lt;br&gt;GeM: open list, no sign-in needed" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#EEF0F3;strokeColor=#7A8597;fontColor=#1F2733;" vertex="1" parent="1">
+          <mxGeometry x="780" y="430" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="n4" value="&lt;b&gt;4. Sign in (Tamil Nadu only)&lt;/b&gt;&lt;br&gt;Type the picture code (CAPTCHA) and your DSC PIN." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;" vertex="1" parent="1">
+          <mxGeometry x="60" y="530" width="260" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n5" value="&lt;b&gt;5. Search&lt;/b&gt;&lt;br&gt;For each day and each of your categories, list the tenders published that day. A category that has gone from the website is skipped, and you are told." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="650" width="360" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="w2" value="Search results: Tender ID, title, value" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#EEF0F3;strokeColor=#7A8597;fontColor=#1F2733;" vertex="1" parent="1">
+          <mxGeometry x="780" y="665" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="d2" value="Does the title have a &quot;not for us&quot; word?" style="rhombus;whiteSpace=wrap;html=1;spacing=4;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="430" y="790" width="240" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="r1" value="&lt;b&gt;Rejected by your rules&lt;/b&gt;&lt;br&gt;Listed for you to glance at. You can still approve one." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FBE4E4;strokeColor=#C0392B;fontColor=#5A1212;" vertex="1" parent="1">
+          <mxGeometry x="60" y="800" width="260" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="n6" value="&lt;b&gt;6. Open the full tender page&lt;/b&gt;&lt;br&gt;Mark it in My Tenders, then read the whole page." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="930" width="360" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="w3" value="Tender page: dates, value, eligibility, documents, corrigenda" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#EEF0F3;strokeColor=#7A8597;fontColor=#1F2733;" vertex="1" parent="1">
+          <mxGeometry x="780" y="935" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="d3" value="Is it your kind of work?&lt;br&gt;(your words, your categories)" style="rhombus;whiteSpace=wrap;html=1;spacing=4;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="430" y="1050" width="240" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="r2" value="&lt;b&gt;Not your kind of work&lt;/b&gt;&lt;br&gt;Rejected. Listed for you; you can still approve one." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FBE4E4;strokeColor=#C0392B;fontColor=#5A1212;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1180" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="q1" value="&lt;b&gt;Not sure?&lt;/b&gt;&lt;br&gt;&quot;Keep or skip?&quot; is asked during the run if you are there; otherwise it waits on Today." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1065" width="260" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="n7" value="&lt;b&gt;7. Save its documents&lt;/b&gt;&lt;br&gt;Every file and the zip, one at a time." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="1270" width="360" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f1" value="On this computer:&lt;br&gt;Month › Day › Tender folder › Documents" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3F4E8;strokeColor=#2E8B57;fontColor=#0E3B22;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="1270" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="n8" value="&lt;b&gt;8. Read inside the documents&lt;/b&gt;&lt;br&gt;The text of each PDF; Windows OCR for scanned pages. Finds the EMD, eligibility and scope." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="1380" width="360" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="n9" value="&lt;b&gt;9. Write the day's report sheet&lt;/b&gt;&lt;br&gt;One Excel sheet per day, one row per tender." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="1510" width="360" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f2" value="Report sheet in the day folder" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3F4E8;strokeColor=#2E8B57;fontColor=#0E3B22;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="1510" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="n10" value="&lt;b&gt;10. Check the tenders you follow&lt;/b&gt;&lt;br&gt;Was the closing date extended? A new corrigendum? Cancelled? New corrigendum files are saved for approved tenders." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="1620" width="360" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="w4" value="Followed tender pages read again" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#EEF0F3;strokeColor=#7A8597;fontColor=#1F2733;" vertex="1" parent="1">
+          <mxGeometry x="780" y="1635" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="n11" value="&lt;b&gt;11. What next?&lt;/b&gt; (still signed in)&lt;br&gt;• Search more dates&lt;br&gt;• Review what was found, approve one anyway&lt;br&gt;• Collect documents now&lt;br&gt;• Check for changes again&lt;br&gt;• Finish and sign out" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;align=left;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1760" width="260" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="w5" value="Signed out" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#EEF0F3;strokeColor=#7A8597;fontColor=#1F2733;" vertex="1" parent="1">
+          <mxGeometry x="780" y="1800" width="260" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d4" value="&lt;b&gt;12. Decide&lt;/b&gt;&lt;br&gt;each tender on Today" style="rhombus;whiteSpace=wrap;html=1;spacing=4;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;" vertex="1" parent="1">
+          <mxGeometry x="80" y="1960" width="220" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="a1" value="&lt;b&gt;Approve&lt;/b&gt;&lt;br&gt;TenderAssist collects its documents if they are not saved yet." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="1950" width="360" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="f3" value="Copied to Google Drive; the day's sheet says &quot;Approved by you&quot;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3F4E8;strokeColor=#2E8B57;fontColor=#0E3B22;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="1950" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="lt" value="&lt;b&gt;Later&lt;/b&gt;&lt;br&gt;Kept and followed; decide any time." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="2050" width="360" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="rj" value="&lt;b&gt;Reject&lt;/b&gt;&lt;br&gt;The sheet says &quot;Rejected by you&quot;; nothing is uploaded." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3F4E8;strokeColor=#2E8B57;fontColor=#0E3B22;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="2050" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="fl" value="&lt;b&gt;Followed tenders&lt;/b&gt; (approved, later, waiting) are checked after every search and with &quot;Check for changes&quot;. A change brings a decided tender back as &quot;Changed since you decided&quot;." style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="370" y="2140" width="360" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg0" value="You do this" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FFF4D6;strokeColor=#C9A227;fontColor=#3D2E00;" vertex="1" parent="1">
+          <mxGeometry x="40" y="2300" width="210" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg1" value="TenderAssist does this" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3EEFB;strokeColor=#2F6FC6;fontColor=#0B2250;" vertex="1" parent="1">
+          <mxGeometry x="270" y="2300" width="210" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg2" value="The tender website" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#EEF0F3;strokeColor=#7A8597;fontColor=#1F2733;" vertex="1" parent="1">
+          <mxGeometry x="500" y="2300" width="210" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg3" value="Saved in your folders / Drive" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#E3F4E8;strokeColor=#2E8B57;fontColor=#0E3B22;" vertex="1" parent="1">
+          <mxGeometry x="730" y="2300" width="210" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg4" value="Rejected" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;spacing=8;fontFamily=Helvetica;fontSize=13;fillColor=#FBE4E4;strokeColor=#C0392B;fontColor=#5A1212;" vertex="1" parent="1">
+          <mxGeometry x="960" y="2300" width="210" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="lg_d" value="A question" style="rhombus;whiteSpace=wrap;html=1;spacing=4;fontFamily=Helvetica;fontSize=13;fillColor=#FFFFFF;strokeColor=#44546A;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="2290" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n1" target="n2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n2" target="d1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="d1" target="n3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="d1" target="n2b">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="400" y="450"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n2b" target="n3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" value="opens" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n3" target="w1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e7" value="Tamil Nadu" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.25;exitY=1;entryX=1;entryY=0.5;" edge="1" parent="1" source="n3" target="n4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e8" value="signed in" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0;entryY=0.5;" edge="1" parent="1" source="n4" target="n5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e9" value="GeM" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.75;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="1" source="n3" target="n5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e10" value="asks" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n5" target="w2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n5" target="d2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e12" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="d2" target="r1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e13" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="d2" target="n6">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e14" value="reads" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n6" target="w3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n6" target="d3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e16" value="Not sure" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="d3" target="q1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e17" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.25;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.5;" edge="1" parent="1" source="d3" target="r2">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="490" y="1215"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e18" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="d3" target="n7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e19" value="you keep it" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;dashed=1;exitX=1;exitY=0.25;entryX=0;entryY=0.25;" edge="1" parent="1" source="q1" target="n7">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="350" y="1087"/>
+              <mxPoint x="350" y="1290"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e20" value="saves" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n7" target="f1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n7" target="n8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e22" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n8" target="n9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e23" value="saves" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n9" target="f2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e24" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n9" target="n10">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e25" value="reads" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n10" target="w4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e26" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n10" target="n11">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="550" y="1738"/>
+              <mxPoint x="190" y="1738"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e27" value="more dates" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;dashed=1;exitX=0;exitY=0.3;entryX=0;entryY=0.3;" edge="1" parent="1" source="n11" target="n5">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="30" y="1805"/>
+              <mxPoint x="30" y="680"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e28" value="finish" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n11" target="w5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e29" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="n11" target="d4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e30" value="Approve" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="d4" target="a1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="2015"/>
+              <mxPoint x="340" y="1985"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e31" value="uploads" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="a1" target="f3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e32" value="Later" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0;entryY=0.5;" edge="1" parent="1" source="d4" target="lt">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e33" value="Reject" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;entryX=0;entryY=0.75;" edge="1" parent="1" source="d4" target="rj">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="190" y="2115"/>
+              <mxPoint x="1060" y="2115"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e34" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="lt" target="fl">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e35" value="something changed" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#44546A;fontColor=#1F2733;fontSize=12;labelBackgroundColor=#FFFFFF;dashed=1;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="fl" target="d4">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="60" y="2190"/>
+              <mxPoint x="60" y="2015"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

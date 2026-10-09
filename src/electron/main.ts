@@ -30,6 +30,9 @@ import { cleanRequirement, keyFactsFrom, parseDetailFields, type TenderFileView 
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
 import { explainScreening, parseScreenedGates } from '../review/tenderExplanation.js';
+import { buildDailyReport, type ReportRun, type ReportTender } from '../review/dailyReport.js';
+import { DailyCountRepository } from '../persistence/repositories/dailyCountRepository.js';
+import { countPublishedTenders } from '../portal/publicTenderCounts.js';
 import { collectAuditHistory, writeAuditWorkbook } from '../review/auditHistory.js';
 import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import { canTransition } from '../state/opportunityLifecycle.js';
@@ -62,10 +65,11 @@ import type {
   GoogleDriveStatus,
   LiveSessionTender,
   LiveSessionView,
+  DailyReportView,
 } from './ipcTypes.js';
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import { categoryHealth, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
-import type { PortalCredentials } from '../browser/portalLoginController.js';
+import { typeAllAtOnce, typeLikeAPerson, type PortalCredentials } from '../browser/portalLoginController.js';
 import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type OcrEngine } from '../documents/documentText.js';
 import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windowsOcr.js';
 import { extractTenderRequirements } from '../extraction/requirementExtractor.js';
@@ -149,6 +153,7 @@ const displaySettings = new DisplaySettingsRepository(db);
 const jobOutputs = new JobOutputRepository(db);
 const opportunities = new OpportunityRepository(db);
 const googleDriveSettings = new GoogleDriveSettingsRepository(db);
+const dailyCounts = new DailyCountRepository(db);
 const opportunitySync = { tenders, classifications, opportunities, workflow };
 
 // Tender records are a view over run data; a failure to update them must
@@ -233,8 +238,30 @@ function preflightFor(portal: PortalDefinition, settings: PublishingSettings) {
   return runPreflight(settings.localOutputRoot, portal.url, portal.name, settings.driveOutputRoot, isGemPortal(portal) ? null : undefined);
 }
 
+/** The sign-in step last announced, so the operator is called once per step. */
+let announcedAuthStep: string | undefined;
+
+/**
+ * The CAPTCHA and the DSC PIN are the operator's to type. When the run
+ * reaches either, the taskbar button flashes and Windows plays its alert
+ * sound once, so the operator can come back to the window.
+ */
+function callOperatorForSignIn(update: AuthJobUpdate): void {
+  const step = update.authStep;
+  if (step === announcedAuthStep) return;
+  announcedAuthStep = step;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (step === 'CAPTCHA_REQUIRED' || step === 'DSC_READY') {
+    if (!mainWindow.isFocused()) mainWindow.flashFrame(true);
+    shell.beep();
+  } else {
+    mainWindow.flashFrame(false);
+  }
+}
+
 function emitJobUpdate(raw: AuthJobUpdate): void {
   const update: AuthJobUpdate = withRunState(raw, { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion });
+  callOperatorForSignIn(update);
   lastActiveJobUpdate = update;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
   applyPortalLock();
@@ -1298,6 +1325,8 @@ function signIn(
       onDscJnlpReady: (jobId, artifact) => dscArtifacts.set(jobId, artifact),
       signal: ctx.abortController.signal,
       paceAction: ctx.paceAction,
+      // Settings → Speed → Typing: one key at a time like a person, or all at once.
+      typeText: automationSettings.get().typing === 'INSTANT' ? typeAllAtOnce : typeLikeAPerson(),
       existingJobId,
       currentJobId: () => ctx.jobId,
     },
@@ -1916,6 +1945,11 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
         if (!ctx.watchNote && ctx.watchForced) ctx.watchNote = `No tender is followed on ${ctx.portal.name} yet: approve one, mark it for later, or leave it waiting for you, and it is checked here.`;
         ctx.changeCheck = { at: new Date().toISOString(), message: ctx.watchNote || 'Nothing to check: every followed tender was read during this search.' };
       }
+      // The website's daily totals for the report, read in the background from its public lists.
+      const lastTotals = dailyCounts.lastReadAt(ctx.portal.id);
+      if (!lastTotals || Date.now() - Date.parse(lastTotals) > PUBLIC_COUNTS_MAX_AGE_MS) {
+        void refreshPublicCounts(ctx.portal).catch((error) => console.error('[TenderAssist] website totals not read:', error));
+      }
       // Keep the portal signed in and ask.
       const skippedNote = [describeSkipped(batch.skipped), ctx.watchNote].filter(Boolean).join(' ');
       emitJobUpdate({
@@ -2102,6 +2136,7 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
     ctx.config = config;
     const decided = await runGemDate({
       jobs, jobMachine, searches, tenders, classifications, client: ctx.gem!, includeProducts, categoryCodes, signal,
+      onDayCounts: (day, total, categories) => dailyCounts.record(ctx.portal.id, day, total, 'GEM_LIST', categories),
       askOperator: (tender, reason, documentUrl) => askOperatorDuringRun(ctx, jobId, tender, reason, documentUrl),
     }, jobId, config, emitJobUpdate);
     syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, jobId, ctx.portal.id, { screening: decided.outcome === 'SUCCESS' }));
@@ -2672,6 +2707,67 @@ ipcMain.handle('start-document-run', async (_event, portalId: unknown) => {
   });
   activeJobCompletion = finishRun(ctx, run, rejectStarted);
   return { jobId: await started, count: targets.length };
+});
+
+// ── Daily report ─────────────────────────────────────────────────────────
+
+/** Website totals older than this are read again after a Tamil Nadu run. */
+const PUBLIC_COUNTS_MAX_AGE_MS = 6 * 3_600_000;
+let publicCountsReading: Promise<void> | null = null;
+
+/** Reads a GePNIC website's public organisation lists and records tenders published per day. */
+function refreshPublicCounts(portal: PortalDefinition): Promise<void> {
+  if (isGemPortal(portal)) return Promise.resolve();
+  if (publicCountsReading) return publicCountsReading;
+  publicCountsReading = countPublishedTenders(portal.url, { pause: () => new Promise((resolve) => setTimeout(resolve, 1_200)) })
+    .then((counts) => {
+      const at = new Date().toISOString();
+      for (const [date, total] of counts.byDate) dailyCounts.record(portal.id, date, total, 'PUBLIC_LIST', null, at);
+    })
+    .finally(() => { publicCountsReading = null; });
+  return publicCountsReading;
+}
+
+ipcMain.handle('get-daily-report', (_event, portalId: unknown, from: unknown, to: unknown): DailyReportView => {
+  const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  if (typeof from !== 'string' || typeof to !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw new Error('Choose the days to report on.');
+  const gem = isGemPortal(portal);
+  const runs: ReportRun[] = jobs.listAll().flatMap((job) => {
+    if (job.purpose && job.purpose !== 'SEARCH') return [];
+    const config = runConfigurations.getForJob(job.id);
+    if (!config || config.portalId !== portal.id || config.searchDate < from || config.searchDate > to) return [];
+    return [{
+      date: config.searchDate,
+      at: job.created_at,
+      finished: job.state === 'COMPLETE',
+      // GeM names its own categories on each bid; Tamil Nadu is searched one chosen category at a time.
+      categoriesSearched: gem ? [] : searches.listForJob(job.id).map((search) => search.product_category),
+      // A GeM run lists every bid that started that day; its category check (G2) says which are the office's.
+      listsWholeWebsite: gem,
+      tenders: tenders.listForJob(job.id).map((tender) => ({
+        key: tender.tender_portal_id ?? tender.tender_ref,
+        category: tender.product_category ?? '',
+        verdict: (workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id)) as ReportTender['verdict'],
+        approved: isApprovedTender(tender),
+        inCategory: !gem || classifications.listForTender(tender.id).some((gate) => gate.gate === 'G2' && gate.result === 'PASS'),
+      })),
+    }];
+  });
+  const counts = dailyCounts.list(portal.id, from, to).map((count) => ({ date: count.published_date, total: count.total_published, categories: count.categories, readAt: count.read_at }));
+  return {
+    ...buildDailyReport(from, to, runs, counts),
+    portalId: portal.id,
+    gem,
+    totalsReadAt: dailyCounts.lastReadAt(portal.id),
+    totalsReading: publicCountsReading !== null,
+    gemProductsIncluded: gem ? runConfigurations.getDefaults().gemIncludeProducts : undefined,
+  };
+});
+
+ipcMain.handle('refresh-website-totals', async (_event, portalId: unknown): Promise<void> => {
+  const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  if (isGemPortal(portal)) throw new Error('GeM totals are recorded by each GeM search; search a day to fill it in.');
+  await refreshPublicCounts(portal);
 });
 
 /** How many tenders on this website are followed for extensions and corrigenda. */

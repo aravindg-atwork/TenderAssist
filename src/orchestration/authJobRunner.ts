@@ -5,7 +5,7 @@ import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { AuthStateMachine } from '../state/authStateMachine.js';
 import { AuthFlow } from '../browser/authFlow.js';
 import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
-import type { AssistedLoginStep, PortalCredentials } from '../browser/portalLoginController.js';
+import type { AssistedLoginStep, PortalCredentials, TypeText } from '../browser/portalLoginController.js';
 import type { DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
 import { shouldSurfacePortalAuthIssue } from '../browser/portalAuthIssueDetector.js';
@@ -32,6 +32,8 @@ export interface AuthJobRunnerDeps {
   onDscJnlpReady?: (jobId: string, artifact: DscJnlpArtifact) => void;
   signal?: AbortSignal;
   paceAction?: PaceAction;
+  /** How the login ID and password are typed. */
+  typeText?: TypeText;
   /** Sign an existing job in again (after its portal session expired) instead of creating a new one. */
   existingJobId?: string;
   /**
@@ -223,6 +225,7 @@ export async function runAuthJob(
     dscDownloadDirectory: deps.dscDownloadDirectory,
     targetUrlPrefix: deps.targetUrlPrefix,
     paceAction: deps.paceAction,
+    typeText: deps.typeText,
     onDscJnlpReady: (artifact) => emitDscReady?.(artifact),
   });
   // Bounded so a CDP attach that never settles (observed under heavier

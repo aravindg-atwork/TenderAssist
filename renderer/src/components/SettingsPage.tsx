@@ -406,10 +406,14 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
               ['CUSTOM', 'Custom', 'Choose the pause yourself.'],
             ] as const).map(([mode, label, hint]) => (
               <label key={mode} className={pacing?.mode === mode ? 'choice is-chosen' : 'choice'}>
-                <input type="radio" name="pacing" checked={pacing?.mode === mode} onChange={() => setPacing(mode === 'FAST'
-                  ? { mode, minDelayMs: 0, maxDelayMs: 0 }
-                  : mode === 'HUMAN' ? DEFAULT_AUTOMATION_PACING
-                    : { mode, minDelayMs: pacing?.minDelayMs || 2_000, maxDelayMs: pacing?.maxDelayMs || 5_000 })} />
+                <input type="radio" name="pacing" checked={pacing?.mode === mode} onChange={() => setPacing({
+                  // The typing choice below is kept when the click speed changes.
+                  ...(mode === 'FAST'
+                    ? { mode, minDelayMs: 0, maxDelayMs: 0 }
+                    : mode === 'HUMAN' ? DEFAULT_AUTOMATION_PACING
+                      : { mode, minDelayMs: pacing?.minDelayMs || 2_000, maxDelayMs: pacing?.maxDelayMs || 5_000 }),
+                  typing: pacing?.typing ?? 'HUMAN',
+                })} />
                 <span className="choice__label">{label}</span>
                 <span className="choice__hint">{hint}</span>
               </label>
@@ -423,6 +427,21 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
                 <input id="pacing-max" type="number" min="0" max="60" step="0.5" value={pacing.maxDelayMs / 1_000} onChange={(event) => setPacing({ ...pacing, maxDelayMs: Number(event.target.value) * 1_000 })} /></label>
             </div>
           )}
+          <h3 className="block__sub">Typing</h3>
+          <p className="block__lede">How TenderAssist types your login ID and password on the website. This is separate from the pause between clicks. You always type the CAPTCHA yourself.</p>
+          <div className="choices" role="radiogroup" aria-label="Typing">
+            {([
+              ['HUMAN', 'Like a person', 'One key at a time, with small natural pauses. Recommended.'],
+              ['INSTANT', 'All at once', 'The whole login ID and password appear at once.'],
+            ] as const).map(([typing, label, hint]) => (
+              <label key={typing} className={(pacing?.typing ?? 'HUMAN') === typing ? 'choice is-chosen' : 'choice'}>
+                <input type="radio" name="typing" checked={(pacing?.typing ?? 'HUMAN') === typing} disabled={!pacing}
+                  onChange={() => pacing && setPacing({ ...pacing, typing })} />
+                <span className="choice__label">{label}</span>
+                <span className="choice__hint">{hint}</span>
+              </label>
+            ))}
+          </div>
         </section>
 
         <section id="settings-updates" hidden={active !== 'updates'} className="block">

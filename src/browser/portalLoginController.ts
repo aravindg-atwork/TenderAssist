@@ -82,10 +82,33 @@ async function findCaptcha(page: Page, password: Locator): Promise<Locator | nul
  * Opens the portal's own login form and optionally fills credentials. It
  * deliberately does not fill CAPTCHA or submit the form.
  */
+/** Puts text in a field: all at once, or one key at a time (`typeLikeAPerson`). */
+export type TypeText = (field: Locator, text: string) => Promise<void>;
+
+export const typeAllAtOnce: TypeText = (field, text) => field.fill(text);
+
+/**
+ * Types one key at a time, the way a person does: about 70–220 ms between
+ * keys and, now and then, a longer pause. Separate from the pause between
+ * clicks. Used for the login ID and password; the CAPTCHA is always typed
+ * by the operator.
+ */
+export function typeLikeAPerson(random: () => number = Math.random, wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))): TypeText {
+  return async (field, text) => {
+    await field.fill('');
+    await field.focus();
+    for (const character of text) {
+      await field.pressSequentially(character);
+      await wait(70 + Math.round(random() * 150) + (random() < 0.08 ? 250 + Math.round(random() * 350) : 0));
+    }
+  };
+}
+
 export async function preparePortalLogin(
   page: Page,
   credentials?: PortalCredentials,
-  paceAction: PaceAction = noPacing
+  paceAction: PaceAction = noPacing,
+  typeText: TypeText = typeAllAtOnce
 ): Promise<AssistedLoginStep> {
   const bodyText = await page.locator('body').innerText().catch(() => '');
   if (isAuthenticatedDashboard(bodyText)) return 'ALREADY_AUTHENTICATED';
@@ -99,9 +122,9 @@ export async function preparePortalLogin(
   if (!loginId) return 'LOGIN_FORM_NOT_FOUND';
 
   await paceAction();
-  await loginId.fill(credentials.loginId);
+  await typeText(loginId, credentials.loginId);
   await paceAction();
-  await password.fill(credentials.password);
+  await typeText(password, credentials.password);
   const captcha = await findCaptcha(page, password);
   if (captcha) await captcha.focus();
   return 'CAPTCHA_REQUIRED';
@@ -112,7 +135,7 @@ export async function preparePortalLogin(
  * a generic Login link, so it is safe to call while polling the DSC flow.
  * Returns true only when at least one saved field had to be restored.
  */
-export async function refillVisiblePortalLogin(page: Page, credentials: PortalCredentials, paceAction: PaceAction = noPacing): Promise<boolean> {
+export async function refillVisiblePortalLogin(page: Page, credentials: PortalCredentials, paceAction: PaceAction = noPacing, typeText: TypeText = typeAllAtOnce): Promise<boolean> {
   const password = await findPassword(page);
   if (!password) return false;
   const loginId = await findLoginId(page, password);
@@ -121,12 +144,12 @@ export async function refillVisiblePortalLogin(page: Page, credentials: PortalCr
   let changed = false;
   if ((await loginId.inputValue().catch(() => '')).trim() !== credentials.loginId) {
     await paceAction();
-    await loginId.fill(credentials.loginId);
+    await typeText(loginId, credentials.loginId);
     changed = true;
   }
   if ((await password.inputValue().catch(() => '')) !== credentials.password) {
     await paceAction();
-    await password.fill(credentials.password);
+    await typeText(password, credentials.password);
     changed = true;
   }
   if (changed) {

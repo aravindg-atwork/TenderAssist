@@ -4,7 +4,7 @@ import type { AuthStateMachine } from '../state/authStateMachine.js';
 import { BrowserController, type SessionLossReason } from './browserController.js';
 import { isAuthenticatedDashboard } from './authDetector.js';
 import { isSessionExpiredPage } from './sessionExpiredDetector.js';
-import { preparePortalLogin, refillVisiblePortalLogin, type AssistedLoginStep, type PortalCredentials } from './portalLoginController.js';
+import { preparePortalLogin, refillVisiblePortalLogin, type AssistedLoginStep, type PortalCredentials, type TypeText } from './portalLoginController.js';
 import type { DscJnlpArtifact } from './dscDownloadSecurity.js';
 import { detectPortalAuthIssue, type PortalAuthIssue } from './portalAuthIssueDetector.js';
 import { clickDscLoginIfAvailable } from './dscLoginController.js';
@@ -18,6 +18,8 @@ export interface AuthFlowDeps {
   onDscJnlpReady?: (artifact: DscJnlpArtifact) => void;
   targetUrlPrefix?: string;
   paceAction?: PaceAction;
+  /** How the login ID and password are typed (Settings → Speed → Typing). */
+  typeText?: TypeText;
 }
 
 export class AuthFlow {
@@ -74,7 +76,7 @@ export class AuthFlow {
   prepareLogin(credentials?: PortalCredentials): Promise<AssistedLoginStep> {
     if (!this.controller) return Promise.reject(new Error('AuthFlow.start() must be called before prepareLogin()'));
     if (!this.preparingLogin) {
-      this.preparingLogin = preparePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction)
+      this.preparingLogin = preparePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction, this.deps.typeText)
         .finally(() => { this.preparingLogin = undefined; });
     }
     return this.preparingLogin;
@@ -82,7 +84,7 @@ export class AuthFlow {
 
   async refillVisibleLogin(credentials: PortalCredentials): Promise<boolean> {
     if (!this.controller) throw new Error('AuthFlow.start() must be called before refillVisibleLogin()');
-    const refilled = await refillVisiblePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction);
+    const refilled = await refillVisiblePortalLogin(this.controller.getPage(), credentials, this.deps.paceAction, this.deps.typeText);
     if (refilled) this.dscLoginStarted = false;
     return refilled;
   }

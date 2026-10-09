@@ -32,6 +32,8 @@ export type { TimelineEntry } from '../review/timeline.js';
 export type { TenderField, TenderFileView } from '../review/tenderFile.js';
 export type { OperatorDecision } from '../state/opportunityLifecycle.js';
 import type { CategoryHealth, CategorySuggestion, MissingCategory, ReplacementAdvice } from '../config/categoryHealth.js';
+import type { DailyReport, DayRow, CategoryRow } from '../review/dailyReport.js';
+export type { DailyReport, DayRow, CategoryRow };
 export type { CategoryHealth, CategorySuggestion, MissingCategory, ReplacementAdvice };
 export type { PortalCategoryList, RunQuestion, RunQuestionAnswer, WordSuggestions };
 export type { WordSuggestion } from '../review/wordSuggestions.js';
@@ -102,6 +104,17 @@ export interface LiveSessionView {
   tenders: LiveSessionTender[];
   /** Approved tenders on this website whose documents are not saved yet. */
   approvedWaitingForDocuments: number;
+}
+
+export interface DailyReportView extends DailyReport {
+  portalId: string;
+  gem: boolean;
+  /** When the website's totals were last read; null when never. */
+  totalsReadAt: string | null;
+  /** A refresh of the website's totals is running now. */
+  totalsReading: boolean;
+  /** GeM: whether product bids are counted as well as service bids. */
+  gemProductsIncluded?: boolean;
 }
 
 export interface RecoveryJob {
@@ -242,6 +255,10 @@ export interface TenderAssistApi {
   collectDocumentsInRun(): Promise<void>;
   /** The live sign-in's tenders, to approve or reject on the spot. */
   getLiveSession(): Promise<LiveSessionView>;
+  /** Per published day: on the website, in your categories, shortlisted, approved, by category. */
+  getDailyReport(portalId: string, from: string, to: string): Promise<DailyReportView>;
+  /** Reads the website's public lists again for its daily totals (GePNIC websites; about two minutes). */
+  refreshWebsiteTotals(portalId: string): Promise<void>;
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
   getGoogleDrive(): Promise<GoogleDriveStatus>;

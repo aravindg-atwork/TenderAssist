@@ -1,7 +1,7 @@
 // One icon family (Phosphor, regular weight, 18px by default). Icons label
 // nothing on their own; they sit beside words. Names stay stable for the screens.
 import {
-  ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon as PhArrowRight, CalendarBlankIcon, CheckIcon as PhCheck, ClockCounterClockwiseIcon,
+  ArrowClockwiseIcon, ArrowLeftIcon, ChartBarIcon, ArrowRightIcon as PhArrowRight, CalendarBlankIcon, CheckIcon as PhCheck, ClockCounterClockwiseIcon,
   ClockIcon as PhClock, DotsThreeIcon, DownloadSimpleIcon, FileTextIcon, FileZipIcon, FolderIcon as PhFolder, GearSixIcon, GlobeIcon as PhGlobe,
   KeyIcon as PhKey, ListBulletsIcon, MagnifyingGlassIcon, NotePencilIcon, PackageIcon, PlusIcon as PhPlus, SparkleIcon, StackIcon as PhStack,
   StopIcon as PhStop, TrashIcon as PhTrash, TrayIcon, WarningIcon, XIcon, type Icon as PhIcon,
@@ -29,6 +29,7 @@ export const TodayIcon = make(TrayIcon, 20);
 export const StackIcon = make(PhStack, 20);
 export const HistoryIcon = make(ClockCounterClockwiseIcon, 20);
 export const SettingsIcon = make(GearSixIcon, 20);
+export const ReportIcon = make(ChartBarIcon, 20);
 export const SearchIcon = make(MagnifyingGlassIcon);
 export const PlusIcon = make(PhPlus, 16, 'bold');
 export const GlobeIcon = make(PhGlobe);

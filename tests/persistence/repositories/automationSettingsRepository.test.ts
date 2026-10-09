@@ -26,13 +26,21 @@ describe('AutomationSettingsRepository', () => {
       mode: 'FAST',
       minDelayMs: 0,
       maxDelayMs: 0,
+      typing: 'HUMAN',
     });
-    expect(repo.get()).toEqual({ mode: 'FAST', minDelayMs: 0, maxDelayMs: 0 });
+    expect(repo.get()).toEqual({ mode: 'FAST', minDelayMs: 0, maxDelayMs: 0, typing: 'HUMAN' });
   });
 
   it('persists a valid custom delay range', () => {
     repo.save({ mode: 'CUSTOM', minDelayMs: 1_500, maxDelayMs: 4_500 });
-    expect(repo.get()).toEqual({ mode: 'CUSTOM', minDelayMs: 1_500, maxDelayMs: 4_500 });
+    expect(repo.get()).toEqual({ mode: 'CUSTOM', minDelayMs: 1_500, maxDelayMs: 4_500, typing: 'HUMAN' });
+  });
+
+  it('keeps the typing choice apart from the click speed', () => {
+    repo.save({ mode: 'FAST', minDelayMs: 0, maxDelayMs: 0, typing: 'INSTANT' });
+    expect(repo.get()).toEqual({ mode: 'FAST', minDelayMs: 0, maxDelayMs: 0, typing: 'INSTANT' });
+    repo.save({ mode: 'HUMAN', minDelayMs: 2_000, maxDelayMs: 5_000 });
+    expect(repo.get().typing).toBe('HUMAN');
   });
 
   it('rejects inverted or excessive delay ranges', () => {

@@ -6,19 +6,21 @@ import { applyTextSize } from './display';
 import { TodayPage, type FinishedRun } from './components/TodayPage';
 import { TendersPage } from './components/TendersPage';
 import { RunsPage } from './components/RunsPage';
+import { ReportsPage } from './components/ReportsPage';
 import { RunDetail } from './components/RunDetail';
 import { SettingsPage } from './components/SettingsPage';
 import { RunWorkspace } from './components/RunWorkspace';
 import { RunPanel } from './components/RunPanel';
-import { BrandMark, HistoryIcon, MoreIcon, SettingsIcon, StackIcon, TodayIcon } from './components/icons';
+import { BrandMark, HistoryIcon, MoreIcon, ReportIcon, SettingsIcon, StackIcon, TodayIcon } from './components/icons';
 import { SessionReport } from './components/SessionReport';
 
-type View = 'today' | 'tenders' | 'runs' | 'settings';
+type View = 'today' | 'tenders' | 'runs' | 'reports' | 'settings';
 
 const NAV: Array<{ id: View; label: string; icon: () => ReactElement }> = [
   { id: 'today', label: 'Today', icon: TodayIcon },
   { id: 'tenders', label: 'Tenders', icon: StackIcon },
   { id: 'runs', label: 'Runs', icon: HistoryIcon },
+  { id: 'reports', label: 'Reports', icon: ReportIcon },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
@@ -184,6 +186,8 @@ export function App() {
           />
         ) : view === 'tenders' ? (
           <TendersPage onInboxCount={setWaiting} />
+        ) : view === 'reports' ? (
+          <ReportsPage portalId={portalId} onPortalChange={setPortalId} />
         ) : view === 'runs' ? (
           <RunsPage activeJobId={activeJobId} onOpenRun={setOpenRunId} />
         ) : (
