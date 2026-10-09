@@ -16,7 +16,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run dist:win
+      - run: npm run dist:win -- --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: TenderAssist-Windows
@@ -34,7 +34,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run dist:mac
+      - run: npm run dist:mac -- --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: TenderAssist-macOS
