@@ -13,6 +13,7 @@ import {
   recordCollectedDocuments,
   recordDownloadSelection,
   syncJobOpportunities,
+  syncTenderSighting,
 } from '../../src/orchestration/opportunitySync.js';
 import { buildInbox } from '../../src/review/inbox.js';
 
@@ -183,5 +184,30 @@ describe('opportunity sync', () => {
     linkAllPossibleRetenders(deps);
     linkAllPossibleRetenders(deps);
     expect(opportunities.listRetenderLinks()).toHaveLength(1);
+  });
+
+  it('records the corrigenda a tender page lists, and a new one brings an approved tender back for a look', () => {
+    const job = jobs.create();
+    const tender = seen(job.id, '2026_TNPL_705448_1');
+    const page = (rows: string) => `Bid Submission End Date 06-Oct-2026 03:00 PM Latest Corrigendum List S.No Corrigendum Title Corrigendum Type View ${rows} Tender Inviting Authority`;
+    tenders.updateDetail(tender.id, {
+      organisationChain: null, publishedDate: null, productCategory: null, tenderCategory: null,
+      detailText: page('1 DUE DATE EXTENSION Date'), closingDate: '06-Oct-2026 03:00 PM',
+    });
+    passAllGates(tender.id);
+    syncJobOpportunities(deps, job.id, 'tamil-nadu', { screening: true });
+    const opportunity = opportunityOf(tender.id);
+    expect(opportunity.closing_date).toBe('06-Oct-2026 03:00 PM');
+    opportunities.decide([opportunity.id], 'APPROVE');
+
+    // Read again later: the date moved and a second corrigendum appeared.
+    tenders.updateDetail(tender.id, {
+      organisationChain: null, publishedDate: null, productCategory: null, tenderCategory: null,
+      detailText: page('1 DUE DATE EXTENSION Date 2 DUE DATE EXTENSION 2 Date'), closingDate: '14-Oct-2026 03:00 PM',
+    });
+    const after = syncTenderSighting(deps, tenders.getById(tender.id)!, 'tamil-nadu', { jobId: job.id });
+    expect(after.closing_date).toBe('14-Oct-2026 03:00 PM');
+    expect(after.changed_since_decision).toBe(1);
+    expect(opportunities.listEvents(opportunity.id).filter((event) => event.kind === 'CORRIGENDUM')).toHaveLength(2);
   });
 });

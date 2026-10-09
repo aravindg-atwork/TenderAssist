@@ -5,6 +5,8 @@ import type { OpportunityRepository } from '../persistence/repositories/opportun
 import { canTransition, DECISION_TARGETS, type OperatorDecision } from '../state/opportunityLifecycle.js';
 import { screeningEvidence } from '../review/tenderExplanation.js';
 import { retenderReason } from '../review/relatedTenders.js';
+import { applyPortalCorrigenda } from '../review/corrigenda.js';
+import { tenderPageFacts } from '../review/watchedTenders.js';
 
 // Bridges run-level rows (`tenders`, gates, reviews) to durable tender
 // records. Every function is idempotent, so a phase can call it again after
@@ -24,7 +26,7 @@ export interface OpportunitySyncDeps {
 export function syncJobOpportunities(deps: OpportunitySyncDeps, jobId: string, portalId: string, options: { screening: boolean }): void {
   const seen = new Set<string>();
   for (const tender of deps.tenders.listForJob(jobId)) {
-    const opportunity = deps.opportunities.recordSighting(tender, portalId, { jobId });
+    const opportunity = syncTenderSighting(deps, tender, portalId, { jobId });
     seen.add(opportunity.id);
     if (!options.screening) continue;
     const final = deps.classifications.getFinalForTender(tender.id);
@@ -32,6 +34,38 @@ export function syncJobOpportunities(deps: OpportunitySyncDeps, jobId: string, p
     deps.opportunities.recordScreening(opportunity.id, final, { jobId }, { ...screeningEvidence(deps.classifications.listForTender(tender.id)) });
   }
   linkPossibleRetenders(deps, portalId, seen);
+}
+
+/**
+ * Records the corrigenda listed on a tender's own page (GePNIC's "Latest
+ * Corrigendum List"). Each is recorded once; a new one on a tender the
+ * operator decided brings it back as "Changed since you decided".
+ */
+export function recordPageCorrigenda(
+  deps: Pick<OpportunitySyncDeps, 'opportunities'>,
+  opportunityId: string,
+  detailText: string | null,
+  context: { jobId?: string | null; at?: string } = {},
+  options: { flagDecided?: boolean } = {}
+): number {
+  const { corrigenda } = tenderPageFacts(detailText);
+  return corrigenda.length === 0 ? 0 : applyPortalCorrigenda(deps.opportunities, opportunityId, corrigenda, context, options);
+}
+
+/**
+ * One reading of a tender's page: its details (a changed closing date is
+ * logged), the corrigenda it lists, and, when an extension moved the
+ * closing date into the future, the tender open again.
+ */
+export function syncTenderSighting(
+  deps: Pick<OpportunitySyncDeps, 'opportunities'>,
+  tender: Parameters<OpportunityRepository['recordSighting']>[0],
+  portalId: string,
+  context: { jobId?: string | null } = {}
+) {
+  const opportunity = deps.opportunities.recordSighting(tender, portalId, context);
+  recordPageCorrigenda(deps, opportunity.id, tender.detail_text ?? null, context);
+  return deps.opportunities.reopenIfExtended(opportunity.id, new Date(), context);
 }
 
 /** Links possible retenders across every tender already recorded, for example at app start. */

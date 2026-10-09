@@ -37,6 +37,8 @@ export interface DateBatchPlan {
   toRun: string[];
   /** Dates in the range that already have a completed run. */
   skipped: string[];
+  /** Instead of dates: check the followed tenders for changes again, in the same sign-in. */
+  checkChanges?: boolean;
 }
 
 export function planDateBatch(from: string, to: string, completedDates: Iterable<string>, today?: string): DateBatchPlan {

@@ -249,6 +249,8 @@ export class OpportunityRepository {
         for (const field of TRACKED_FIELDS) {
           const next = incoming[field];
           const previous = opportunity[field];
+          // A closing date read for the first time is not an extension.
+          if (field === 'closing_date' && previous === null) continue;
           if (next !== null && next !== previous) changes[field] = { from: previous, to: next };
         }
         if (Object.keys(changes).length > 0) {
@@ -345,7 +347,7 @@ export class OpportunityRepository {
    * tender. A corrigendum already recorded under the same portal number is
    * skipped, so re-reading the portal's list on every run is safe.
    */
-  recordCorrigendum(opportunityId: string, corrigendum: CorrigendumInput, context: EventContext = {}): OpportunityRow {
+  recordCorrigendum(opportunityId: string, corrigendum: CorrigendumInput, context: EventContext = {}, options: { flagDecided?: boolean } = {}): OpportunityRow {
     return this.inTransaction(() => {
       const opportunity = this.require(opportunityId);
       const portalNumber = corrigendum.portalNumber?.trim() || null;
@@ -363,7 +365,8 @@ export class OpportunityRepository {
       if (alreadyRecorded) return opportunity;
       const at = context.at ?? new Date().toISOString();
       this.insertEvent(opportunityId, 'CORRIGENDUM', 'automation', context, { ...corrigendum, description: corrigendum.description ?? null, portalNumber });
-      const flag = DECIDED_LIFECYCLES.includes(opportunity.lifecycle) ? 1 : opportunity.changed_since_decision;
+      // Catching up on pages read before corrigenda were recorded: the operator already saw them there.
+      const flag = options.flagDecided !== false && DECIDED_LIFECYCLES.includes(opportunity.lifecycle) ? 1 : opportunity.changed_since_decision;
       this.db.prepare('UPDATE opportunities SET changed_since_decision = ?, updated_at = ? WHERE id = ?').run(flag, at, opportunityId);
       return this.getById(opportunityId)!;
     });
@@ -440,6 +443,39 @@ export class OpportunityRepository {
   hideFromInbox(ids: string[], at = new Date().toISOString()): void {
     const update = this.db.prepare('UPDATE opportunities SET inbox_hidden_at = ? WHERE id = ? AND workspace_id = ?');
     for (const id of ids) update.run(at, id, this.workspaceId);
+  }
+
+  /** Fills a closing date read from a page saved earlier, with no history entry; a known date is kept. */
+  fillClosingDate(opportunityId: string, closingDate: string): void {
+    this.db.prepare('UPDATE opportunities SET closing_date = ?, closing_at = ? WHERE id = ? AND closing_date IS NULL')
+      .run(closingDate, toClosingAt(closingDate), opportunityId);
+  }
+
+  /** What an expired tender was before it expired (approved, decide later, ...); null if it never expired. */
+  lifecycleBeforeExpiry(opportunityId: string): OpportunityLifecycle | null {
+    const row = this.db.prepare(
+      `SELECT json_extract(data_json, '$.from') AS from_lifecycle FROM opportunity_events
+       WHERE opportunity_id = ? AND kind = 'EXPIRED' ORDER BY created_at DESC LIMIT 1`
+    ).get(opportunityId) as { from_lifecycle: OpportunityLifecycle | null } | undefined;
+    return row?.from_lifecycle ?? null;
+  }
+
+  /**
+   * An expired tender whose closing date was extended into the future is
+   * open again, as it was before: an approved tender stays approved. The
+   * operator is shown it as changed when they had decided it.
+   */
+  reopenIfExtended(opportunityId: string, now = new Date(), context: EventContext = {}): OpportunityRow {
+    return this.inTransaction(() => {
+      const opportunity = this.require(opportunityId);
+      if (opportunity.lifecycle !== 'EXPIRED' || !opportunity.closing_at || Date.parse(opportunity.closing_at) <= now.getTime()) return opportunity;
+      const before = this.lifecycleBeforeExpiry(opportunityId) ?? 'SCREENED';
+      const at = context.at ?? now.toISOString();
+      const flag = DECIDED_LIFECYCLES.includes(before) ? 1 : opportunity.changed_since_decision;
+      this.db.prepare('UPDATE opportunities SET lifecycle = ?, changed_since_decision = ?, updated_at = ? WHERE id = ?').run(before, flag, at, opportunityId);
+      this.insertEvent(opportunityId, 'CHANGED', 'automation', { ...context, at }, { reopened: { from: 'EXPIRED', to: before }, closingDate: opportunity.closing_date });
+      return this.getById(opportunityId)!;
+    });
   }
 
   /** Moves open tenders whose closing time has passed to EXPIRED. Returns how many moved. */

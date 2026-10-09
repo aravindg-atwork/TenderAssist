@@ -85,6 +85,8 @@ export async function runSearchPhase(
     return state !== 'TAB_LOST' && state !== 'SESSION_EXPIRED' && !isCancellationRequested(deps.signal);
   };
   const failedCategories: string[] = [];
+  // Dropped from the website's list: nothing to search again later; pick a replacement instead.
+  const notListedCategories: string[] = [];
   let categoryListRead = !deps.onCategoryList;
   const readCategoryList = (categories: string[]) => {
     categoryListRead = true;
@@ -229,8 +231,13 @@ export async function runSearchPhase(
       const message = err instanceof Error ? err.message : String(err);
       const attempts = (err as { attempts?: number }).attempts ?? 1;
       searches.markFailed(search.id, message, attempts);
-      failedCategories.push(config.productCategory);
-      statusMessage = `${config.productCategory} could not be searched after ${attempts} attempt${attempts === 1 ? '' : 's'}: ${message}`;
+      if ((err as Error | null)?.name === 'CategoryNotOnPortalError') {
+        notListedCategories.push(config.productCategory);
+        statusMessage = message;
+      } else {
+        failedCategories.push(config.productCategory);
+        statusMessage = `${config.productCategory} could not be searched after ${attempts} attempt${attempts === 1 ? '' : 's'}: ${message}`;
+      }
     }
 
     onUpdate(snapshot());
@@ -240,9 +247,14 @@ export async function runSearchPhase(
   jobMachine.transition(jobId, 'CLASSIFYING', failedCategories.length > 0
     ? `category searches finished; not searched: ${failedCategories.join(', ')}`
     : 'all category searches complete');
+  const notes: string[] = [];
   if (failedCategories.length > 0) {
-    statusMessage = `Search finished, but ${failedCategories.length} of ${configuredSearches.length} categories could not be searched (${failedCategories.join(', ')}). Tenders in them may be missing; run this date again later to fill the gap.`;
+    notes.push(`${failedCategories.length} of ${configuredSearches.length} categories could not be searched (${failedCategories.join(', ')}). Tenders in them may be missing; run this date again later to fill the gap.`);
   }
+  if (notListedCategories.length > 0) {
+    notes.push(`${notListedCategories.join(', ')} ${notListedCategories.length === 1 ? 'is' : 'are'} no longer on the website's category list, so ${notListedCategories.length === 1 ? 'it was' : 'they were'} skipped. Choose a replacement on Today or in Settings.`);
+  }
+  if (notes.length > 0) statusMessage = `Search finished, but ${notes.join(' ')}`;
   const final = snapshot('SUCCESS');
   onUpdate(final);
   return final;

@@ -81,6 +81,21 @@ export async function readProductCategoryOptions(page: Page): Promise<string[]> 
     .map((option) => option.label);
 }
 
+export class CategoryNotOnPortalError extends Error {
+  constructor(productCategory: string) {
+    super(`"${productCategory}" is not in the website's Product Category list today, so it was skipped.`);
+    this.name = 'CategoryNotOnPortalError';
+  }
+}
+
+const normaliseCategory = (label: string) => label.replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** The website's own spelling of a category, ignoring case and spacing; null when it is not listed. */
+export function findCategoryLabel(categories: readonly string[], productCategory: string): string | null {
+  const wanted = normaliseCategory(productCategory);
+  return categories.find((label) => normaliseCategory(label) === wanted) ?? null;
+}
+
 export async function searchCategory(
   page: Page,
   productCategory: string,
@@ -93,13 +108,16 @@ export async function searchCategory(
   await paceAction();
   await submitAndWaitForNewPage(page, () => page.click('text=Search Active Tenders'));
   await page.waitForSelector('#ProductCategory');
-  if (onCategoryList) {
-    // Reading the list is a bonus; a surprise here must not stop the search.
-    const categories = await readProductCategoryOptions(page).catch(() => []);
-    if (categories.length > 0) onCategoryList(categories);
-  }
+  const categories = await readProductCategoryOptions(page).catch((): string[] => []);
+  // Reading the list is a bonus; a surprise here must not stop the search.
+  if (onCategoryList && categories.length > 0) onCategoryList(categories);
+  // The website drops categories from its list now and then (Tamil Nadu's
+  // "Information Technology", 9 Oct 2026). Selecting a missing one would
+  // wait 30s and look like a slow portal, so say so plainly instead.
+  const label = categories.length > 0 ? findCategoryLabel(categories, productCategory) : productCategory;
+  if (!label) throw new CategoryNotOnPortalError(productCategory);
   await paceAction();
-  await page.selectOption('#ProductCategory', { label: productCategory });
+  await page.selectOption('#ProductCategory', { label });
   await paceAction();
   await page.selectOption('#dateCriteria', { label: 'Published Date' });
   await paceAction();

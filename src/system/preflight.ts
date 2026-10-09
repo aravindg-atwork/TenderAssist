@@ -1,6 +1,16 @@
 import { accessSync, constants, mkdirSync } from 'node:fs';
 import { detectJnlpLauncher, MISSING_SIGNER_MESSAGE, OPENWEBSTART_DOWNLOAD_URL, type JnlpLauncher } from './jnlpLauncher.js';
 
+// Asked the way a browser asks. Node's fetch sends "Accept-Language: *",
+// which NIC's GePNIC websites answer with a server error (500) even while
+// they work for everyone else -- seen on Tamil Nadu, 9 Oct 2026 -- so the
+// check said "having trouble" for a website that was fine.
+export const PORTAL_CHECK_HEADERS: Readonly<Record<string, string>> = {
+  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'accept-language': 'en-IN,en;q=0.9',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 TenderAssist',
+};
+
 export type PreflightLevel = 'PASS' | 'WARNING' | 'BLOCKED';
 export interface PreflightCheck {
   id: string;
@@ -44,7 +54,7 @@ export async function runPreflight(
   }
 
   try {
-    const response = await fetch(portalUrl, { signal: AbortSignal.timeout(7000) });
+    const response = await fetch(portalUrl, { headers: PORTAL_CHECK_HEADERS, signal: AbortSignal.timeout(7000) });
     checks.push({ id: 'portal', label: portalLabel, level: response.ok ? 'PASS' : 'WARNING', message: response.ok ? 'The website is answering.' : 'The website is having trouble right now. You can still search; TenderAssist waits and tries again.' });
   } catch {
     checks.push({ id: 'portal', label: portalLabel, level: 'WARNING', message: 'The website could not be reached. Check the internet connection, or try again in a few minutes.' });

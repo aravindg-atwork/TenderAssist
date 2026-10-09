@@ -2,6 +2,31 @@
 
 Last updated: 8 Oct 2026. Pick up from **Next up**.
 
+## Fixed after 0.5.0 (9 Oct 2026; not yet in an installer)
+
+- **Tamil Nadu dropped "Information Technology" from its Product Category list** (some days it is there, some not). The search waited 30s per try on a missing option and looked like a slow portal (3 tries). Now the category is checked against the website's list first: missing → skipped at once with "not in the website's Product Category list today"; case/spacing differences are matched (`findCategoryLabel`, `CategoryNotOnPortalError`).
+- **Google Drive gets only approved tenders** (user request). The direct upload used to send every tender folder a run saved, including ones waiting for a decision. Now, like the Drive for desktop copy, only approved tenders go (`isApprovedTender` in `main.ts`). Approving uploads the tender; rejecting never does. Report sheets still upload after every run. Not covered by a test (main.ts has none).
+- **Extended closing dates and corrigenda** (agreed with the operator, 9 Oct). Core in `src/review/watchedTenders.ts` (tested); wiring in `main.ts` (`checkWatchedTenders`, `checkWatchedGemBids`, `runChangeCheck`).
+  - Tamil Nadu tender pages are now read for "Bid Submission End Date" (the current closing date; before this, TN tenders had none, so they never expired) and the "Latest Corrigendum List" (types seen: Date, Other).
+  - At start-up, pages saved earlier are caught up quietly: on the real data, 66 of 69 TN tenders got their closing date, 8 corrigenda were recorded, and 18 past their date became Expired.
+  - Followed tenders: approved, decide later, and waiting (not rule- or hand-rejected), until 3 days after closing (30 days after found when the date is unknown).
+  - Checked: (1) after the last date of every Tamil Nadu search, still signed in (pages read in the last 20 h skipped, at most 40, soonest closing first); (2) "Check for changes" in the run panel's "What next?" (same sign-in); (3) "Check for changes" on Today (signs in first); (4) GeM: at the end of every GeM run and from Today, no sign-in: each bid found again by its start day in GeM's list (current end date, cancelled). A check the operator asks for re-reads everything.
+  - On a change: a later closing date is logged; an expired tender extended into the future opens again as it was (approved stays approved); a decided tender returns under "Changed since you decided"; approved tenders' new corrigendum files go to "Corrigendum <n>" in the tender's documents folder, then the sheet and Drive are refreshed. Report sheet has a "Corrigenda" column.
+  - Runs list it as "Changes in followed tenders"; its report is "Check for changes".
+  - Live-checked: GeM check (twice) on the real data copy. **Not yet live:** the Tamil Nadu re-read (needs a sign-in) and the corrigendum "View" page download (its page was never captured; failures leave a note on the tender). GeM corrigendum documents are not read.
+  - Fixed on the way: a run that ended before its start call returned left the app showing "running" forever (`App.tsx`, `endedJobs`).
+- **False "The website is having trouble right now" on Today** (operator report, 9 Oct). Not the website and not the address: Node's `fetch` sends `Accept-Language: *`, and every GePNIC site answers that with HTTP 500 (checked: Tamil Nadu, CPPP, Kerala, West Bengal, Uttarakhand: old 500, new 200). The website check now asks like a browser (`PORTAL_CHECK_HEADERS` in `src/system/preflight.ts`, test in `tests/system/preflight.test.ts`).
+- **Website categories that change** (agreed with the operator, 9 Oct). Logic in `src/config/categoryHealth.ts` (tested); picker in `renderer/src/components/CategoryReplacement.tsx`.
+  - Every read of a website's list is remembered per category (first and last seen) in `portal_categories:<id>`. Lists saved before count as the first sighting.
+  - A chosen category the website dropped is never removed by itself. Runs skip it (the end message says so) and search it again if it comes back.
+  - Today → Find warns before Start ("… is not on Tamil Nadu's category list, read <time>"), with **Choose replacements** and **Skip for now**. Skip hides the warning until another category goes missing; Settings still shows it.
+  - The picker allows several choices. Suggestions: first, categories where tenders the operator wanted (approved, or kept) were listed, including the category on a tender's own page; then categories new since it went (a likely rename); then similar names. It also says what the dropped category brought before.
+  - "Stop searching it" is off by default and on after 14 days gone. In Settings, a chip says "Last on the website's list <time>" or "Gone two weeks or more. Remove it?", and has a Replace link.
+  - Settings shows categories new on the website since the operator last looked (add with one click, "Seen them").
+  - Tamil Nadu's list is read only during a search (after sign-in), so Today's warning uses the last run's list. GeM's list is public and read every two weeks.
+  - Not yet seen in the running app.
+- **Decide: rule-rejected tenders had only "Move back to review"** (user feedback). They now have Reject, Approve instead, Decide later and Move back to review; A/R/D keys work on them too. The walkthrough has Previous / Next buttons beside See all.
+
 ## Done in 0.5.0 (8 Oct 2026; local installer built, not yet installed on a clean PC)
 
 - **Installer: Terms and Conditions page** (`build/license.txt`, an "I Agree" page before anything installs). Draft wording: needs the company's own review (name, governing law city).
@@ -163,6 +188,8 @@ Last updated: 8 Oct 2026. Pick up from **Next up**.
 - **Folder layout:** `October-2026 / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx` + the day report sheet (month names since 8 Oct). Older days stay under `10-2026`; move them by hand if wanted.
 
 ## Later
+
+- **Intent tenders listed in other categories** (operator's thought, 9 Oct: "the tender speaks louder than the category", but do not search every category). Idea: one extra Tamil Nadu search per day using the search form's Work/Item Title field with the intent words and no category, kept to the title screen. Needs a live check of how that field matches.
 
 - **Really understanding a tender (AI).** On hold (8 Oct 2026, owner's call); do not start until asked. Today's decision is word matching: an intent word anywhere on the details page means keep. Real reading needs the Amazon Nova Lite relay (13.203.67.167:8787 through an SSH tunnel).
   - Blocked: the AWS security group must allow port 22, and sshd must be running on the VM.

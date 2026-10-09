@@ -33,6 +33,8 @@ export function App() {
   const [finishedRun, setFinishedRun] = useState<FinishedRun | null>(null);
   // The dates (jobs) of the search session in progress, and the report once it ends.
   const sessionJobs = useRef<string[]>([]);
+  // A quick run (a check for changes with nothing due) can end before its start call returns.
+  const endedJobs = useRef(new Set<string>());
   const [report, setReport] = useState<{ jobIds: string[]; message: string | null } | null>(null);
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
   const [waiting, setWaiting] = useState(0);
@@ -69,6 +71,7 @@ export function App() {
     const over = update.outcome === 'TIMEOUT' || update.outcome === 'ABORTED' || (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING');
     if (!sessionJobs.current.includes(update.jobId)) sessionJobs.current = [...sessionJobs.current, update.jobId];
     if (over) {
+      endedJobs.current.add(update.jobId);
       // The session ended: show what it did, then start a fresh list for the next one.
       setReport({ jobIds: sessionJobs.current, message: update.statusMessage ?? update.abortReason ?? null });
       sessionJobs.current = [];
@@ -169,11 +172,15 @@ export function App() {
             selectedPortalId={portalId}
             onPortalChange={setPortalId}
             onOpenSettings={openSettings}
-            onRunStarted={(jobId) => { sessionJobs.current = [jobId]; setActiveJobId(jobId); setFinishedRun(null); setReport(null); }}
+            onRunStarted={(jobId) => {
+              if (endedJobs.current.has(jobId)) return; // Already over: its report is showing.
+              sessionJobs.current = [jobId]; setActiveJobId(jobId); setFinishedRun(null); setReport(null);
+            }}
             onOpenRun={(jobId) => setOpenRunId(jobId)}
             onInboxCount={setWaiting}
             finishedRun={finishedRun}
             onDismissFinished={() => setFinishedRun(null)}
+            onSettingsSaved={setSettings}
           />
         ) : view === 'tenders' ? (
           <TendersPage onInboxCount={setWaiting} />

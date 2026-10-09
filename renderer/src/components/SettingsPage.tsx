@@ -3,12 +3,13 @@ import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import { GoogleDriveSetting } from './GoogleDriveSetting';
 import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
-import type { PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
+import type { CategoryHealth, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
 import type { UpdateStatus } from '../../../src/electron/updateService';
 import { DEFAULT_AUTOMATION_PACING, type AutomationPacingSettings, type AutomationPacingMode } from '../../../src/persistence/repositories/automationSettingsRepository';
 import { EditableChips } from './EditableChips';
 import { CategoryPicker } from './CategoryPicker';
+import { CategoryReplacement, withReplacements } from './CategoryReplacement';
 import { WordSuggestionList } from './WordSuggestionList';
 import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
 import { refreshCategoryNames } from '../../../src/gem/gemBid';
@@ -32,6 +33,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const [excludedKeywords, setExcludedKeywords] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<WordSuggestions | null>(null);
   const [websiteCategories, setWebsiteCategories] = useState<PortalCategoryList | null>(null);
+  const [categoryHealth, setCategoryHealth] = useState<CategoryHealth | null>(null);
+  const [replacing, setReplacing] = useState<MissingCategory[] | null>(null);
   const [credentialSettings, setCredentialSettings] = useState<PortalCredentialSettings | null>(null);
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
@@ -83,8 +86,20 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     window.tenderAssist.getPortalCategories(selectedPortalId, { includeProducts: gem && gemIncludeProducts })
       .then((list) => { if (current) setWebsiteCategories(list); })
       .catch(() => {});
+    window.tenderAssist.getCategoryHealth(selectedPortalId)
+      .then((health) => { if (current) setCategoryHealth(health); })
+      .catch(() => {});
     return () => { current = false; };
-  }, [selectedPortalId, gem, gemIncludeProducts]);
+  }, [selectedPortalId, gem, gemIncludeProducts, settings]);
+
+  const openReplacement = (names: string[]) => setReplacing(names.map((name) =>
+    categoryHealth?.missing.find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()) ?? { name, lastSeen: null, longGone: false }));
+  const markNewLooked = () => {
+    window.tenderAssist.markNewCategoriesLooked(selectedPortalId)
+      .then(() => setCategoryHealth((health) => health && { ...health, newOnWebsite: [] }))
+      .catch(() => {});
+  };
+  const categoryHelp = { health: categoryHealth, onReplace: openReplacement, onNewLooked: markNewLooked };
 
   useEffect(() => {
     let current = true;
@@ -248,7 +263,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             <>
               <p className="block__lede">Bids in these categories are kept when they mention an intent word.</p>
               <CategoryPicker portalName="GeM" websiteList={websiteCategories}
-                values={chosenCategories} onChange={setChosenCategories} startingList={DEFAULT_GEM_CATEGORIES}
+                values={chosenCategories} onChange={setChosenCategories} startingList={DEFAULT_GEM_CATEGORIES} {...categoryHelp}
                 unknownListHint="GeM’s category list could not be read just now; these are the starting categories. Check the internet connection and open Settings again." />
               <label className="check">
                 <input type="checkbox" checked={gemIncludeProducts} onChange={(event) => setGemIncludeProducts(event.target.checked)} />
@@ -260,7 +275,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             <>
               <p className="block__lede">Tenders in these categories are kept when they mention an intent word.</p>
               <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories}
-                values={chosenCategories} onChange={setChosenCategories} />
+                values={chosenCategories} onChange={setChosenCategories} {...categoryHelp} />
             </>
           )}
           <EditableChips id="intent-keyword-entry" label="Intent words"
@@ -434,6 +449,16 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         {!error && saved && <span className="savebar__ok">Saved. New searches use these settings.</span>}
         <button className="btn btn--primary" type="submit" disabled={!canSave}>{saving ? 'Saving…' : 'Save changes'}</button>
       </div>
+      {replacing && (
+        <CategoryReplacement portalId={selectedPortalId} portalName={selectedPortal.name} missing={replacing}
+          chosen={chosenCategories} includeProducts={gem && gemIncludeProducts}
+          onSkip={() => setReplacing(null)}
+          onApply={(add, remove) => {
+            // Shown in the list straight away; Save changes keeps it, as with any other edit.
+            setChosenCategories(withReplacements(chosenCategories, add, remove));
+            setReplacing(null);
+          }} />
+      )}
     </form>
   );
 }

@@ -2,6 +2,7 @@
 // "Tenders Interested" workbook): one row per kept tender.
 
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
+import { corrigendaSummary, tenderPageFacts } from '../review/watchedTenders.js';
 
 export interface ReportColumn {
   header: string;
@@ -31,6 +32,8 @@ export interface ReportRow {
   eligibilityNotes: string;
   viewTenderLink: ReportLink | null;
   tenderDocumentLink: ReportLink | null;
+  /** The website's corrigenda for the tender: "1. DUE DATE EXTENSION (Date)". */
+  corrigenda: string;
 }
 
 export const REPORT_COLUMNS: readonly ReportColumn[] = [
@@ -49,6 +52,7 @@ export const REPORT_COLUMNS: readonly ReportColumn[] = [
   { header: 'Eligibility Notes', key: 'eligibilityNotes', width: 48 },
   { header: 'View Tender Link', key: 'viewTenderLink', width: 22 },
   { header: 'Tender Document Link', key: 'tenderDocumentLink', width: 22 },
+  { header: 'Corrigenda', key: 'corrigenda', width: 40 },
 ];
 
 /** The "Label: value" lines at the top of a tender's saved details, by label. */
@@ -155,5 +159,6 @@ export function reportRow(input: ReportRowInput): ReportRow {
       ? { text: 'Open on GeM', target: `https://bidplus.gem.gov.in/showbidDocument/${bidId}` }
       : input.portalUrl ? { text: `Open ${input.portalName ?? 'the website'} (Tender ID ${bidId || tender.tender_ref})`, target: input.portalUrl } : null,
     tenderDocumentLink: input.documentsFolder ? { text: 'Open documents', target: input.documentsFolder } : null,
+    corrigenda: corrigendaSummary(tenderPageFacts(tender.detail_text).corrigenda),
   };
 }

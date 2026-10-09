@@ -5,6 +5,7 @@ import type { TenderRepository, TenderRow } from '../persistence/repositories/te
 import type { ClassificationRepository, FinalClassification } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
+import { tenderPageFacts } from '../review/watchedTenders.js';
 import { detailTextFor, navigateToMyTenders, NotInMyTendersError, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
@@ -140,6 +141,8 @@ export async function runClassificationPhase(
       tenderCategory: detail.tenderCategory,
       detailText: detailTextFor(detail),
       documentLinks: detail.documentLinks,
+      // The current closing date, extensions included: "Bid Submission End Date".
+      closingDate: tenderPageFacts(detailTextFor(detail)).closingDateRaw,
     });
 
     const g1 = publishedDate

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { CheckIcon, ChipRemoveIcon, PlusIcon } from './icons';
 import { absoluteDateTime } from '../format';
-import type { PortalCategoryList } from '../../../src/electron/ipcTypes';
+import type { CategoryHealth, PortalCategoryList } from '../../../src/electron/ipcTypes';
+import { missingSince } from './CategoryReplacement';
 import { DEFAULT_RUN_DEFAULTS } from '../../../src/config/runConfiguration';
 
 export interface CategoryPickerProps {
@@ -14,6 +15,12 @@ export interface CategoryPickerProps {
   startingList?: readonly string[];
   /** Said while the website's list is not known yet. */
   unknownListHint?: string;
+  /** Since when chosen categories are off the website's list, and what is new on it. */
+  health?: CategoryHealth | null;
+  /** Open the replacement picker for these dropped categories. */
+  onReplace?: (names: string[]) => void;
+  /** The operator has seen the new categories. */
+  onNewLooked?: () => void;
 }
 
 // GeM with products has thousands of categories; draw only the first ones and let typing narrow them.
@@ -32,7 +39,7 @@ function splitCategory(value: string): { name: string; detail: string } {
 const sameName = (a: string, b: string) => a.toLocaleLowerCase() === b.toLocaleLowerCase();
 
 /** Categories to search, picked from the website's own Product Category list. */
-export function CategoryPicker({ portalName, websiteList, values, onChange, startingList = DEFAULT_RUN_DEFAULTS.productCategories, unknownListHint }: CategoryPickerProps) {
+export function CategoryPicker({ portalName, websiteList, values, onChange, startingList = DEFAULT_RUN_DEFAULTS.productCategories, unknownListHint, health, onReplace, onNewLooked }: CategoryPickerProps) {
   const [filter, setFilter] = useState('');
   const known = (websiteList?.categories.length ?? 0) > 0;
   const options = useMemo(() => {
@@ -51,6 +58,9 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
   const typed = filter.trim().replace(/\s+/g, ' ');
   // Typing a name is only offered until the website's list is known.
   const canAddTyped = !known && typed !== '' && !options.some((option) => sameName(option, typed));
+
+  const newOnWebsite = (health?.newOnWebsite ?? []).filter((name) => !values.some((value) => sameName(value, name)));
+  const missingInfo = (value: string) => health?.missing.find((item) => sameName(item.name, value));
 
   const add = (value: string) => {
     if (values.some((item) => sameName(item, value))) return;
@@ -71,13 +81,18 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
         {values.map((value) => {
           const missing = known && !options.some((option) => sameName(option, value));
           const { name, detail } = splitCategory(value);
+          const info = missing ? missingInfo(value) : undefined;
+          const missingText = info ? (info.longGone ? 'Gone two weeks or more. Remove it?' : missingSince(info)) : 'Not on the website’s list';
           return (
             <li className={missing ? 'cat cat--missing' : 'cat'} key={value.toLocaleLowerCase()}
-              title={missing ? `${value}\n\nNot on the website’s list. This search will fail; remove it or pick the right name.` : value}>
+              title={missing ? `${value}\n\n${missingText}. Searches skip it until the website lists it again; replace it or remove it.` : value}>
               <span className="cat__text">
                 <span className="cat__name">{name}</span>
-                {missing ? <span className="cat__detail">Not on the website’s list</span> : detail && <span className="cat__detail">{detail}</span>}
+                {missing ? <span className="cat__detail">{missingText}</span> : detail && <span className="cat__detail">{detail}</span>}
               </span>
+              {missing && onReplace && (
+                <button type="button" className="cat__replace" onClick={() => onReplace([value])}>Replace</button>
+              )}
               <button type="button" className="chip__remove" aria-label={`Remove ${value}`}
                 onClick={() => onChange(values.filter((item) => item !== value))}>
                 <ChipRemoveIcon />
@@ -86,6 +101,21 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
           );
         })}
       </ul>
+      {newOnWebsite.length > 0 && (
+        <div className="new-cats" aria-live="polite">
+          <div className="new-cats__head">
+            <span><strong>New on the {portalName} list:</strong> {newOnWebsite.length} {newOnWebsite.length === 1 ? 'category' : 'categories'} since you last looked.</span>
+            {onNewLooked && <button type="button" className="btn btn--text btn--sm" onClick={onNewLooked}>Seen them</button>}
+          </div>
+          <ul className="new-cats__list">
+            {newOnWebsite.slice(0, 20).map((option) => (
+              <li key={option}>
+                <button type="button" className="btn btn--line btn--sm" onClick={() => add(option)} title={option}><PlusIcon /> {splitCategory(option).name}</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="chip-entry">
         <input id="product-category-entry" type="search" value={filter} placeholder="Find a category"
           aria-describedby="category-picker-helper" aria-controls="category-picker-options"

@@ -17,7 +17,8 @@ export interface RunsPageProps {
 type ResultFilter = 'all' | 'done' | 'stopped' | 'problem' | 'documents';
 
 /** Every search TenderAssist has run, newest first, in plain words. */
-const runName = (run: JobListItem) => run.purpose === 'DOCUMENTS' ? 'the documents run' : `the search for ${publishedLabel(run.searchDate)}`;
+const runName = (run: JobListItem) => run.purpose === 'DOCUMENTS' ? 'the documents run'
+  : run.purpose === 'CHANGES' ? 'the check for changes' : `the search for ${publishedLabel(run.searchDate)}`;
 
 export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
   const [runs, setRuns] = useState<JobListItem[] | null>(null);
@@ -102,7 +103,13 @@ export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
                 {shown.map((run) => {
                   const status = runStatus(run.jobState, run.jobId === activeJobId);
                   const date = run.searchDate ? new Date(`${run.searchDate}T00:00:00`) : null;
-                  const stops: Array<{ label: string; tone: Tone }> = run.purpose === 'DOCUMENTS'
+                  const stops: Array<{ label: string; tone: Tone }> = run.purpose === 'CHANGES'
+                    ? [
+                      { label: 'Followed', tone: 'done' },
+                      { label: `${run.tendersFound} checked`, tone: run.tendersFound > 0 ? 'done' : 'todo' },
+                      { label: status.text, tone: STATUS_TONE[status.tone] },
+                    ]
+                    : run.purpose === 'DOCUMENTS'
                     ? [
                       { label: 'Approved', tone: 'done' },
                       { label: `${run.tendersFound} opened`, tone: run.tendersFound > 0 ? 'done' : 'todo' },
@@ -119,10 +126,10 @@ export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
                     <li key={run.jobId} className="runrow">
                       <button type="button" className="runrow__main" onClick={() => onOpenRun(run.jobId)}>
                         <span className="runrow__date">
-                          {run.purpose === 'DOCUMENTS' ? <strong>Files</strong> : date ? <><strong>{date.getDate()}</strong><small>{date.toLocaleDateString('en-IN', { month: 'short', weekday: 'short' })}</small></> : <strong>?</strong>}
+                          {run.purpose === 'CHANGES' ? <strong>Check</strong> : run.purpose === 'DOCUMENTS' ? <strong>Files</strong> : date ? <><strong>{date.getDate()}</strong><small>{date.toLocaleDateString('en-IN', { month: 'short', weekday: 'short' })}</small></> : <strong>?</strong>}
                         </span>
                         <span className="runrow__what">
-                          <span className="runrow__title">{run.purpose === 'DOCUMENTS' ? 'Documents for approved tenders' : getPortalDefinition(run.portalId).name}</span>
+                          <span className="runrow__title">{run.purpose === 'CHANGES' ? 'Changes in followed tenders' : run.purpose === 'DOCUMENTS' ? 'Documents for approved tenders' : getPortalDefinition(run.portalId).name}</span>
                           <span className="runrow__meta">Searched <span title={absoluteDateTime(run.createdAt)}>{relativeTime(run.createdAt)}</span></span>
                         </span>
                         <Stops stops={stops} label="How this run went" />

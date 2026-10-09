@@ -365,6 +365,12 @@ export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, 
               Finish and sign out
             </button>
           </div>
+          <div className="more__changes">
+            <p>Tenders you follow were checked for extensions and corrigenda after the last date. Check again, still signed in:</p>
+            <button type="button" className="btn btn--line btn--sm" disabled={busy} onClick={() => act(() => window.tenderAssist.checkChangesInRun())}>
+              Check for changes
+            </button>
+          </div>
         </section>
       )}
 

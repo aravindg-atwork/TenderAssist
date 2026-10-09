@@ -31,6 +31,8 @@ export type { TendersView } from '../review/tenders.js';
 export type { TimelineEntry } from '../review/timeline.js';
 export type { TenderField, TenderFileView } from '../review/tenderFile.js';
 export type { OperatorDecision } from '../state/opportunityLifecycle.js';
+import type { CategoryHealth, CategorySuggestion, MissingCategory, ReplacementAdvice } from '../config/categoryHealth.js';
+export type { CategoryHealth, CategorySuggestion, MissingCategory, ReplacementAdvice };
 export type { PortalCategoryList, RunQuestion, RunQuestionAnswer, WordSuggestions };
 export type { WordSuggestion } from '../review/wordSuggestions.js';
 
@@ -102,7 +104,7 @@ export interface JobListItem {
   tendersFound: number;
   kept: number;
   /** SEARCH searches a published date; DOCUMENTS only collects approved tenders' documents. */
-  purpose: 'SEARCH' | 'DOCUMENTS';
+  purpose: 'SEARCH' | 'DOCUMENTS' | 'CHANGES';
 }
 
 /** Approved tenders still waiting for their documents. */
@@ -136,7 +138,7 @@ export interface DocumentsWaiting {
 export interface JobDetail {
   jobId: string;
   jobState: JobState;
-  purpose: 'SEARCH' | 'DOCUMENTS';
+  purpose: 'SEARCH' | 'DOCUMENTS' | 'CHANGES';
   authSessionId: string | null;
   authState: AuthState | null;
   jobTransitions: StateTransitionRow[];
@@ -155,6 +157,12 @@ export interface TenderAssistApi {
   /** The website's own Product Category list, as the last search read it. */
   /** For GeM, read from GeM itself; product categories are added only when asked. */
   getPortalCategories(portalId: string, options?: { includeProducts?: boolean }): Promise<PortalCategoryList>;
+  /** Chosen categories no longer on the website's list, and categories new on it. */
+  getCategoryHealth(portalId: string): Promise<CategoryHealth>;
+  /** What to search instead of a category the website dropped, led by where wanted tenders were listed. */
+  suggestCategoryReplacements(portalId: string, missingName: string): Promise<ReplacementAdvice>;
+  /** The operator has seen today's new categories; stop showing them as new. */
+  markNewCategoriesLooked(portalId: string): Promise<void>;
   /** Words to consider adding, learnt from tenders the operator approved and rejected. */
   getWordSuggestions(): Promise<WordSuggestions>;
   getPortalCredentialSettings(portalId: string): Promise<PortalCredentialSettings>;
@@ -203,6 +211,12 @@ export interface TenderAssistApi {
   getDocumentsWaiting(portalId: string): Promise<DocumentsWaiting>;
   /** Signs in and collects only the documents of approved tenders in My Tenders. */
   startDocumentRun(portalId: string): Promise<{ jobId: string; count: number }>;
+  /** Tenders followed for extensions and corrigenda: approved, decide later, waiting; open or just closed. */
+  getFollowedTenders(portalId: string): Promise<{ followed: number }>;
+  /** Sign in and reopen the followed tenders' pages to record extensions and corrigenda. */
+  startChangeCheck(portalId: string): Promise<{ jobId: string; count: number }>;
+  /** While a run waits signed in ("What next?"): check the followed tenders again, no new sign-in. */
+  checkChangesInRun(): Promise<void>;
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
   getGoogleDrive(): Promise<GoogleDriveStatus>;

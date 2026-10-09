@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { DocumentsWaiting, InboxItem, InboxView, OperatorDecision, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
+import type { CategoryHealth, DocumentsWaiting, InboxItem, InboxView, OperatorDecision, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
 import type { PreflightReport } from '../../../src/system/preflight';
 import { getPortalDefinition, isGemPortal, PORTALS } from '../../../src/config/portalRegistry';
+import { categoriesForPortal } from '../../../src/config/runConfiguration';
 import { absoluteDateTime, LIFECYCLE_LABELS } from '../format';
 import { PortalSelect } from './PortalSelect';
+import { CategoryReplacement, withReplacements } from './CategoryReplacement';
 import { TenderFile, type FileAction } from './TenderFile';
 import { TenderTray, type TrayGroup } from './TenderTray';
 import { Tracking } from './Tracking';
 import { compactRupees, deadline, portalMark } from './TenderCard';
-import { AlertIcon, ArrowRightIcon, CheckIcon, ClockIcon, CrossIcon, ListIcon, NoteIcon } from './icons';
+import { AlertIcon, ArrowRightIcon, BackIcon, CheckIcon, ClockIcon, CrossIcon, ListIcon, NoteIcon } from './icons';
 import { plainError } from '../words';
 
 export interface FinishedRun { jobId: string; message: string }
@@ -23,6 +25,8 @@ export interface TodayPageProps {
   onInboxCount: (count: number) => void;
   finishedRun: FinishedRun | null;
   onDismissFinished: () => void;
+  /** Settings changed here (a category replacement); the app keeps the new copy. */
+  onSettingsSaved: (settings: RunSettingsState) => void;
 }
 
 const isoOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -64,6 +68,14 @@ const CHANGED_ALTERNATIVES: Record<string, OperatorDecision[]> = {
   APPROVED: ['REJECT'], DOCUMENTS_COLLECTED: ['REJECT'], DEFERRED: ['APPROVE', 'REJECT'], REJECTED: ['APPROVE'],
 };
 
+const skipKey = (portalId: string) => `tenderassist.categorySkip.${portalId}`;
+function readSkippedMissing(portalId: string): string | null {
+  try { return window.localStorage.getItem(skipKey(portalId)); } catch { return null; }
+}
+function writeSkippedMissing(portalId: string, key: string): void {
+  try { window.localStorage.setItem(skipKey(portalId), key); } catch { /* the warning simply shows again */ }
+}
+
 function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
 }
@@ -72,7 +84,7 @@ const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce
 
 /** Today: one next step at a time. Decide what is waiting, or find new tenders. */
 export function TodayPage({
-  settings, selectedPortalId, onPortalChange, onOpenSettings, onRunStarted, onOpenRun, onInboxCount, finishedRun, onDismissFinished,
+  settings, selectedPortalId, onPortalChange, onOpenSettings, onRunStarted, onOpenRun, onInboxCount, finishedRun, onDismissFinished, onSettingsSaved,
 }: TodayPageProps) {
   const [mode, setMode] = useState<'decide' | 'find' | null>(null);
   const [from, setFrom] = useState(todayIso());
@@ -96,6 +108,52 @@ export function TodayPage({
   const [driveSet, setDriveSet] = useState(false);
   const portal = getPortalDefinition(selectedPortalId);
   const gem = isGemPortal(portal);
+  const [categoryHealth, setCategoryHealth] = useState<CategoryHealth | null>(null);
+  const [followed, setFollowed] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    window.tenderAssist.getFollowedTenders(selectedPortalId)
+      .then((result) => { if (current) setFollowed(result.followed); })
+      .catch(() => { if (current) setFollowed(0); });
+    return () => { current = false; };
+  }, [selectedPortalId, finishedRun, inbox]);
+  const [replacing, setReplacing] = useState(false);
+  const [skippedMissing, setSkippedMissing] = useState<string | null>(() => readSkippedMissing(selectedPortalId));
+
+  useEffect(() => {
+    let current = true;
+    setSkippedMissing(readSkippedMissing(selectedPortalId));
+    window.tenderAssist.getCategoryHealth(selectedPortalId)
+      .then((health) => { if (current) setCategoryHealth(health); })
+      .catch(() => { if (current) setCategoryHealth(null); });
+    return () => { current = false; };
+  }, [selectedPortalId, settings]);
+
+  const missingCategories = useMemo(() => categoryHealth?.missing ?? [], [categoryHealth]);
+  const missingKey = missingCategories.map((item) => item.name.toLocaleLowerCase()).sort().join('|');
+  // Skipping hides the warning until another category goes missing; Settings still shows them.
+  const showMissing = missingCategories.length > 0 && skippedMissing !== missingKey;
+  const skipMissing = () => {
+    writeSkippedMissing(selectedPortalId, missingKey);
+    setSkippedMissing(missingKey);
+    setReplacing(false);
+  };
+  const applyReplacements = async (add: string[], remove: string[]) => {
+    if (!settings) return;
+    const chosen = categoriesForPortal(settings.defaults, portal);
+    const next = withReplacements(chosen, add, remove);
+    if (next.length === 0) { setStartError(`Keep at least one category for ${portal.name}.`); return; }
+    try {
+      onSettingsSaved(await window.tenderAssist.saveRunSettings({
+        ...settings.defaults,
+        categoriesByPortal: { ...settings.defaults.categoriesByPortal, [portal.id]: next },
+      }));
+      setReplacing(false);
+    } catch (err) {
+      setStartError(plainError(err));
+    }
+  };
 
   useEffect(() => {
     Promise.all([window.tenderAssist.getPublishingSettings(selectedPortalId), window.tenderAssist.getGoogleDrive()])
@@ -187,7 +245,12 @@ export function TodayPage({
 
   const actionsFor = (item: InboxItem): FileAction[] => {
     if (item.group === 'AUTO_REJECTED') {
-      return [{ id: 'reopen', label: 'Move back to review', kind: 'plain', run: (note) => void decide(item, 'REOPEN', note) }];
+      return [
+        { id: 'reject', label: 'Reject', kind: 'reject', run: (note) => void decide(item, 'REJECT', note) },
+        { id: 'approve', label: 'Approve instead', kind: 'approve', run: (note) => void decide(item, 'APPROVE', note) },
+        { id: 'later', label: 'Decide later', kind: 'later', run: (note) => void decide(item, 'DEFER', note) },
+        { id: 'reopen', label: 'Move back to review', kind: 'plain', run: (note) => void decide(item, 'REOPEN', note) },
+      ];
     }
     if (item.group === 'CHANGED') {
       const keep: FileAction = {
@@ -216,7 +279,7 @@ export function TodayPage({
         event.preventDefault();
         const next = walk[key === 'j' ? Math.min(index + 1, walk.length - 1) : Math.max(index - 1, 0)];
         if (next) setSelectedId(next.id);
-      } else if (KEYS[key] && (selected.group === 'RECOMMENDED' || selected.group === 'UNCERTAIN') && !busy) {
+      } else if (KEYS[key] && selected.group !== 'CHANGED' && !busy) {
         event.preventDefault();
         void decide(selected, KEYS[key]);
       }
@@ -281,6 +344,19 @@ export function TodayPage({
     onDismissFinished();
     try {
       const { jobId } = await window.tenderAssist.startDocumentRun(selectedPortalId);
+      onRunStarted(jobId);
+    } catch (err) {
+      setStartError(plainError(err));
+    } finally {
+      setStarting(false);
+    }
+  };
+  const checkForChanges = async () => {
+    setStarting(true);
+    setStartError(null);
+    onDismissFinished();
+    try {
+      const { jobId } = await window.tenderAssist.startChangeCheck(selectedPortalId);
       onRunStarted(jobId);
     } catch (err) {
       setStartError(plainError(err));
@@ -398,6 +474,20 @@ export function TodayPage({
               </div>
             )}
             {startError && <div className="alert alert--stop" role="alert"><AlertIcon /><p>{startError}</p></div>}
+            {showMissing && (
+              <div className="alert alert--look">
+                <AlertIcon />
+                <p>
+                  <strong>{missingCategories.map((item) => `“${item.name}”`).join(', ')} {missingCategories.length === 1 ? 'is' : 'are'} not on {portal.name}’s category list</strong>
+                  {categoryHealth?.readAt && ` (read ${absoluteDateTime(categoryHealth.readAt)})`}. The search skips {missingCategories.length === 1 ? 'it' : 'them'}.
+                  Choose a category to search instead, or skip this for now and change it later in Settings.
+                </p>
+                <div className="alert__actions">
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => setReplacing(true)}>Choose replacements</button>
+                  <button type="button" className="btn btn--text btn--sm" onClick={skipMissing}>Skip for now</button>
+                </div>
+              </div>
+            )}
             {skippedNote && <div className="alert"><p>{skippedNote}</p></div>}
             {recovery && (
               <div className="alert alert--look">
@@ -414,6 +504,15 @@ export function TodayPage({
               <div className="alert alert--blue">
                 <p><strong>{documentsWaiting.ready} approved {documentsWaiting.ready === 1 ? 'tender needs' : 'tenders need'} {documentsWaiting.ready === 1 ? 'its' : 'their'} documents.</strong> {gem ? 'Saved straight from GeM, no sign-in.' : 'TenderAssist opens only those in My Tenders.'}</p>
                 <button type="button" className="btn btn--line btn--sm" disabled={starting || Boolean(blocker)} onClick={() => void collectDocuments()}>Collect documents</button>
+              </div>
+            )}
+            {followed > 0 && (
+              <div className="alert alert--blue">
+                <p>
+                  <strong>{followed} {followed === 1 ? 'tender' : 'tenders'} you follow</strong> (approved, for later, or waiting for you) {followed === 1 ? 'is' : 'are'} checked for extended closing dates and corrigenda at the end of every search.
+                  {gem ? ' GeM needs no sign-in.' : ' Checking now signs in to the website first.'}
+                </p>
+                <button type="button" className="btn btn--line btn--sm" disabled={starting || Boolean(blocker)} onClick={() => void checkForChanges()}>Check for changes</button>
               </div>
             )}
             {notInMyTenders.length > 0 && (
@@ -448,7 +547,11 @@ export function TodayPage({
               <div className="decide__bar">
                 <span className="decide__count"><strong>{position}</strong> of {walk.length}</span>
                 <span className="decide__progress" aria-hidden="true"><span style={{ transform: `scaleX(${position / walk.length})` }} /></span>
-                <button type="button" className="btn btn--text btn--sm" onClick={() => setDrawer('queue')}><ListIcon /> See all</button>
+                <span className="decide__nav">
+                  <button type="button" className="btn btn--line btn--sm" disabled={position <= 1} onClick={() => setSelectedId(walk[position - 2].id)}><BackIcon /> Previous</button>
+                  <button type="button" className="btn btn--line btn--sm" disabled={position >= walk.length} onClick={() => setSelectedId(walk[position].id)}>Next <ArrowRightIcon /></button>
+                  <button type="button" className="btn btn--text btn--sm" onClick={() => setDrawer('queue')}><ListIcon /> See all</button>
+                </span>
               </div>
               <Consignment
                 key={selected.id}
@@ -489,6 +592,12 @@ export function TodayPage({
             </section>
           )}
         </div>
+      )}
+
+      {replacing && settings && (
+        <CategoryReplacement portalId={portal.id} portalName={portal.name} missing={missingCategories}
+          chosen={categoriesForPortal(settings.defaults, portal)} includeProducts={gem && settings.defaults.gemIncludeProducts}
+          onSkip={skipMissing} onClose={() => setReplacing(false)} onApply={(add, remove) => void applyReplacements(add, remove)} />
       )}
 
       {drawer && (

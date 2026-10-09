@@ -180,6 +180,16 @@ export class TenderRepository {
       .run(new Date().toISOString(), tender.tender_ref, tender.tender_portal_id, tender.tender_portal_id, tender.job_id);
   }
 
+  /** The website's current closing date, as read again (an extension replaces the old date). */
+  setClosingDate(id: string, closingDate: string): void {
+    this.db.prepare('UPDATE tenders SET closing_date = ?, updated_at = ? WHERE id = ?').run(closingDate, new Date().toISOString(), id);
+  }
+
+  /** Fills a closing date read from a page saved earlier; a date already known is kept. */
+  fillClosingDate(id: string, closingDate: string): void {
+    this.db.prepare('UPDATE tenders SET closing_date = ? WHERE id = ? AND closing_date IS NULL').run(closingDate, id);
+  }
+
   updateDetail(id: string, input: TenderDetailInput): void {
     const now = new Date().toISOString();
     this.db

@@ -438,3 +438,64 @@ export async function downloadDetailDocuments(
   }
   return results;
 }
+
+/**
+ * Opens each listed corrigendum ("Latest Corrigendum List", its View link)
+ * on an open tender details page and saves the files it shows, then returns
+ * to the tender. The View link may open the corrigendum in the same page or
+ * in a popup; both are handled. A corrigendum that cannot be opened is
+ * reported with an error and the rest still save.
+ */
+export async function downloadCorrigendumDocuments(
+  detailPage: Page,
+  portalNumbers: readonly string[],
+  captureFor: (portalNumber: string) => CaptureDownload,
+  paceAction: PaceAction = noPacing
+): Promise<Map<string, { results: DetailDocumentResult[]; error?: string }>> {
+  const saved = new Map<string, { results: DetailDocumentResult[]; error?: string }>();
+  const markRows = () => detailPage.evaluate((wanted) => {
+    const compactText = (value: string | null | undefined) => (value ?? '').trim().replace(/\s+/g, ' ');
+    // The smallest table holding the corrigendum list, not the page-layout tables around it.
+    const tables = Array.from(document.querySelectorAll('table'))
+      .filter((table) => /Corrigendum Title/i.test(table.innerText) && /Corrigendum Type/i.test(table.innerText))
+      .sort((a, b) => a.outerHTML.length - b.outerHTML.length);
+    const table = tables[0];
+    if (!table) return [] as string[];
+    const marked: string[] = [];
+    for (const row of Array.from(table.querySelectorAll('tr'))) {
+      const number = compactText(row.querySelector('td')?.textContent);
+      const link = row.querySelector('a[href], a[onclick]');
+      if (!link || !wanted.includes(number)) continue;
+      link.setAttribute('data-tenderassist-corrigendum', number);
+      marked.push(number);
+    }
+    return marked;
+  }, [...portalNumbers]);
+
+  let marked = await markRows().catch(() => [] as string[]);
+  for (const number of portalNumbers) {
+    if (!marked.includes(number)) {
+      saved.set(number, { results: [], error: 'Its View link was not found on the tender page.' });
+      continue;
+    }
+    const detailUrl = detailPage.url();
+    try {
+      await paceAction();
+      const popup = detailPage.context().waitForEvent('page', { timeout: 8_000 }).catch(() => null);
+      await detailPage.locator(`[data-tenderassist-corrigendum="${number}"]`).first().click();
+      const opened = await popup;
+      const corrigendumPage = opened ?? detailPage;
+      await corrigendumPage.waitForLoadState('load', { timeout: 30_000 }).catch(() => {});
+      const results = await downloadDetailDocuments(corrigendumPage, captureFor(number), paceAction);
+      saved.set(number, { results });
+      if (opened) await opened.close().catch(() => {});
+    } catch (error) {
+      saved.set(number, { results: [], error: error instanceof Error ? error.message : String(error) });
+    }
+    if (detailPage.url() !== detailUrl) {
+      await detailPage.goBack({ waitUntil: 'load' }).catch(() => {});
+      marked = await markRows().catch(() => [] as string[]);
+    }
+  }
+  return saved;
+}

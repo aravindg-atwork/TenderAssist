@@ -34,6 +34,7 @@ describe('the day report sheet', () => {
       eligibilityNotes: '',
       viewTenderLink: { text: 'Open Tamil Nadu (Tender ID 2026_POLIS_702131_1)', target: 'https://tntenders.gov.in/nicgep/app' },
       tenderDocumentLink: { text: 'Open documents', target: '05-10-2026_3_OARS/Documents' },
+      corrigenda: '',
     });
   });
 

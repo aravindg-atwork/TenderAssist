@@ -47,7 +47,8 @@ export function applyPortalCorrigenda(
   opportunities: Pick<OpportunityRepository, 'getById' | 'listEvents' | 'recordCorrigendum' | 'markCancelled'>,
   opportunityId: string,
   entries: PortalCorrigendum[],
-  context: EventContext = {}
+  context: EventContext = {},
+  options: { flagDecided?: boolean } = {}
 ): number {
   const known = () => opportunities.listEvents(opportunityId).filter((event) => event.kind === 'CORRIGENDUM').length;
   const before = known();
@@ -59,7 +60,7 @@ export function applyPortalCorrigenda(
       publishedAt: entry.publishedAt,
       changes,
       description: [entry.title, entry.description].filter(Boolean).join(' — ') || null,
-    }, context);
+    }, context, options);
     if (changes.includes('CANCELLATION')) cancelledBy = entry.portalNumber;
   }
   const current = opportunities.getById(opportunityId);

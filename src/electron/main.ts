@@ -21,8 +21,8 @@ import { AutomationSettingsRepository } from '../persistence/repositories/automa
 import { DisplaySettingsRepository, type TextSize } from '../persistence/repositories/displaySettingsRepository.js';
 import { TenderWorkflowRepository, type ManualTenderDecision, type TenderReviewRow } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
-import { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
-import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, syncJobOpportunities } from '../orchestration/opportunitySync.js';
+import { OpportunityRepository, type OpportunityRow } from '../persistence/repositories/opportunityRepository.js';
+import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, recordPageCorrigenda, syncJobOpportunities, syncTenderSighting } from '../orchestration/opportunitySync.js';
 import { automaticDownloadSelection } from '../orchestration/automaticSelection.js';
 import { describeSkipped, planDateBatch, type DateBatchPlan } from '../orchestration/dateBatch.js';
 import { buildInbox, type InboxView } from '../review/inbox.js';
@@ -31,6 +31,7 @@ import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
 import { collectAuditHistory, writeAuditWorkbook } from '../review/auditHistory.js';
 import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
+import { canTransition } from '../state/opportunityLifecycle.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
@@ -42,6 +43,8 @@ import { RUN_QUESTION_TIMEOUT_MS, waitForAnswer, withRunState, type RunQuestion,
 import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
 import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing, saveTenderFiles, type DocumentDownloader } from '../orchestration/postProcessingRunner.js';
 import { GemClient } from '../gem/gemClient.js';
+import { findBidsStartedOn } from '../gem/gemDaySearch.js';
+import { portalStyleDate } from '../gem/gemBid.js';
 import { bidFromTender, GEM_RETRY_DELAYS_MS, readGemBidDetails, runGemDate } from '../gem/gemRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
 import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
@@ -58,13 +61,15 @@ import type {
   GoogleDriveStatus,
 } from './ipcTypes.js';
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
+import { categoryHealth, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
 import { driveFolderPath, GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser, type DriveCredentials } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
-import { detailTextFor, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
+import { detailTextFor, downloadCorrigendumDocuments, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
+import { corrigendaSummary, isWatched, tenderPageFacts } from '../review/watchedTenders.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { retryTransient } from '../orchestration/transientRetry.js';
 import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
@@ -145,6 +150,25 @@ const opportunitySync = { tenders, classifications, opportunities, workflow };
 function syncOpportunities(label: string, fn: () => void): void {
   try { fn(); } catch (error) { console.error(`[TenderAssist] tender record sync failed (${label}):`, error); }
 }
+/**
+ * Tender pages saved before closing dates and corrigenda were read from
+ * them (before 9 Oct 2026). Filled in quietly: the operator saw those pages,
+ * so nothing is shown as changed. Safe to repeat; known values are kept.
+ */
+function catchUpTenderPages(): void {
+  for (const opportunity of opportunities.list()) {
+    if (isGemPortal(getPortalDefinition(opportunity.portal_id))) continue;
+    const pages = tenders.listForOpportunity(opportunity.id).filter((tender) => tender.detail_text);
+    for (const tender of pages) {
+      const { closingDateRaw } = tenderPageFacts(tender.detail_text);
+      if (closingDateRaw) tenders.fillClosingDate(tender.id, closingDateRaw);
+      recordPageCorrigenda(opportunitySync, opportunity.id, tender.detail_text, { jobId: tender.job_id, at: tender.detail_reviewed_at ?? undefined }, { flagDecided: false });
+    }
+    const closing = tenderPageFacts(pages.at(-1)?.detail_text).closingDateRaw;
+    if (closing) opportunities.fillClosingDate(opportunity.id, closing);
+  }
+}
+syncOpportunities('tender page catch-up', catchUpTenderPages);
 syncOpportunities('expiry sweep', () => opportunities.expireOverdue());
 syncOpportunities('retender links', () => linkAllPossibleRetenders(opportunitySync));
 const jobMachine = new JobStateMachine(db, jobs, transitions);
@@ -593,6 +617,15 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
   return jobs.listAll().map((job) => {
     const session = sessions.getLatestForJob(job.id);
     const config = runConfigurations.getForJob(job.id);
+    if (job.purpose === 'CHANGES') {
+      return {
+        jobId: job.id, jobState: job.state, authState: session?.state ?? null,
+        createdAt: job.created_at, updatedAt: job.updated_at,
+        portalId: config?.portalId ?? DEFAULT_PORTAL_ID, searchDate: null,
+        tendersFound: changeCheckIds(job).length, kept: 0,
+        purpose: 'CHANGES' as const,
+      };
+    }
     if (job.purpose === 'DOCUMENTS') {
       const ids = jobs.documentTenderIds(job);
       return {
@@ -689,7 +722,43 @@ ipcMain.handle('get-portal-categories', async (_event, portalId: string, options
   return { categories: [...services.categories, ...products.categories], readAt: services.readAt };
 });
 
-ipcMain.handle('get-portal-credential-settings', async (_event, portalId: string): Promise<PortalCredentialSettings> => {
+/** The website's list the chosen categories are checked against, with its history. */
+async function categoryListForHealth(portal: PortalDefinition): Promise<PortalCategoryList> {
+  if (!isGemPortal(portal)) return portalCategories.get(portal.id);
+  const { services, products } = await gemCategoryLists(portal);
+  if (!runConfigurations.getDefaults().gemIncludeProducts) return services;
+  return {
+    ...services,
+    categories: [...services.categories, ...products.categories],
+    history: { ...products.history, ...services.history },
+  };
+}
+
+ipcMain.handle('get-category-health', async (_event, portalId: string): Promise<CategoryHealth> => {
+  const portal = getPortalDefinition(portalId);
+  return categoryHealth(await categoryListForHealth(portal), categoriesForPortal(runConfigurations.getDefaults(), portal));
+});
+
+ipcMain.handle('suggest-category-replacements', async (_event, portalId: string, missingName: string): Promise<ReplacementAdvice> => {
+  const portal = getPortalDefinition(portalId);
+  if (typeof missingName !== 'string' || !missingName.trim()) throw new Error('Name the category to replace.');
+  // Every tender this website gave before: where the office's kind of work was listed.
+  const evidence: CategoryEvidence[] = jobs.listAll()
+    .filter((job) => (runConfigurations.getForJob(job.id)?.portalId ?? DEFAULT_PORTAL_ID) === portal.id)
+    .flatMap((job) => tenders.listForJob(job.id))
+    .map((tender) => ({
+      category: tender.product_category,
+      detailCategory: tender.detail_product_category,
+      wanted: isApprovedTender(tender) || (workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id)) === 'KEEP',
+    }));
+  return suggestReplacements(await categoryListForHealth(portal), missingName, categoriesForPortal(runConfigurations.getDefaults(), portal), evidence);
+});
+
+ipcMain.handle('mark-new-categories-looked', (_event, portalId: string): void => {
+  portalCategories.markNewLooked(getPortalDefinition(portalId).id);
+});
+
+ipcMain.handle('get-portal-credential-settings',async (_event, portalId: string): Promise<PortalCredentialSettings> => {
   return credentialSettings(getPortalDefinition(portalId).id);
 });
 
@@ -1028,13 +1097,13 @@ ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
   const session = sessions.getLatestForJob(jobId);
   const documentRun = job.purpose === 'DOCUMENTS';
   // A documents run's tenders belong to the searches that found them; all were approved.
-  const runTenders = documentRun
-    ? jobs.documentTenderIds(job).map((id) => tenders.getById(id)).filter((tender): tender is TenderRow => Boolean(tender))
+  const runTenders = documentRun || job.purpose === 'CHANGES'
+    ? (documentRun ? jobs.documentTenderIds(job) : changeCheckIds(job)).map((id) => tenders.getById(id)).filter((tender): tender is TenderRow => Boolean(tender))
     : tenders.listForJob(jobId);
   return {
     jobId: job.id,
     jobState: job.state,
-    purpose: documentRun ? 'DOCUMENTS' : 'SEARCH',
+    purpose: documentRun ? 'DOCUMENTS' : job.purpose === 'CHANGES' ? 'CHANGES' : 'SEARCH',
     authSessionId: session?.id ?? null,
     authState: session?.state ?? null,
     jobTransitions: transitions.listFor('JOB', jobId),
@@ -1092,6 +1161,11 @@ interface RunContext {
   checkAllUndecided?: boolean;
   /** A question went unanswered: the operator is away, so the rest of the run does not wait. */
   operatorAway?: boolean;
+  /** Followed tenders were checked for changes in this sign-in, and what was found. */
+  watchChecked?: boolean;
+  watchNote?: string;
+  /** The operator asked for the check: read every followed tender, even ones read today. */
+  watchForced?: boolean;
   /** GeM runs: no portal page; files come straight from GeM. */
   gem?: GemClient;
   downloader?: DocumentDownloader;
@@ -1230,7 +1304,7 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
       // Tenders approved in the Inbox before this run had their documents
       // collected just now, so they go to Drive straight away.
       reportDriveProblems(copyApprovedTendersToDrive(tenders.listForJob(jobId)));
-      // Drive gets what this computer got, when the operator chose that.
+      // Drive gets the approved tenders and the report sheet; the rest wait for a decision.
       uploadRunToGoogleDrive(jobId);
       // The caller reports success, since more dates may follow in this sign-in.
       return result;
@@ -1280,6 +1354,12 @@ function selectionFor(jobId: string): string[] {
 // Lifecycles in which the operator has approved a tender.
 const APPROVED_LIFECYCLES: readonly string[] = ['APPROVED', 'DOCUMENTS_COLLECTED', 'ELIGIBILITY_REVIEWED', 'PREPARING'];
 
+/** Only tenders the operator approved go to Drive; ones waiting for a decision, or rejected, stay local. */
+function isApprovedTender(tender: TenderRow): boolean {
+  const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
+  return lifecycle !== undefined && APPROVED_LIFECYCLES.includes(lifecycle);
+}
+
 /**
  * Copy approved tenders' saved folders from the local output folder to the
  * portal's Drive folder. Tenders without a saved folder, or portals without
@@ -1289,8 +1369,7 @@ function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
   const problems: string[] = [];
   const sheetsCopied = new Set<string>();
   for (const tender of tenderRows) {
-    const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
-    if (!lifecycle || !APPROVED_LIFECYCLES.includes(lifecycle)) continue;
+    if (!isApprovedTender(tender)) continue;
     const portalId = runConfigurations.getForJob(tender.job_id)?.portalId ?? DEFAULT_PORTAL_ID;
     const driveRoot = publishingSettings.get(portalId).driveOutputRoot;
     const plan = jobOutputs.getPlan(tender.job_id);
@@ -1395,6 +1474,9 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
     }
     try {
       for (const tender of tenderRows) {
+        // A tender waiting for the operator stays on this computer; it goes
+        // to Drive when approved (afterApproval), never when rejected.
+        if (!isApprovedTender(tender)) continue;
         const plan = jobOutputs.getPlan(tender.job_id);
         const serialNumber = jobOutputs.findSerialNumber(tender.id);
         if (!plan || serialNumber === undefined) continue;
@@ -1451,7 +1533,7 @@ function uploadSavedTendersToGoogleDrive(tenderRows: TenderRow[]): void {
   if (tenderRows.length > 0) void uploadToGoogleDrive(tenderRows, tenderRows.map((tender) => ({ jobId: tender.job_id })), 'saved tenders upload');
 }
 
-/** Drive mirrors this computer: after a run, everything it saved (tender folders with documents, and the report sheet). */
+/** After a run: the report sheet, and the tender folders already approved; tenders waiting for a decision stay local. */
 function uploadRunToGoogleDrive(jobId: string): void {
   void uploadToGoogleDrive(tenders.listForJob(jobId), [{ jobId }], 'run upload');
 }
@@ -1517,7 +1599,7 @@ function runsUploadToDrive(): boolean {
 
 function runFinishedMessage(counts: CollectedCounts, dateCount = 1): string {
   const dates = dateCount > 1 ? ` across ${dateCount} published dates` : '';
-  const drive = runsUploadToDrive() ? ` The report sheet${counts.shortlisted > 0 ? ' and kept tenders are' : ' is'} being uploaded to Google Drive.` : '';
+  const drive = runsUploadToDrive() ? ` The report sheet is being uploaded to Google Drive; each tender goes there once you approve it.` : '';
   if (counts.shortlisted + counts.needsReview === 0) return `No tender matched your filters${dates}. Open a run to see what was checked.${drive}`;
   const parts = [
     counts.shortlisted > 0 && `${counts.shortlisted} shortlisted`,
@@ -1783,8 +1865,18 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
   for (let index = 0; ; index += 1) {
     const date = dates[index];
     if (date === undefined) {
-      // Every chosen date has run. Keep the portal signed in and ask.
-      const skippedNote = describeSkipped(batch.skipped);
+      // Every chosen date has run. While still signed in, check the tenders
+      // the operator follows for extensions and corrigenda, once per sign-in.
+      if (!ctx.watchChecked && lastResult) {
+        ctx.watchChecked = true;
+        const result = lastResult;
+        const summary = await checkWatchedTenders(ctx, result.jobId, authSessionId, (statusMessage) => emitJobUpdate({ ...result, outcome: undefined, statusMessage }), ctx.watchForced)
+          .catch((error) => { console.error('[TenderAssist] checking followed tenders failed:', error); return null; });
+        if (ctx.abortController.signal.aborted) return;
+        ctx.watchNote = summary ? describeWatch(summary) : 'Followed tenders could not be checked for changes this time; use "Check for changes" on Today.';
+      }
+      // Keep the portal signed in and ask.
+      const skippedNote = [describeSkipped(batch.skipped), ctx.watchNote].filter(Boolean).join(' ');
       emitJobUpdate({
         ...lastResult!,
         outcome: undefined,
@@ -1797,8 +1889,15 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
       portalHost?.setAutomationPopups(true);
       if (ctx.abortController.signal.aborted) return;
       if (!more) {
-        emitJobUpdate({ ...lastResult!, awaitingMoreDates: false, outcome: 'SUCCESS', statusMessage: runFinishedMessage(collected, batch.done.length) });
+        emitJobUpdate({ ...lastResult!, awaitingMoreDates: false, outcome: 'SUCCESS', statusMessage: [runFinishedMessage(collected, batch.done.length), ctx.watchNote].filter(Boolean).join(' ') });
         return;
+      }
+      if (more.checkChanges) {
+        // "Check for changes" from the run panel: check again, then ask again.
+        ctx.watchChecked = false;
+        ctx.watchForced = true;
+        index -= 1;
+        continue;
       }
       dates = [...dates, ...more.toRun];
       batch = { dates: [...dates], done: batch.done, skipped: [...batch.skipped, ...more.skipped] };
@@ -1967,7 +2066,12 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
     last = result;
   }
   if (!last) return;
-  const skippedNote = describeSkipped(batch.skipped);
+  // GeM needs no sign-in: the followed bids are checked at the end of every GeM run.
+  const finished = last;
+  const watch = await checkWatchedGemBids(ctx, finished.jobId, (statusMessage) => emitJobUpdate({ ...finished, outcome: undefined, statusMessage }))
+    .catch((error) => { console.error('[TenderAssist] checking followed GeM bids failed:', error); return null; });
+  if (signal.aborted) return;
+  const skippedNote = [describeSkipped(batch.skipped), watch ? describeWatch(watch) : 'Followed bids could not be checked for changes this time; use "Check for changes" on Today.'].filter(Boolean).join(' ');
   emitJobUpdate({
     ...last,
     outcome: 'SUCCESS',
@@ -2063,6 +2167,242 @@ ipcMain.handle('get-documents-waiting', (_event, portalId: unknown): DocumentsWa
  * saves its documents and zip into the folder its search gave it. Nothing is
  * searched or screened again.
  */
+// ── Watching followed tenders for extensions and corrigenda ─────────────────
+
+/** The followed tenders a "Check for changes" run reopened. */
+function changeCheckIds(job: { purpose?: string; document_tender_ids_json?: string | null }): string[] {
+  if (job.purpose !== 'CHANGES' || !job.document_tender_ids_json) return [];
+  try { return (JSON.parse(job.document_tender_ids_json) as unknown[]).filter((id): id is string => typeof id === 'string'); } catch { return []; }
+}
+
+/** At most this many tender pages are reopened per check, soonest closing first, to keep runs short. */
+const WATCH_MAX_PER_CHECK = 40;
+/** A page read this recently (by today's search, for example) is not read again. */
+const WATCH_FRESH_MS = 20 * 3_600_000;
+
+/**
+ * Tenders the operator follows on this website: approved, decide later, and
+ * waiting for a decision (not rejected), while open or just closed. Each as
+ * the sighting to reopen from My Tenders.
+ */
+function watchedTenderRows(portalId: string, now = new Date()): TenderRow[] {
+  const rows: TenderRow[] = [];
+  for (const opportunity of opportunities.list({ portalId })) {
+    const lifecycle = opportunity.lifecycle === 'EXPIRED' ? opportunities.lifecycleBeforeExpiry(opportunity.id) : opportunity.lifecycle;
+    if (!lifecycle || !isWatched({ ...opportunity, lifecycle }, now)) continue;
+    const sightings = tenders.listForOpportunity(opportunity.id);
+    const sighting = [...sightings].reverse().find((tender) => tender.favorited === 1) ?? sightings.at(-1);
+    if (sighting) rows.push(sighting);
+  }
+  return rows;
+}
+
+interface WatchSummary {
+  checked: number;
+  notFound: number;
+  extended: Array<{ title: string; from: string | null; to: string }>;
+  corrigenda: number;
+  reopened: number;
+  cancelled: number;
+  filesSaved: number;
+}
+
+const corrigendumNumbers = (opportunityId: string) => new Set(opportunities.listEvents(opportunityId)
+  .filter((event) => event.kind === 'CORRIGENDUM')
+  .map((event) => (JSON.parse(event.data_json) as { portalNumber?: string | null }).portalNumber ?? ''));
+
+function describeWatch(summary: WatchSummary): string {
+  if (summary.checked === 0) return '';
+  const parts = [
+    summary.extended.length > 0 && `${summary.extended.length} extended (${summary.extended.slice(0, 3).map((item) => `${item.title.slice(0, 40)}: now ${item.to}`).join('; ')}${summary.extended.length > 3 ? '; …' : ''})`,
+    summary.corrigenda > 0 && `${summary.corrigenda} new ${summary.corrigenda === 1 ? 'corrigendum' : 'corrigenda'}`,
+    summary.reopened > 0 && `${summary.reopened} open again`,
+    summary.cancelled > 0 && `${summary.cancelled} cancelled`,
+  ].filter(Boolean);
+  const found = summary.notFound > 0 ? ` ${summary.notFound} ${summary.notFound === 1 ? 'was' : 'were'} no longer in My Tenders.` : '';
+  return parts.length > 0
+    ? `Checked ${summary.checked} ${summary.checked === 1 ? 'tender' : 'tenders'} you follow: ${parts.join(', ')}.${found}`
+    : `Checked ${summary.checked} ${summary.checked === 1 ? 'tender' : 'tenders'} you follow: no extensions or corrigenda.${found}`;
+}
+
+/** Saves the files of new corrigenda of an approved tender, in "Corrigendum <n>" inside its documents folder. */
+async function saveCorrigendumFiles(ctx: RunContext, tender: TenderRow, detailPage: Page, portalNumbers: string[]): Promise<number> {
+  const host = portalHost;
+  if (!host || portalNumbers.length === 0) return 0;
+  const config = runConfigurations.getForJob(tender.job_id) ?? ctx.config;
+  const plan = jobOutputs.getOrCreatePlan(tender.job_id, ctx.outputSettings.localOutputRoot, config.searchDate, ctx.outputSettings.structure);
+  const documents = tenderDocumentsDirectory(plan.jobDirectory, tender, jobOutputs.serialNumberFor(plan, tender.id), plan.structure, plan.outputDate);
+  const saved = await downloadCorrigendumDocuments(detailPage, portalNumbers,
+    (number) => (click) => host.captureDocument(join(documents, `Corrigendum ${number}`), click), ctx.paceAction);
+  let files = 0;
+  for (const [number, outcome] of saved) {
+    const names = outcome.results.filter((result) => result.filePath).map((result) => result.fileName);
+    files += names.length;
+    const note = names.length > 0
+      ? `Corrigendum ${number}: saved ${names.join(', ')} in "Corrigendum ${number}".`
+      : `Corrigendum ${number}: its files could not be saved automatically (${outcome.error ?? 'none found on its page'}). Open the tender on the website to see them.`;
+    if (tender.opportunity_id) {
+      const id = tender.opportunity_id;
+      syncOpportunities('corrigendum files', () => opportunities.addNote(id, note, 'automation', { jobId: tender.job_id }));
+    }
+  }
+  return files;
+}
+
+/**
+ * Reopens the pages of followed tenders from My Tenders, while signed in,
+ * and records what changed: a later closing date, new corrigenda (their
+ * files saved for approved tenders), a tender open again or cancelled.
+ * Approved tenders that changed get their sheet row and Drive copy updated.
+ */
+async function checkWatchedTenders(ctx: RunContext, jobId: string, authSessionId: string, report: (message: string) => void, force = false): Promise<WatchSummary> {
+  const summary: WatchSummary = { checked: 0, notFound: 0, extended: [], corrigenda: 0, reopened: 0, cancelled: 0, filesSaved: 0 };
+  if (!ctx.page || isGemPortal(ctx.portal)) return summary;
+  const now = Date.now();
+  const due = watchedTenderRows(ctx.portal.id)
+    // Asked for by the operator: every followed tender; after a search: only pages not read today.
+    .filter((tender) => force || !tender.detail_reviewed_at || now - Date.parse(tender.detail_reviewed_at) > WATCH_FRESH_MS)
+    .sort((a, b) => (opportunities.getById(a.opportunity_id ?? '')?.closing_at ?? '9999').localeCompare(opportunities.getById(b.opportunity_id ?? '')?.closing_at ?? '9999'))
+    .slice(0, WATCH_MAX_PER_CHECK);
+  if (due.length === 0) return summary;
+
+  const before = new Map(due.map((tender) => {
+    const opportunity = tender.opportunity_id ? opportunities.getById(tender.opportunity_id) : undefined;
+    return [tender.id, { closing: opportunity?.closing_date ?? null, lifecycle: opportunity?.lifecycle, corrigenda: tender.opportunity_id ? corrigendumNumbers(tender.opportunity_id) : new Set<string>() }];
+  }));
+  report(`Checking ${due.length} ${due.length === 1 ? 'tender' : 'tenders'} you follow for extensions and corrigenda.`);
+  await retryTransient(() => navigateToMyTenders(ctx.page!, ctx.paceAction, ctx.portal.url), {
+    signal: ctx.abortController.signal,
+    canRetry: () => !sessionWasLost(authSessionId),
+  });
+  let opened = 0;
+  const batch = await reviewTendersFromMyTenders(ctx.page, due, 100, ctx.paceAction, async (tender, detail, detailPage) => {
+    if (ctx.abortController.signal.aborted) return;
+    opened += 1;
+    report(`Checking ${tender.title} for changes (${opened} of ${due.length}).`);
+    const detailText = detailTextFor(detail);
+    const facts = tenderPageFacts(detailText);
+    tenders.updateDetail(tender.id, {
+      organisationChain: detail.organisationChain,
+      department: detail.department ?? undefined,
+      stateName: detail.stateName ?? undefined,
+      publishedDate: (detail.publishedDateRaw ? parseTenderPortalDate(detail.publishedDateRaw) : null) ?? tender.published_date,
+      productCategory: detail.productCategories[0] ?? tender.detail_product_category ?? tender.product_category,
+      tenderCategory: detail.tenderCategory,
+      detailText,
+      documentLinks: detail.documentLinks,
+      closingDate: facts.closingDateRaw,
+    });
+    // An approved tender's new corrigenda: save their files while the page is open.
+    const was = before.get(tender.id);
+    const approved = was?.lifecycle && (APPROVED_LIFECYCLES.includes(was.lifecycle)
+      || (was.lifecycle === 'EXPIRED' && APPROVED_LIFECYCLES.includes(opportunities.lifecycleBeforeExpiry(tender.opportunity_id ?? '') ?? '')));
+    const fresh = facts.corrigenda.map((entry) => entry.portalNumber ?? '').filter((number) => number && !was?.corrigenda.has(number));
+    if (approved && fresh.length > 0) summary.filesSaved += await saveCorrigendumFiles(ctx, tender, detailPage, fresh).catch(() => 0);
+  }, ctx.portal.url);
+
+  const changedApproved: TenderRow[] = [];
+  for (const tender of due) {
+    if (!batch.reviewed.has(tender.id)) { summary.notFound += 1; continue; }
+    summary.checked += 1;
+    const row = tenders.getById(tender.id) ?? tender;
+    let after: OpportunityRow | undefined;
+    syncOpportunities('watch', () => { after = syncTenderSighting(opportunitySync, row, ctx.portal.id, { jobId }); });
+    const was = before.get(tender.id)!;
+    if (!after) continue;
+    let changed = false;
+    if (after.closing_date && was.closing && after.closing_date !== was.closing && (after.closing_at ?? '') > (toIsoClosing(was.closing) ?? '')) {
+      summary.extended.push({ title: after.title, from: was.closing, to: after.closing_date });
+      changed = true;
+    }
+    const newCorrigenda = [...corrigendumNumbers(after.id)].filter((number) => !was.corrigenda.has(number)).length;
+    if (newCorrigenda > 0) { summary.corrigenda += newCorrigenda; changed = true; }
+    if (was.lifecycle === 'EXPIRED' && after.lifecycle !== 'EXPIRED') summary.reopened += 1;
+    if (was.lifecycle !== 'CANCELLED' && after.lifecycle === 'CANCELLED') { summary.cancelled += 1; changed = true; }
+    if (changed && APPROVED_LIFECYCLES.includes(after.lifecycle)) changedApproved.push(row);
+  }
+  if (changedApproved.length > 0) {
+    // The sheet shows the new closing date and corrigenda; the folder and sheet go to Drive.
+    void refreshDaySheets(changedApproved).then(() => {
+      reportDriveProblems(copyApprovedTendersToDrive(changedApproved));
+      if (runsUploadToDrive()) uploadSavedTendersToGoogleDrive(changedApproved);
+    });
+  }
+  return summary;
+}
+
+/**
+ * GeM's version, with no sign-in: GeM lists bids by start date, and an
+ * extension does not move a bid in that order, so each followed bid is found
+ * again among the bids that started on its day. Its listing gives the
+ * current closing date and whether it was cancelled. (GeM's corrigendum
+ * documents are not read here.)
+ */
+async function checkWatchedGemBids(ctx: RunContext, jobId: string, report: (message: string) => void, force = false): Promise<WatchSummary> {
+  const summary: WatchSummary = { checked: 0, notFound: 0, extended: [], corrigenda: 0, reopened: 0, cancelled: 0, filesSaved: 0 };
+  const client = ctx.gem;
+  if (!client) return summary;
+  const now = Date.now();
+  const due = watchedTenderRows(ctx.portal.id).filter((tender) => {
+    const opportunity = tender.opportunity_id ? opportunities.getById(tender.opportunity_id) : undefined;
+    return tender.tender_portal_id && tender.published_date && (force || !opportunity || now - Date.parse(opportunity.last_seen_at) > WATCH_FRESH_MS);
+  });
+  if (due.length === 0) return summary;
+  const byDay = new Map<string, TenderRow[]>();
+  for (const tender of due) {
+    const day = tender.published_date!.slice(0, 10);
+    byDay.set(day, [...(byDay.get(day) ?? []), tender]);
+  }
+  report(`Checking ${due.length} GeM ${due.length === 1 ? 'bid' : 'bids'} you follow for extensions and cancellations.`);
+  const changedApproved: TenderRow[] = [];
+  let day = 0;
+  for (const [startDay, followed] of byDay) {
+    if (ctx.abortController.signal.aborted) break;
+    day += 1;
+    report(`Checking GeM bids that started on ${startDay} (${day} of ${byDay.size} days).`);
+    const listed = new Map((await findBidsStartedOn(startDay, (page) => retryTransient(() => client.listBids({ page, bidType: 'all' }), { signal: ctx.abortController.signal })))
+      .map((bid) => [bid.id, bid]));
+    for (const tender of followed) {
+      const bid = listed.get(tender.tender_portal_id!);
+      const opportunity = tender.opportunity_id ? opportunities.getById(tender.opportunity_id) : undefined;
+      if (!bid || !opportunity) { summary.notFound += 1; continue; }
+      summary.checked += 1;
+      const was = { closing: opportunity.closing_date, closingAt: opportunity.closing_at, lifecycle: opportunity.lifecycle };
+      const closing = portalStyleDate(bid.endsAt);
+      if (closing) tenders.setClosingDate(tender.id, closing);
+      let after: OpportunityRow | undefined;
+      syncOpportunities('watch', () => {
+        after = syncTenderSighting(opportunitySync, tenders.getById(tender.id) ?? tender, ctx.portal.id, { jobId });
+        if (bid.cancelled && after.lifecycle !== 'CANCELLED' && canTransition(after.lifecycle, 'CANCELLED')) {
+          after = opportunities.markCancelled(after.id, { jobId }, { reason: 'GeM lists the bid as cancelled' });
+        }
+      });
+      if (!after) continue;
+      let changed = false;
+      if (closing && was.closing && closing !== was.closing && (after.closing_at ?? '') > (was.closingAt ?? '')) {
+        summary.extended.push({ title: after.title, from: was.closing, to: closing });
+        changed = true;
+      }
+      if (was.lifecycle === 'EXPIRED' && after.lifecycle !== 'EXPIRED' && after.lifecycle !== 'CANCELLED') summary.reopened += 1;
+      if (was.lifecycle !== 'CANCELLED' && after.lifecycle === 'CANCELLED') { summary.cancelled += 1; changed = true; }
+      if (changed && APPROVED_LIFECYCLES.includes(after.lifecycle)) changedApproved.push(tender);
+    }
+  }
+  if (changedApproved.length > 0) {
+    void refreshDaySheets(changedApproved).then(() => {
+      reportDriveProblems(copyApprovedTendersToDrive(changedApproved));
+      if (runsUploadToDrive()) uploadSavedTendersToGoogleDrive(changedApproved);
+    });
+  }
+  return summary;
+}
+
+/** ISO time of a closing date as the website writes it, for comparing two of them. */
+function toIsoClosing(raw: string): string | null {
+  const parsed = parseTenderPortalDate(raw);
+  return parsed ? new Date(parsed).toISOString() : null;
+}
+
 async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSessionId: string, targets: TenderRow[]): Promise<void> {
   const signal = ctx.abortController.signal;
   const update = (extra: Partial<AuthJobUpdate> = {}): AuthJobUpdate => ({
@@ -2094,6 +2434,7 @@ async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSess
         tenderCategory: detail.tenderCategory,
         detailText: detailTextFor(detail),
         documentLinks: detail.documentLinks,
+        closingDate: tenderPageFacts(detailTextFor(detail)).closingDateRaw,
       });
       const config = runConfigurations.getForJob(tender.job_id) ?? ctx.config;
       // A failed file is recorded as not saved; the next documents run tries it again.
@@ -2213,6 +2554,129 @@ ipcMain.handle('start-document-run', async (_event, portalId: unknown) => {
   activeJobCompletion = finishRun(ctx, run, rejectStarted);
   return { jobId: await started, count: targets.length };
 });
+
+/** How many tenders on this website are followed for extensions and corrigenda. */
+ipcMain.handle('get-followed-tenders', (_event, portalId: unknown): { followed: number } => {
+  const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  return { followed: watchedTenderRows(portal.id).length };
+});
+
+/** "Check for changes": sign in, reopen the followed tenders, record extensions and corrigenda, and finish. */
+ipcMain.handle('start-change-check', async (_event, portalId: unknown) => {
+  const requested = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  if (isGemPortal(requested)) return startGemChangeCheck(requested);
+  const { abortController, paceAction } = claimRun();
+  let ctx: RunContext;
+  let targets: TenderRow[];
+  let credentials: PortalCredentials | undefined;
+  try {
+    const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+    targets = watchedTenderRows(portal.id);
+    if (targets.length === 0) throw new Error('No tender is followed on this website yet: approve one, mark it for later, or leave it waiting for your decision.');
+    const outputSettings = publishingSettings.get(portal.id);
+    const config: RunConfiguration = { ...runConfigurations.getDefaults(), portalId: portal.id, searchDate: new Date().toLocaleDateString('en-CA') };
+    ctx = { portal, config, outputSettings, abortController, paceAction };
+    activeRunPortalId = portal.id;
+    await checkReadiness(portal, outputSettings);
+    credentials = await loadPortalCredentials(portal.id);
+    await openPortal(portal);
+  } catch (error) {
+    portalHost?.close();
+    releaseRun(abortController);
+    throw error;
+  }
+
+  let resolveStarted!: (jobId: string) => void;
+  let rejectStarted!: (err: unknown) => void;
+  const started = new Promise<string>((resolve, reject) => { resolveStarted = resolve; rejectStarted = reject; });
+  let captured = false;
+  const run = signIn(ctx, credentials, (signInUpdate) => {
+    if (!captured) {
+      captured = true;
+      jobs.markChangeCheck(signInUpdate.jobId, targets.map((tender) => tender.id));
+      activeJobId = signInUpdate.jobId;
+      ctx.jobId = signInUpdate.jobId;
+      resolveStarted(signInUpdate.jobId);
+    }
+    emitJobUpdate(signInUpdate);
+  }).then(async (signedIn) => {
+    if (signedIn.outcome !== 'SUCCESS' || !ctx.page) return;
+    await runChangeCheck(ctx, signedIn.jobId, signedIn.authSessionId);
+  });
+  activeJobCompletion = finishRun(ctx, run, rejectStarted);
+  return { jobId: await started, count: targets.length };
+});
+
+/** GeM's check for changes: no sign-in, the followed bids are read from GeM's list. */
+async function startGemChangeCheck(portal: PortalDefinition): Promise<{ jobId: string; count: number }> {
+  const { abortController, paceAction } = claimRun();
+  let ctx: RunContext;
+  let targets: TenderRow[];
+  try {
+    targets = watchedTenderRows(portal.id);
+    if (targets.length === 0) throw new Error('No GeM bid is followed yet: approve one, mark it for later, or leave it waiting for your decision.');
+    const outputSettings = publishingSettings.get(portal.id);
+    const config: RunConfiguration = { ...runConfigurations.getDefaults(), portalId: portal.id, searchDate: new Date().toLocaleDateString('en-CA') };
+    const gem = gemClientFor(abortController.signal);
+    ctx = { portal, config, outputSettings, abortController, paceAction, gem };
+    activeRunPortalId = portal.id;
+    await checkReadiness(portal, outputSettings);
+  } catch (error) {
+    releaseRun(abortController);
+    throw error;
+  }
+  const job = jobs.create();
+  jobs.markChangeCheck(job.id, targets.map((tender) => tender.id));
+  runConfigurations.saveForJob(job.id, ctx.config);
+  jobMachine.transition(job.id, 'AUTH_REQUIRED', 'GeM check for changes');
+  jobMachine.transition(job.id, 'AUTH_PENDING', 'GeM needs no sign-in');
+  jobMachine.transition(job.id, 'AUTHENTICATED', 'GeM lists are public');
+  activeJobId = job.id;
+  ctx.jobId = job.id;
+  activeJobCompletion = finishRun(ctx, runChangeCheck(ctx, job.id, ''), () => {});
+  return { jobId: job.id, count: targets.length };
+}
+
+async function runChangeCheck(ctx: RunContext, jobId: string, authSessionId: string): Promise<void> {
+  const update = (extra: Partial<AuthJobUpdate> = {}): AuthJobUpdate => ({
+    jobId, authSessionId,
+    jobState: jobs.getById(jobId)!.state,
+    authState: sessions.getById(authSessionId)?.state ?? 'AUTHENTICATED',
+    phase: 'ACQUISITION',
+    ...extra,
+  });
+  try {
+    jobMachine.transition(jobId, 'ACQUIRING_DOCUMENTS', 'checking followed tenders for extensions and corrigenda');
+    const report = (statusMessage: string) => emitJobUpdate(update({ statusMessage }));
+    const summary = isGemPortal(ctx.portal) ? await checkWatchedGemBids(ctx, jobId, report, true) : await checkWatchedTenders(ctx, jobId, authSessionId, report, true);
+    if (ctx.abortController.signal.aborted) throw new Error(USER_CANCELLED_REASON);
+    if (authSessionId && sessionWasLost(authSessionId)) {
+      endJob(jobId, 'portal signed out while checking followed tenders');
+      emitJobUpdate(update({ jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED', abortReason: 'The website signed you out part-way. What was checked is saved; check again to finish the rest.' }));
+      return;
+    }
+    for (const [state, reason] of [
+      ['DOCUMENTS_LOCAL', 'followed tenders checked'],
+      ['PROCESSING_DOCUMENTS', 'check for changes finishing'],
+      ['EXTRACTING_REQUIREMENTS', 'no requirement extraction in a check for changes'],
+      ['UPLOADING', 'changed approved tenders copied to Drive'],
+      ['REPORTING', 'check for changes reporting'],
+      ['COMPLETE', 'check for changes complete'],
+    ] as const) jobMachine.transition(jobId, state, reason);
+    emitJobUpdate(update({
+      jobState: 'COMPLETE', phase: 'PUBLISHING', outcome: 'SUCCESS',
+      statusMessage: describeWatch(summary) || 'Every followed tender was read today already; nothing to check again.',
+    }));
+  } catch (error) {
+    if (ctx.abortController.signal.aborted) {
+      markJobCancelled(jobs, jobMachine, jobId);
+      emitJobUpdate(update({ jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED', abortReason: USER_CANCELLED_REASON }));
+      return;
+    }
+    endJob(jobId, 'check for changes failed');
+    emitJobUpdate(update({ jobState: jobs.getById(jobId)!.state, outcome: 'ABORTED', abortReason: error instanceof Error ? error.message : String(error) }));
+  }
+}
 
 ipcMain.handle('start-job', (_event, requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) =>
   startSearch(requestedConfig, untilDate, options));
@@ -2359,6 +2823,12 @@ ipcMain.handle('show-app-menu', (_event, x: unknown, y: unknown): void => {
   const menu = Menu.getApplicationMenu();
   if (!menu || !mainWindow) return;
   menu.popup({ window: mainWindow, x: typeof x === 'number' ? Math.round(x) : undefined, y: typeof y === 'number' ? Math.round(y) : undefined });
+});
+
+/** "Check for changes" while a run waits signed in: checks the followed tenders without signing in again. */
+ipcMain.handle('check-changes-in-run', (): void => {
+  if (!pendingMoreDates) throw new Error('The run is not waiting; check for changes once it has finished its dates.');
+  pendingMoreDates({ toRun: [], skipped: [], checkChanges: true });
 });
 
 ipcMain.handle('finish-run', (): void => {

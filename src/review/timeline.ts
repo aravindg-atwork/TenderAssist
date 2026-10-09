@@ -59,7 +59,9 @@ export function describeChangesSinceDecision(events: OpportunityEventRow[]): str
   for (const event of events.slice(start)) {
     const data = parse(event.data_json);
     if (event.kind === 'CANCELLED') parts.push('cancelled by the portal');
-    else if (event.kind === 'CHANGED') {
+    else if (event.kind === 'CHANGED' && data.reopened) {
+      parts.push('closing date extended, open again');
+    } else if (event.kind === 'CHANGED') {
       const detail = changeDetail(data.changes);
       if (detail) parts.push(detail);
     } else if (event.kind === 'CORRIGENDUM') {
@@ -89,6 +91,10 @@ export function describeTimeline(events: OpportunityEventRow[]): TimelineEntry[]
         };
       }
       case 'CHANGED':
+        if (data.reopened) {
+          const closing = typeof data.closingDate === 'string' ? ` It now closes ${data.closingDate}.` : '';
+          return { ...base, title: 'Open again: closing date extended', detail: `It had closed; the website extended it.${closing}` };
+        }
         return { ...base, title: 'Portal details changed', detail: changeDetail(data.changes) };
       case 'CORRIGENDUM': {
         const number = typeof data.portalNumber === 'string' && data.portalNumber ? ` ${data.portalNumber}` : '';

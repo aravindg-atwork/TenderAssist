@@ -171,4 +171,50 @@ describe('OpportunityRepository', () => {
     expect(other.getById(opportunity.id)).toBeUndefined();
     expect(other.list()).toEqual([]);
   });
+
+  it('does not count a closing date read for the first time as an extension', () => {
+    const opportunity = repo.recordSighting(sighting(), 'tamil-nadu');
+    repo.recordScreening(opportunity.id, 'KEEP');
+    repo.decide([opportunity.id], 'APPROVE');
+    const updated = repo.recordSighting(sighting({ closingDate: '14-Oct-2026 03:00 PM' }), 'tamil-nadu');
+    expect(updated.closing_date).toBe('14-Oct-2026 03:00 PM');
+    expect(updated.changed_since_decision).toBe(0);
+  });
+
+  it('opens an expired tender again as it was when the website extends it, approved staying approved', () => {
+    const opportunity = repo.recordSighting(sighting({ closingDate: '06-Oct-2026 03:00 PM' }), 'tamil-nadu');
+    repo.recordScreening(opportunity.id, 'KEEP');
+    repo.decide([opportunity.id], 'APPROVE');
+    expect(repo.expireOverdue(new Date('2026-10-07T00:00:00Z'))).toBe(1);
+    expect(repo.lifecycleBeforeExpiry(opportunity.id)).toBe('APPROVED');
+
+    repo.recordSighting(sighting({ closingDate: '14-Oct-2026 03:00 PM' }), 'tamil-nadu');
+    const reopened = repo.reopenIfExtended(opportunity.id, new Date('2026-10-09T00:00:00Z'));
+    expect(reopened.lifecycle).toBe('APPROVED');
+    expect(reopened.changed_since_decision).toBe(1);
+    expect(repo.listEvents(opportunity.id).some((event) => event.kind === 'CHANGED' && JSON.parse(event.data_json).reopened)).toBe(true);
+  });
+
+  it('leaves an expired tender closed when its date was not moved into the future', () => {
+    const opportunity = repo.recordSighting(sighting({ closingDate: '06-Oct-2026 03:00 PM' }), 'tamil-nadu');
+    repo.expireOverdue(new Date('2026-10-07T00:00:00Z'));
+    expect(repo.reopenIfExtended(opportunity.id, new Date('2026-10-09T00:00:00Z')).lifecycle).toBe('EXPIRED');
+  });
+
+  it('fills a closing date quietly and keeps one already known', () => {
+    const opportunity = repo.recordSighting(sighting(), 'tamil-nadu');
+    repo.fillClosingDate(opportunity.id, '06-Oct-2026 03:00 PM');
+    repo.fillClosingDate(opportunity.id, '20-Oct-2026 03:00 PM');
+    expect(repo.getById(opportunity.id)).toMatchObject({ closing_date: '06-Oct-2026 03:00 PM', closing_at: '2026-10-06T09:30:00.000Z' });
+    expect(repo.listEvents(opportunity.id).some((event) => event.kind === 'CHANGED')).toBe(false);
+  });
+
+  it('records a corrigendum found while catching up without flagging the decision', () => {
+    const opportunity = repo.recordSighting(sighting(), 'tamil-nadu');
+    repo.recordScreening(opportunity.id, 'KEEP');
+    repo.decide([opportunity.id], 'APPROVE');
+    const after = repo.recordCorrigendum(opportunity.id, { portalNumber: '1', publishedAt: null, changes: ['DEADLINE'] }, {}, { flagDecided: false });
+    expect(after.changed_since_decision).toBe(0);
+    expect(repo.listEvents(opportunity.id).filter((event) => event.kind === 'CORRIGENDUM')).toHaveLength(1);
+  });
 });

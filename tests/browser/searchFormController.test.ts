@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import http, { type Server } from 'node:http';
 import { chromium } from 'playwright-core';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
-import { ensurePortalMenu, searchCategory, favoriteAllVisibleRows, favoriteVisibleRows } from '../../src/browser/searchFormController.js';
+import { CategoryNotOnPortalError, ensurePortalMenu, searchCategory, favoriteAllVisibleRows, favoriteVisibleRows } from '../../src/browser/searchFormController.js';
+import { isTransientPortalError } from '../../src/orchestration/transientRetry.js';
 import { CHROME_PATH } from '../support/chrome.js';
 import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
 
@@ -165,6 +166,28 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
     await searchCategory(page, 'Information Technology', '21/09/2026', undefined, undefined, (categories) => { read = categories; });
 
     expect(read).toEqual(['Information Technology', 'Computer- S/W']);
+  });
+
+  it('searchCategory skips at once a category the website no longer lists, not after a 30s wait', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    const started = Date.now();
+    const error = await searchCategory(page, 'Info. Tech. Services', '21/09/2026').catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(CategoryNotOnPortalError);
+    expect(isTransientPortalError(error)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('searchCategory matches the website spelling regardless of case and spacing', async () => {
+    currentRows = [];
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    await expect(searchCategory(page, ' information  technology', '21/09/2026')).resolves.toEqual([]);
   });
 
   it('searchCategory returns an empty array when there are zero results', async () => {

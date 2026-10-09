@@ -24,7 +24,7 @@ Passwords are encrypted with Windows' secure storage and never reach the screen 
 
 Folder and file names can be changed in **Settings → Folders** (`{DD}`, `{MM}`, `{MONTH}`, `{YYYY}`, `{SNO}`, `{TITLE}`).
 
-Everything saved is copied to Google Drive in the same layout, through the built-in Google sign-in (Settings → Folders) or a Google Drive for desktop folder. A decision made later, on Today or Tenders, rewrites that day's report sheet and uploads it again. Setup: `docs/google-drive-setup.md`.
+Approved tenders and the day report sheets are copied to Google Drive in the same layout (tenders waiting for a decision stay on this computer until approved; rejected ones never go), through the built-in Google sign-in (Settings → Folders) or a Google Drive for desktop folder. A decision made later, on Today or Tenders, rewrites that day's report sheet and uploads it again. Setup: `docs/google-drive-setup.md`.
 
 ## Install (end users)
 

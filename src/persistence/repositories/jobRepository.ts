@@ -34,7 +34,7 @@ export interface JobRow {
   document_tender_ids_json?: string | null;
 }
 
-export type JobPurpose = 'SEARCH' | 'DOCUMENTS';
+export type JobPurpose = 'SEARCH' | 'DOCUMENTS' | 'CHANGES';
 
 const TERMINAL_STATES: JobState[] = ['COMPLETE', 'CANCELLED', 'FAILED_MANUAL'];
 
@@ -53,6 +53,11 @@ export class JobRepository {
   /** Marks a run as one that only collects documents for these tender rows. */
   markDocumentRun(id: string, tenderIds: string[]): void {
     this.db.prepare("UPDATE jobs SET purpose = 'DOCUMENTS', document_tender_ids_json = ? WHERE id = ?").run(JSON.stringify(tenderIds), id);
+  }
+
+  /** Marks a run as one that only checks these followed tenders for extensions and corrigenda. */
+  markChangeCheck(id: string, tenderIds: string[]): void {
+    this.db.prepare("UPDATE jobs SET purpose = 'CHANGES', document_tender_ids_json = ? WHERE id = ?").run(JSON.stringify(tenderIds), id);
   }
 
   /** The tender rows a documents run collects for; empty for a search. */

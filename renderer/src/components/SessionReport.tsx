@@ -73,6 +73,21 @@ export function SessionReport({ jobIds, message, onDecide, onOpenRun }: SessionR
       && (tender.opportunityLifecycle === null || tender.opportunityLifecycle === 'NEW' || tender.opportunityLifecycle === 'SCREENED'))
     .map((tender) => tender.opportunity_id ?? tender.id)));
   const waiting = undecided.size;
+  if (lines.length > 0 && lines.every((line) => line.detail.purpose === 'CHANGES')) {
+    return (
+      <div className="page report">
+        <header className="page__head">
+          <h1>Check for changes</h1>
+          <p>{message ?? 'The check for changes has ended.'}</p>
+        </header>
+        <div className="report__next">
+          <p>Extended tenders show their new closing date, and ones you had decided are back under “Changed since you decided”. Each tender’s history lists its corrigenda.</p>
+          <button type="button" className="btn btn--quiet" onClick={onDecide}>Back to Today</button>
+        </div>
+        <button type="button" className="btn btn--quiet btn--small" onClick={() => onOpenRun(lines[0].detail.jobId)}>See the run</button>
+      </div>
+    );
+  }
   const documentRun = lines.length > 0 && lines.every((line) => line.detail.purpose === 'DOCUMENTS');
   if (documentRun) {
     const collected = lines.flatMap((line) => line.detail.tenders);
