@@ -39,6 +39,8 @@ export interface DateBatchPlan {
   skipped: string[];
   /** Instead of dates: check the followed tenders for changes again, in the same sign-in. */
   checkChanges?: boolean;
+  /** Instead of dates: collect the approved tenders' documents, in the same sign-in. */
+  collectApproved?: boolean;
 }
 
 export function planDateBatch(from: string, to: string, completedDates: Iterable<string>, today?: string): DateBatchPlan {

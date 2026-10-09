@@ -71,6 +71,10 @@ export interface AuthJobUpdate {
   batch?: { dates: string[]; done: string[]; skipped: string[] };
   /** Every date has run; the portal stays signed in while the operator picks more dates or finishes. */
   awaitingMoreDates?: boolean;
+  /** The last check of followed tenders in this sign-in: when, and what it found. */
+  changeCheck?: { at: string; message: string };
+  /** The last documents collection in this sign-in, and what it saved. */
+  documentsNote?: string;
   /** The run is waiting for the operator to keep or skip an unsure tender. */
   question?: RunQuestion;
 }

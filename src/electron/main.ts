@@ -26,9 +26,10 @@ import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments
 import { automaticDownloadSelection } from '../orchestration/automaticSelection.js';
 import { describeSkipped, planDateBatch, type DateBatchPlan } from '../orchestration/dateBatch.js';
 import { buildInbox, type InboxView } from '../review/inbox.js';
-import { keyFactsFrom, parseDetailFields, type TenderFileView } from '../review/tenderFile.js';
+import { cleanRequirement, keyFactsFrom, parseDetailFields, type TenderFileView } from '../review/tenderFile.js';
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
+import { explainScreening, parseScreenedGates } from '../review/tenderExplanation.js';
 import { collectAuditHistory, writeAuditWorkbook } from '../review/auditHistory.js';
 import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import { canTransition } from '../state/opportunityLifecycle.js';
@@ -59,10 +60,15 @@ import type {
   AuthJobUpdate,
   SettingsSection,
   GoogleDriveStatus,
+  LiveSessionTender,
+  LiveSessionView,
 } from './ipcTypes.js';
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import { categoryHealth, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
 import type { PortalCredentials } from '../browser/portalLoginController.js';
+import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type OcrEngine } from '../documents/documentText.js';
+import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windowsOcr.js';
+import { extractTenderRequirements } from '../extraction/requirementExtractor.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
@@ -189,6 +195,8 @@ let activeBatch: AuthJobUpdate['batch'];
 let activeRunPortalId: string | undefined;
 // Resolves the "run other dates?" question: dates to run next, or null to finish.
 let pendingMoreDates: ((choice: DateBatchPlan | null) => void) | undefined;
+/** The search run in progress, for "This search" in the run panel. */
+let activeRunContext: RunContext | undefined;
 // The "Keep or skip?" question on screen, and how to deliver its answer.
 let activeQuestion: RunQuestion | undefined;
 let pendingAnswer: ((answer: RunQuestionAnswer) => void) | undefined;
@@ -564,12 +572,26 @@ function tenderFolderFor(opportunityId: string): string | null {
   return null;
 }
 
+/** Requirements found from the tender page and its documents, in plain names. */
+function requirementFields(row: { data_json: string } | undefined): Array<{ label: string; value: string }> {
+  if (!row) return [];
+  let data: Record<string, unknown> = {};
+  try { data = JSON.parse(row.data_json) as Record<string, unknown>; } catch { return []; }
+  const names: Array<[string, string]> = [['scope', 'Scope'], ['eligibility', 'Eligibility'], ['emd', 'EMD'], ['tenderFee', 'Tender fee'], ['submissionDeadline', 'Submission deadline'], ['contact', 'Contact']];
+  return names.flatMap(([key, label]) => {
+    const value = typeof data[key] === 'string' ? cleanRequirement(key, data[key] as string) : null;
+    return value ? [{ label, value }] : [];
+  });
+}
+
 ipcMain.handle('get-tender-file', (_event, opportunityId: unknown): TenderFileView => {
   if (typeof opportunityId !== 'string' || !opportunities.getById(opportunityId)) throw new Error('Tender not found.');
   const rows = [...tenders.listForOpportunity(opportunityId)].reverse();
   const read = rows.find((tender) => tender.detail_text);
   const allFields = parseDetailFields(read?.detail_text);
   const withDocuments = rows.find((tender) => workflow.listDocuments(tender.id).length > 0);
+  const documentsRead = withDocuments ? workflow.listDocuments(withDocuments.id).some((document) => document.text_content) : false;
+  const defaults = runConfigurations.getDefaults();
   const latest = rows[0];
   const foundOnDate = latest ? runConfigurations.getForJob(latest.job_id)?.searchDate ?? null : null;
   const listing = latest ? [
@@ -594,9 +616,19 @@ ipcMain.handle('get-tender-file', (_event, opportunityId: unknown): TenderFileVi
       name: document.file_name,
       state: document.state,
       error: document.error,
+      read: document.text_read_at && document.text_method ? {
+        method: document.text_method,
+        pages: document.text_pages ?? 0,
+        ocrPages: document.text_ocr_pages ?? 0,
+        intentWords: wordsFoundIn(document.text_content ?? '', defaults.keywords),
+        excludedWords: wordsFoundIn(document.text_content ?? '', defaults.excludedKeywords),
+        // GeM's PDFs are in Hindi and English; the Hindi shows as boxes without its font, so the preview keeps the English.
+        preview: (document.text_content ?? '').replace(/\[Page \d+\]/g, ' ').replace(/[^\x20-\x7E₹\s]/g, '').replace(/\s+/g, ' ').replace(/(?:\s*\/\/?\s*){2,}/g, ' / ').trim().slice(0, 280),
+      } : null,
     })),
     hasFolder: tenderFolderFor(opportunityId) !== null,
     detailsRead: Boolean(read?.detail_reviewed_at),
+    fromDocuments: documentsRead && withDocuments ? requirementFields(workflow.getRequirements(withDocuments.id)) : [],
   };
 });
 
@@ -1117,6 +1149,7 @@ ipcMain.handle('get-job-detail', (_event, jobId: string): JobDetail => {
       documents: workflow.listDocuments(tender.id),
       requirements: workflow.getRequirements(tender.id) ?? null,
       opportunityLifecycle: tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle ?? null : null,
+      ...(job.purpose === 'CHANGES' ? { changesFound: changesFoundBy(jobId, tender) } : {}),
     })),
     searches: searches.listForJob(jobId),
     runConfiguration: runConfigurations.getForJob(jobId) ?? null,
@@ -1164,8 +1197,13 @@ interface RunContext {
   /** Followed tenders were checked for changes in this sign-in, and what was found. */
   watchChecked?: boolean;
   watchNote?: string;
+  /** Every job of this sign-in (one per date), for "This search" in the run panel. */
+  sessionJobIds?: string[];
+  /** The last in-session documents collection: what it saved. */
+  documentsNote?: string;
   /** The operator asked for the check: read every followed tender, even ones read today. */
   watchForced?: boolean;
+  changeCheck?: { at: string; message: string };
   /** GeM runs: no portal page; files come straight from GeM. */
   gem?: GemClient;
   downloader?: DocumentDownloader;
@@ -1183,6 +1221,7 @@ function claimRun(): { abortController: AbortController; paceAction: PaceAction 
   lastActiveJobUpdate = undefined;
   activeSearchDate = undefined;
   activeBatch = undefined;
+  activeRunContext = undefined;
   activeRunPortalId = undefined;
   return { abortController, paceAction: createActionPacer(automationSettings.get(), abortController.signal) };
 }
@@ -1287,7 +1326,7 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
   let result: AuthJobUpdate;
   for (let signIns = 0; ; signIns += 1) {
     result = await runPostProcessing(
-      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: ctx.abortController.signal, downloader: ctx.downloader },
+      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: ctx.abortController.signal, downloader: ctx.downloader, readDocuments: (rows, report) => readTenderDocuments(rows, report) },
       ctx.page,
       jobId,
       authSessionId,
@@ -1597,15 +1636,15 @@ function runsUploadToDrive(): boolean {
   return Boolean(settings.refreshTokenEncrypted && settings.folderId) && builtInGoogleClient() !== null;
 }
 
-function runFinishedMessage(counts: CollectedCounts, dateCount = 1): string {
+function runFinishedMessage(counts: CollectedCounts, dateCount = 1, inSession = false): string {
   const dates = dateCount > 1 ? ` across ${dateCount} published dates` : '';
   const drive = runsUploadToDrive() ? ` The report sheet is being uploaded to Google Drive; each tender goes there once you approve it.` : '';
-  if (counts.shortlisted + counts.needsReview === 0) return `No tender matched your filters${dates}. Open a run to see what was checked.${drive}`;
+  if (counts.shortlisted + counts.needsReview === 0) return `No tender matched your filters${dates}. ${inSession ? 'See “This search” below for what was found and why; you can still approve one there.' : 'Open a run to see what was checked.'}${drive}`;
   const parts = [
     counts.shortlisted > 0 && `${counts.shortlisted} shortlisted`,
     counts.needsReview > 0 && `${counts.needsReview} need${counts.needsReview === 1 ? 's' : ''} your review`,
   ].filter(Boolean).join(' and ');
-  return `${parts}${dates}. Kept tenders' documents are saved in your folder.${drive} Decide them on the Today page.`;
+  return `${parts}${dates}. Kept tenders' documents are saved in your folder.${drive} ${inSession ? 'Review them under “This search” below, or later on Today.' : 'Decide them on the Today page.'}`;
 }
 
 /** A new job for the next published date, signed in through the session already open. */
@@ -1874,6 +1913,8 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
           .catch((error) => { console.error('[TenderAssist] checking followed tenders failed:', error); return null; });
         if (ctx.abortController.signal.aborted) return;
         ctx.watchNote = summary ? describeWatch(summary) : 'Followed tenders could not be checked for changes this time; use "Check for changes" on Today.';
+        if (!ctx.watchNote && ctx.watchForced) ctx.watchNote = `No tender is followed on ${ctx.portal.name} yet: approve one, mark it for later, or leave it waiting for you, and it is checked here.`;
+        ctx.changeCheck = { at: new Date().toISOString(), message: ctx.watchNote || 'Nothing to check: every followed tender was read during this search.' };
       }
       // Keep the portal signed in and ask.
       const skippedNote = [describeSkipped(batch.skipped), ctx.watchNote].filter(Boolean).join(' ');
@@ -1881,7 +1922,9 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
         ...lastResult!,
         outcome: undefined,
         awaitingMoreDates: true,
-        statusMessage: `${runFinishedMessage(collected, batch.done.length)}${skippedNote ? ` ${skippedNote}` : ''}`,
+        changeCheck: ctx.changeCheck,
+        documentsNote: ctx.documentsNote,
+        statusMessage: `${runFinishedMessage(collected, batch.done.length, true)}${skippedNote ? ` ${skippedNote}` : ''}`,
       });
       // The operator may browse the portal while deciding.
       portalHost?.setAutomationPopups(false);
@@ -1891,6 +1934,25 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
       if (!more) {
         emitJobUpdate({ ...lastResult!, awaitingMoreDates: false, outcome: 'SUCCESS', statusMessage: [runFinishedMessage(collected, batch.done.length), ctx.watchNote].filter(Boolean).join(' ') });
         return;
+      }
+      if (more.collectApproved) {
+        // "Collect documents now": approved tenders' files, in this same sign-in.
+        const targets = approvedWaitingForDocuments(ctx.portal.id).ready;
+        if (targets.length > 0) {
+          const docJob = jobs.create();
+          jobMachine.transition(docJob.id, 'AUTH_REQUIRED', 'documents in the same portal session');
+          jobMachine.transition(docJob.id, 'AUTH_PENDING', 'reusing the signed-in portal session');
+          jobMachine.transition(docJob.id, 'AUTHENTICATED', 'portal session already signed in');
+          runConfigurations.saveForJob(docJob.id, { ...ctx.config, searchDate: new Date().toLocaleDateString('en-CA') });
+          jobs.markDocumentRun(docJob.id, targets.map((tender) => tender.id));
+          ctx.sessionJobIds = [...(ctx.sessionJobIds ?? []), docJob.id];
+          await collectApprovedDocuments(ctx, docJob.id, authSessionId, targets, { inSession: (message) => { ctx.documentsNote = message; } });
+          if (ctx.abortController.signal.aborted || sessionWasLost(authSessionId)) return;
+        } else {
+          ctx.documentsNote = 'No approved tender is waiting for its documents.';
+        }
+        index -= 1;
+        continue;
       }
       if (more.checkChanges) {
         // "Check for changes" from the run panel: check again, then ask again.
@@ -1908,6 +1970,7 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
 
     activeSearchDate = date;
     let jobId = index === 0 ? firstJobId : startDateJob(ctx, date);
+    ctx.sessionJobIds = [...(ctx.sessionJobIds ?? []), jobId];
     let { result, selected } = await runDate(ctx, jobId, authSessionId);
     // A crashed or signed-out portal restarts this date after signing in again.
     for (let recovery = 1; result.outcome !== 'SUCCESS' && recovery <= MAX_DATE_RECOVERIES && sessionWasLost(result.authSessionId || authSessionId); recovery += 1) {
@@ -1917,6 +1980,7 @@ async function runDateBatch(ctx: RunContext, firstJobId: string, authSessionId: 
       if (!signedIn) return;
       jobId = signedIn.jobId;
       authSessionId = signedIn.authSessionId;
+      ctx.sessionJobIds = [...(ctx.sessionJobIds ?? []), jobId];
       ({ result, selected } = await runDate(ctx, jobId, authSessionId));
     }
     lastResult = result;
@@ -2124,6 +2188,8 @@ async function collectGemApprovedDocuments(ctx: RunContext, jobId: string, targe
     for (const sourceJob of new Set(targets.map((tender) => tender.job_id))) {
       syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, sourceJob));
     }
+    // Read inside the files (OCR for scans) and find the requirements again.
+    await readTenderDocuments(targets, (statusMessage) => emitJobUpdate(update({ statusMessage }))).catch(() => {});
     reportDriveProblems(copyApprovedTendersToDrive(targets.map((tender) => tenders.getById(tender.id) ?? tender)));
     // Their files are saved now, so Drive gets them too.
     uploadSavedTendersToGoogleDrive(targets.map((tender) => tenders.getById(tender.id) ?? tender));
@@ -2169,11 +2235,62 @@ ipcMain.handle('get-documents-waiting', (_event, portalId: unknown): DocumentsWa
  */
 // ── Watching followed tenders for extensions and corrigenda ─────────────────
 
+/** What a check for changes found for one tender, in history wording. */
+function changesFoundBy(jobId: string, tender: TenderRow): string[] {
+  if (!tender.opportunity_id) return [];
+  const events = opportunities.listEvents(tender.opportunity_id)
+    .filter((event) => event.job_id === jobId && ['CHANGED', 'CORRIGENDUM', 'CANCELLED', 'NOTE'].includes(event.kind));
+  return describeTimeline(events).map((entry) => (entry.detail ? `${entry.title}: ${entry.detail}` : entry.title));
+}
+
 /** The followed tenders a "Check for changes" run reopened. */
 function changeCheckIds(job: { purpose?: string; document_tender_ids_json?: string | null }): string[] {
   if (job.purpose !== 'CHANGES' || !job.document_tender_ids_json) return [];
   try { return (JSON.parse(job.document_tender_ids_json) as unknown[]).filter((id): id is string => typeof id === 'string'); } catch { return []; }
 }
+
+// ── Reading inside saved documents (PDF text, Windows OCR for scans) ────────
+
+const documentOcr: OcrEngine | null = windowsOcrAvailable() ? { pdfPages: ocrPdfPages, image: ocrImage } : null;
+// One document at a time, app-wide: OCR is heavy and runs share the queue.
+let documentReading: Promise<unknown> = Promise.resolve();
+
+/**
+ * Reads the text inside every saved, not yet read document of these
+ * tenders, then finds their requirements again from the tender page plus
+ * the documents. Safe to repeat; a file that cannot be read is skipped.
+ */
+function readTenderDocuments(rows: TenderRow[], report: (message: string) => void = () => {}): Promise<void> {
+  const run = documentReading.then(async () => {
+    for (const tender of rows) {
+      const unread = workflow.listDocuments(tender.id).filter((document) =>
+        document.state === 'DOWNLOADED' && document.local_path && !document.text_read_at
+        && canReadDocument(document.local_path) && existsSync(document.local_path));
+      if (unread.length === 0) continue;
+      for (const [index, document] of unread.entries()) {
+        report(`Reading ${document.file_name} of ${tender.title} (${index + 1} of ${unread.length}).`);
+        try {
+          workflow.saveDocumentText(document.id, await readDocumentText(document.local_path!, documentOcr));
+        } catch (error) {
+          console.error(`[TenderAssist] could not read ${document.local_path}:`, error);
+          workflow.saveDocumentText(document.id, { text: '', method: 'NONE', pages: 0, ocrPages: 0 });
+        }
+      }
+      const extraction = extractTenderRequirements([tender.detail_text ?? '', documentsTextFor(workflow.listDocuments(tender.id))].filter(Boolean).join('\n\n'));
+      workflow.saveRequirements(tender.id, extraction.requirements, extraction.confidence);
+    }
+  });
+  documentReading = run.catch(() => {});
+  return run;
+}
+
+/** Documents saved before reading was added: read in the background, a while after start-up. */
+function catchUpDocumentReading(): void {
+  const rows = jobs.listAll().flatMap((job) => tenders.listForJob(job.id))
+    .filter((tender) => workflow.listDocuments(tender.id).some((document) => document.state === 'DOWNLOADED' && !document.text_read_at));
+  if (rows.length > 0) void readTenderDocuments(rows).catch((error) => console.error('[TenderAssist] document catch-up failed:', error));
+}
+setTimeout(catchUpDocumentReading, 20_000);
 
 /** At most this many tender pages are reopened per check, soonest closing first, to keep runs short. */
 const WATCH_MAX_PER_CHECK = 40;
@@ -2403,7 +2520,7 @@ function toIsoClosing(raw: string): string | null {
   return parsed ? new Date(parsed).toISOString() : null;
 }
 
-async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSessionId: string, targets: TenderRow[]): Promise<void> {
+async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSessionId: string, targets: TenderRow[], options: { inSession?: (message: string) => void } = {}): Promise<void> {
   const signal = ctx.abortController.signal;
   const update = (extra: Partial<AuthJobUpdate> = {}): AuthJobUpdate => ({
     jobId, authSessionId,
@@ -2444,6 +2561,8 @@ async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSess
     for (const sourceJob of new Set(targets.map((tender) => tender.job_id))) {
       syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, sourceJob));
     }
+    // Read inside the files (OCR for scans) and find the requirements again.
+    await readTenderDocuments(targets, (statusMessage) => emitJobUpdate(update({ statusMessage }))).catch(() => {});
     // Approved tenders go to Drive once their files are saved.
     reportDriveProblems(copyApprovedTendersToDrive(targets));
     // Their files are saved now, so Drive gets them too.
@@ -2466,10 +2585,10 @@ async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSess
     ] as const) jobMachine.transition(jobId, state, reason);
     const saved = targets.filter((tender) => workflow.listDocuments(tender.id).some((document) => document.state === 'DOWNLOADED')).length;
     const missing = targets.length - batch.reviewed.size;
-    emitJobUpdate(update({
-      jobState: 'COMPLETE', phase: 'PUBLISHING', outcome: 'SUCCESS',
-      statusMessage: `Documents saved for ${saved} of ${count}.${missing > 0 ? ` ${missing} could not be found in My Tenders.` : ''}`,
-    }));
+    const done = `Documents saved for ${saved} of ${count}.${missing > 0 ? ` ${missing} could not be found in My Tenders.` : ''}`;
+    // Inside a live search the sign-in carries on; the run asks "What next?" again.
+    if (options.inSession) options.inSession(done);
+    else emitJobUpdate(update({ jobState: 'COMPLETE', phase: 'PUBLISHING', outcome: 'SUCCESS', statusMessage: done }));
   } catch (error) {
     if (signal.aborted) {
       markJobCancelled(jobs, jobMachine, jobId);
@@ -2661,12 +2780,10 @@ async function runChangeCheck(ctx: RunContext, jobId: string, authSessionId: str
       ['EXTRACTING_REQUIREMENTS', 'no requirement extraction in a check for changes'],
       ['UPLOADING', 'changed approved tenders copied to Drive'],
       ['REPORTING', 'check for changes reporting'],
-      ['COMPLETE', 'check for changes complete'],
     ] as const) jobMachine.transition(jobId, state, reason);
-    emitJobUpdate(update({
-      jobState: 'COMPLETE', phase: 'PUBLISHING', outcome: 'SUCCESS',
-      statusMessage: describeWatch(summary) || 'Every followed tender was read today already; nothing to check again.',
-    }));
+    const message = describeWatch(summary) || 'No followed tender could be checked.';
+    jobMachine.transition(jobId, 'COMPLETE', `check for changes complete: ${message}`);
+    emitJobUpdate(update({ jobState: 'COMPLETE', phase: 'PUBLISHING', outcome: 'SUCCESS', statusMessage: message }));
   } catch (error) {
     if (ctx.abortController.signal.aborted) {
       markJobCancelled(jobs, jobMachine, jobId);
@@ -2700,6 +2817,7 @@ async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknow
     config.searchDate = plan.toRun[0];
     const outputSettings = publishingSettings.get(portal.id);
     ctx = { portal, config, outputSettings, abortController, paceAction };
+    activeRunContext = ctx;
     activeRunPortalId = portal.id;
     activeSearchDate = config.searchDate;
     await checkReadiness(portal, outputSettings);
@@ -2829,6 +2947,44 @@ ipcMain.handle('show-app-menu', (_event, x: unknown, y: unknown): void => {
 ipcMain.handle('check-changes-in-run', (): void => {
   if (!pendingMoreDates) throw new Error('The run is not waiting; check for changes once it has finished its dates.');
   pendingMoreDates({ toRun: [], skipped: [], checkChanges: true });
+});
+
+/** "Collect documents now" while a run waits signed in: approved tenders' files, no new sign-in. */
+ipcMain.handle('collect-documents-in-run', (): void => {
+  if (!pendingMoreDates) throw new Error('The run is not waiting; collect documents once it has finished its dates.');
+  pendingMoreDates({ toRun: [], skipped: [], collectApproved: true });
+});
+
+/** "This search": every tender this sign-in found, with its verdict and why, to approve or reject on the spot. */
+ipcMain.handle('get-live-session', (): LiveSessionView => {
+  const ctx = activeRunContext;
+  const jobIds = ctx?.sessionJobIds ?? [];
+  const seen = new Map<string, LiveSessionTender>();
+  const screening = new Map(opportunities.listAllWithScreening().map((row) => [row.id, row]));
+  for (const jobId of jobIds) {
+    for (const tender of tenders.listForJob(jobId)) {
+      if (!tender.opportunity_id || seen.has(tender.opportunity_id)) continue;
+      const row = screening.get(tender.opportunity_id);
+      if (!row) continue;
+      const explanation = explainScreening(row.recommendation, parseScreenedGates(row.screening_json));
+      seen.set(row.id, {
+        opportunityId: row.id,
+        tenderId: row.tender_portal_id ?? row.tender_ref,
+        title: row.title,
+        organisation: (row.organisation_chain ?? '').split('||')[0]?.trim() || null,
+        closingDate: row.closing_date,
+        recommendation: row.recommendation,
+        lifecycle: row.lifecycle,
+        reason: explanation.sentence,
+        filesSaved: tenders.listForOpportunity(row.id).some((sighting) => workflow.listDocuments(sighting.id).some((document) => document.state === 'DOWNLOADED')),
+      });
+    }
+  }
+  const portalId = ctx?.portal.id ?? DEFAULT_PORTAL_ID;
+  return {
+    tenders: [...seen.values()],
+    approvedWaitingForDocuments: isGemPortal(getPortalDefinition(portalId)) ? 0 : approvedWaitingForDocuments(portalId).ready.length,
+  };
 });
 
 ipcMain.handle('finish-run', (): void => {

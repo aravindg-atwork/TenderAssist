@@ -2,7 +2,17 @@
 
 Last updated: 8 Oct 2026. Pick up from **Next up**.
 
-## Fixed after 0.5.0 (9 Oct 2026; not yet in an installer)
+## Done in 0.5.2 (9 Oct 2026; local installer built)
+
+- **Reading inside documents** (`src/documents/`): PDFs by their own text, scanned pages and images by Windows' built-in OCR (Windows.Media.Ocr + Windows.Data.Pdf through PowerShell; nothing to install). Read after documents are saved (runs and "Collect documents"), then requirements are found from page + documents. Saved documents are caught up in the background 20 s after start-up.
+  - On the real data: all 160 saved PDFs read: 132 own text, 22 by OCR, 6 mixed; 112 scanned pages. Excel/Word (price bids, BOQs) are not read yet.
+  - Tender → Documents shows how each file was read, the operator's words in it, and a preview (GeM's Hindi dropped from previews). Summary shows "Found in the page and its documents", with junk values filtered (`cleanRequirement`).
+  - Windows' components refuse paths over 260 characters; long GeM tender folders reach 286. OCR reads such files from a short temp copy. **Open:** the folder names themselves are long enough to trouble Explorer/Drive; shorten tender folder names.
+- **Live run panel**: "This search" with counts and "Review what was found" (every tender, verdict and why, Approve / Approve anyway / Reject), then "Collect documents now" in the same sign-in (`collect-documents-in-run`). The finished-dates message points there instead of to Runs.
+- **Check for changes, visible**: the run panel shows how many tenders are followed (or says none are), and "Checked <time>: <result>" after each check. A check run has its own report and run view (per tender: changed or not, what changed).
+- **Excluded-word suggestions**: GeM form wording ("Custom Bid for Services", "; Yes; Buyer Premises") ignored; only phrases suggested.
+
+## Fixed after 0.5.0 (9 Oct 2026; in 0.5.1)
 
 - **Tamil Nadu dropped "Information Technology" from its Product Category list** (some days it is there, some not). The search waited 30s per try on a missing option and looked like a slow portal (3 tries). Now the category is checked against the website's list first: missing → skipped at once with "not in the website's Product Category list today"; case/spacing differences are matched (`findCategoryLabel`, `CategoryNotOnPortalError`).
 - **Google Drive gets only approved tenders** (user request). The direct upload used to send every tender folder a run saved, including ones waiting for a decision. Now, like the Drive for desktop copy, only approved tenders go (`isApprovedTender` in `main.ts`). Approving uploads the tender; rejecting never does. Report sheets still upload after every run. Not covered by a test (main.ts has none).

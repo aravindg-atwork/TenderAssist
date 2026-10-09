@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { AuthJobUpdate, RunQuestion } from '../../../src/electron/ipcTypes';
+import type { AuthJobUpdate, LiveSessionView, RunQuestion } from '../../../src/electron/ipcTypes';
+import { LiveReview } from './LiveReview';
 import { AlertIcon, CheckIcon, KeyIcon, RefreshIcon, StopIcon } from './icons';
 import { PortalSelect } from './PortalSelect';
 import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
-import { plainError } from '../words';
+import { plainError, plural } from '../words';
 
 const OPENWEBSTART_DOWNLOAD_URL = 'https://openwebstart.com/download/';
 // How long the DSC signer may take before help is offered.
@@ -217,6 +218,21 @@ export interface RunPanelProps {
 export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, noSignIn = false }: RunPanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [followed, setFollowed] = useState<number | null>(null);
+  const [session, setSession] = useState<LiveSessionView | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  useEffect(() => {
+    if (!update?.awaitingMoreDates || reviewing) return;
+    let current = true;
+    window.tenderAssist.getLiveSession().then((next) => { if (current) setSession(next); }).catch(() => {});
+    return () => { current = false; };
+  }, [update?.awaitingMoreDates, update?.documentsNote, reviewing]);
+  useEffect(() => {
+    if (!update?.awaitingMoreDates) return;
+    let current = true;
+    window.tenderAssist.getFollowedTenders(portalId).then((result) => { if (current) setFollowed(result.followed); }).catch(() => {});
+    return () => { current = false; };
+  }, [portalId, update?.awaitingMoreDates, update?.changeCheck?.at]);
   const [signerSlow, setSignerSlow] = useState(false);
   const [moreFrom, setMoreFrom] = useState(todayIso());
   const [moreTo, setMoreTo] = useState(todayIso());
@@ -324,6 +340,10 @@ export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, 
         </section>
       )}
 
+      {reviewing && (
+        <LiveReview portalName={portalName} onClose={() => setReviewing(false)}
+          onCollect={() => { setReviewing(false); void act(() => window.tenderAssist.collectDocumentsInRun()); }} />
+      )}
       {update?.awaitingMoreDates && (
         <section className="more" aria-labelledby="more-title">
           <h3 id="more-title">What next?</h3>
@@ -365,11 +385,28 @@ export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, 
               Finish and sign out
             </button>
           </div>
-          <div className="more__changes">
-            <p>Tenders you follow were checked for extensions and corrigenda after the last date. Check again, still signed in:</p>
-            <button type="button" className="btn btn--line btn--sm" disabled={busy} onClick={() => act(() => window.tenderAssist.checkChangesInRun())}>
-              Check for changes
-            </button>
+          <div className="more__session" aria-live="polite">
+            <p>
+              <strong>This search:</strong> {session ? `${plural(session.tenders.length, 'tender')} found, ${session.tenders.filter((tender) => tender.recommendation === 'KEEP').length} kept, ${session.tenders.filter((tender) => tender.recommendation === 'REJECT').length} rejected by your rules.` : 'loading…'}
+              {' '}See each one and why; approve one the rules rejected and collect its documents before signing out.
+              {update.documentsNote && <strong className="more__result"> {update.documentsNote}</strong>}
+            </p>
+            <button type="button" className="btn btn--line btn--sm" disabled={busy} onClick={() => setReviewing(true)}>Review what was found</button>
+          </div>
+          <div className="more__changes" aria-live="polite">
+            {followed === 0 ? (
+              <p>No tender is followed on {portalName} yet. Approve one, mark it for later, or leave it waiting for you, and it is checked for extended dates and corrigenda after every search.</p>
+            ) : (
+              <>
+                <p>
+                  {followed === null ? 'Tenders you follow' : `${plural(followed, 'tender')} you follow`} {followed === 1 ? 'is' : 'are'} checked for extended dates and corrigenda after the last date.
+                  {update.changeCheck && <strong className="more__result"> Checked {new Date(update.changeCheck.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}: {update.changeCheck.message}</strong>}
+                </p>
+                <button type="button" className="btn btn--line btn--sm" disabled={busy} onClick={() => act(() => window.tenderAssist.checkChangesInRun())}>
+                  {busy ? 'Checking…' : 'Check again now'}
+                </button>
+              </>
+            )}
           </div>
         </section>
       )}

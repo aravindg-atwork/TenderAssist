@@ -84,6 +84,41 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
   const config = detail.runConfiguration;
   const documentRun = detail.purpose === 'DOCUMENTS';
 
+  if (detail.purpose === 'CHANGES') {
+    // What the check found, as recorded when it finished.
+    const finished = [...detail.jobTransitions].reverse().find((row) => row.to_state === 'COMPLETE');
+    const summary = finished?.reason?.replace(/^check for changes complete:\s*/i, '') ?? null;
+    const changed = detail.tenders.filter((tender) => (tender.changesFound?.length ?? 0) > 0);
+    return (
+      <div className="page">
+        {back}
+        <header className="page__head">
+          <h1>Check for changes</h1>
+          <p>
+            <span className={`status status--${status.tone}`}>{status.text}</span>
+            {config && <> on {getPortalDefinition(config.portalId).name}</>}
+          </p>
+        </header>
+        <p className="lede">{summary && summary !== 'check for changes complete' ? summary : `${plural(detail.tenders.length, 'followed tender')} to check: ${changed.length} changed.`}</p>
+        <section className="block">
+          <h2>Followed tenders</h2>
+          <ul className="verdicts">
+            {detail.tenders.map((tender) => (
+              <li key={tender.id} className="verdict">
+                <span className={(tender.changesFound?.length ?? 0) > 0 ? 'mark mark--look' : 'mark mark--keep'}>{(tender.changesFound?.length ?? 0) > 0 ? 'Changed' : 'No change'}</span>
+                <span className="verdict__title">{tender.title}</span>
+                <span className="verdict__reason">
+                  {tender.closing_date ? `Closes ${tender.closing_date}. ` : ''}
+                  {(tender.changesFound ?? []).join(' ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       {back}

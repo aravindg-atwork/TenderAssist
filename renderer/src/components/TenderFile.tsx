@@ -49,14 +49,25 @@ function publishedText(stored: string | null): string {
   return Number.isNaN(date.getTime()) ? stored : date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function DocumentRow({ name, state, error }: { name: string; state: string; error: string | null }) {
+function DocumentRow({ name, state, error, read }: TenderFileView['documents'][number]) {
   const isZip = /zip/i.test(name);
+  const how = read && (read.method === 'NONE'
+    ? 'No readable text inside'
+    : `Read: ${read.pages} ${read.pages === 1 ? 'page' : 'pages'}${read.ocrPages > 0 ? ` (${read.ocrPages} by OCR, from a scan)` : ''}`);
   return (
     <li className={`doc doc--${state.toLowerCase()}`}>
       {isZip ? <ZipIcon /> : <DocumentIcon />}
       <span className="doc__name">{name}</span>
       <span className="doc__state">{state === 'DOWNLOADED' ? 'Saved' : state === 'FAILED' ? 'Not saved' : 'Waiting'}</span>
       {state === 'FAILED' && error && <span className="doc__error">{error}</span>}
+      {how && (
+        <span className="doc__read">
+          {how}
+          {read!.intentWords.length > 0 && <span className="doc__words doc__words--intent">Your words: {read!.intentWords.join(', ')}</span>}
+          {read!.excludedWords.length > 0 && <span className="doc__words doc__words--excluded">Excluded words: {read!.excludedWords.join(', ')}</span>}
+          {read!.preview && <span className="doc__preview">{read!.preview}…</span>}
+        </span>
+      )}
     </li>
   );
 }
@@ -139,6 +150,16 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
         {tab === 'summary' && (
           <>
             {fileError && <p className="file-empty" role="alert">{fileError}</p>}
+            {file?.fromDocuments && file.fromDocuments.length > 0 && (
+              <section className="from-docs" aria-label="Found in the tender page and its documents">
+                <h3 className="unread__title">Found in the page and its documents</h3>
+                <dl className="facts">
+                  {file.fromDocuments.map((fact) => (
+                    <div key={fact.label} className="facts__row facts__row--wide"><dt>{fact.label}</dt><dd>{fact.value}</dd></div>
+                  ))}
+                </dl>
+              </section>
+            )}
             {file && file.keyFacts.length > 0 ? (
               <dl className="facts">
                 {file.keyFacts.map((fact) => (

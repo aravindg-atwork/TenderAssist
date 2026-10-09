@@ -38,7 +38,22 @@ const STOPWORDS = new Set([
   'tender', 'tenders', 'supply', 'work', 'works', 'department', 'district', 'office', 'government', 'govt', 'tamil', 'nadu',
   'chennai', 'state', 'name', 'providing', 'provision', 'various', 'item', 'items', 'nos', 'lot', 'invited', 'bid', 'bids',
   'rate', 'contract', 'period', 'basis', 'regarding', 'reg', 'ref', 'description', 'title',
+  // GeM's form wording in bid titles ("Custom Bid for Services", "Service Provider Premises; Yes; Buyer Premises").
+  'custom', 'yes', 'buyer', 'buyers', 'seller', 'sellers', 'premises', 'provider', 'service', 'services', 'product', 'products',
+  'consignee', 'onsite', 'offsite', 'location', 'locations', 'quantity', 'qty', 'unit', 'units', 'option', 'options', 'required',
 ]);
+
+/**
+ * The part of a title that names the work. GeM titles start with "Custom
+ * Bid for Services - " and list the bid's form answers after the first ";"
+ * (make, place, "Yes", "Buyer Premises"); neither says what the work is.
+ */
+export function workPartOfTitle(title: string): string {
+  return title
+    .replace(/^\s*custom bid for (?:services|products?)\s*-\s*/i, '')
+    .split(';')[0]
+    .trim();
+}
 
 const MAX_PHRASE_WORDS = 3;
 
@@ -114,16 +129,18 @@ export function suggestWords(input: SuggestionInput): WordSuggestions {
   const limit = input.limit ?? 8;
   const existing = [...input.keywords, ...input.excludedKeywords];
   // Intent words are matched against the whole tender, so read title and description.
-  const fullText = (tender: DecidedTenderText) => [tender.title, tender.description].filter(Boolean).join(' . ');
+  const fullText = (tender: DecidedTenderText) => [workPartOfTitle(tender.title), tender.description].filter(Boolean).join(' . ');
   const approvedFull = countTenders(input.approved.map(fullText));
   const rejectedFull = countTenders(input.rejected.map(fullText));
   // Excluded words are matched against titles only, so suggest them from titles.
-  const approvedTitles = countTenders(input.approved.map((tender) => tender.title));
-  const rejectedTitles = countTenders(input.rejected.map((tender) => tender.title));
+  const approvedTitles = countTenders(input.approved.map((tender) => workPartOfTitle(tender.title)));
+  const rejectedTitles = countTenders(input.rejected.map((tender) => workPartOfTitle(tender.title)));
   return {
     intent: pick(approvedFull, rejectedFull, existing, minTenders, limit,
       (count, other) => `in ${count} approved, ${other} rejected`, true),
-    excluded: pick(rejectedTitles, approvedTitles, existing, minTenders, limit,
+    // Excluded words reject without reading the tender, so only phrases: one word
+    // ("installation") would also reject the office's own work ("installation of software").
+    excluded: pick(new Map([...rejectedTitles].filter(([phrase]) => phrase.includes(' '))), approvedTitles, existing, minTenders, limit,
       (count, other) => `in ${count} rejected titles, ${other} approved`, false),
   };
 }

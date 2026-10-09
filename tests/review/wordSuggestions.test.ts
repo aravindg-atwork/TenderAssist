@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { suggestWords, workDescriptionFrom } from '../../src/review/wordSuggestions.js';
+import { suggestWords, workDescriptionFrom, workPartOfTitle } from '../../src/review/wordSuggestions.js';
 
 const tender = (title: string, description: string | null = null) => ({ title, description });
 
@@ -47,5 +47,22 @@ describe('workDescriptionFrom', () => {
     expect(workDescriptionFrom('Tender ID: 1\nWork Description: Build a web portal\n\nbody')).toBe('Build a web portal');
     expect(workDescriptionFrom('Tender ID: 1')).toBeNull();
     expect(workDescriptionFrom(null)).toBeNull();
+  });
+
+  it('ignores GeM form wording in bid titles and suggests the work instead', () => {
+    const gem = (work: string) => ({ title: `Custom Bid for Services - Repair and Overhauling Service - ${work}; ANGAD; Yes; Buyer Premises`, description: null });
+    const result = suggestWords({
+      approved: [{ title: 'Custom Bid for Services - Mobile app development; Yes; Service Provider Premises', description: null }],
+      rejected: [gem('WASHING RIG'), gem('BARE SHELTER'), gem('built up trucks'), gem('CRANE')],
+      keywords: [], excludedKeywords: [],
+    });
+    const phrases = result.excluded.map((item) => item.phrase);
+    expect(phrases).toContain('repair and overhauling');
+    for (const noise of ['custom', 'premises', 'yes', 'buyer', 'buyer premises', 'service provider premises', 'angad']) expect(phrases).not.toContain(noise);
+  });
+
+  it('keeps only the work part of a GeM title', () => {
+    expect(workPartOfTitle('Custom Bid for Services - Handling Service, Transport Service; Yes; Buyer Premises')).toBe('Handling Service, Transport Service');
+    expect(workPartOfTitle('Construction of compound wall')).toBe('Construction of compound wall');
   });
 });

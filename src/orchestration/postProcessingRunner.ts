@@ -9,6 +9,7 @@ import type { ClassificationRepository } from '../persistence/repositories/class
 import type { TenderWorkflowRepository } from '../persistence/repositories/tenderWorkflowRepository.js';
 import type { JobOutputRepository } from '../persistence/repositories/jobOutputRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
+import { documentsTextFor } from '../documents/documentText.js';
 import { extractTenderRequirements } from '../extraction/requirementExtractor.js';
 import { publishJobWorkbook, tenderDocumentsDirectory } from '../publishing/jobPublisher.js';
 import { DEFAULT_OUTPUT_STRUCTURE, type OutputStructureSettings } from '../publishing/outputStructure.js';
@@ -51,6 +52,8 @@ export interface PostProcessingDeps {
   signal?: AbortSignal;
   /** Used instead of the portal page when given; no sign-in is needed then. */
   downloader?: DocumentDownloader;
+  /** Reads the text inside the saved documents (PDFs, with OCR for scans) before requirements are found. */
+  readDocuments?: (tenders: TenderRow[], report: (message: string) => void) => Promise<void>;
 }
 
 function safeFileName(value: string, index: number, url: string): string {
@@ -215,9 +218,11 @@ export async function runPostProcessing(
     deps.jobMachine.transition(jobId, 'PROCESSING_DOCUMENTS', 'document processing started');
     deps.jobMachine.transition(jobId, 'EXTRACTING_REQUIREMENTS', 'requirement extraction started');
     onUpdate(snapshot('EXTRACTION'));
+    // A reading problem never stops the run: requirements then come from the page alone.
+    await deps.readDocuments?.(approved, (statusMessage) => onUpdate({ ...snapshot('EXTRACTION'), statusMessage })).catch(() => {});
     for (const tender of approved) {
       throwIfCancellationRequested(deps.signal);
-      const extraction = extractTenderRequirements(tender.detail_text ?? '');
+      const extraction = extractTenderRequirements([tender.detail_text ?? '', documentsTextFor(deps.workflow.listDocuments(tender.id))].filter(Boolean).join('\n\n'));
       deps.workflow.saveRequirements(tender.id, extraction.requirements, extraction.confidence);
     }
 

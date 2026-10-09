@@ -81,6 +81,27 @@ export interface TenderDetailItem extends TenderRow {
   requirements: TenderRequirementRow | null;
   /** The durable tender's state, so run screens can honour Inbox decisions. */
   opportunityLifecycle: OpportunityLifecycle | null;
+  /** A check for changes: what this run found for the tender (extension, corrigendum, cancelled); empty when nothing changed. */
+  changesFound?: string[];
+}
+
+/** One tender found in the live sign-in, with TenderAssist's verdict and why. */
+export interface LiveSessionTender {
+  opportunityId: string;
+  tenderId: string;
+  title: string;
+  organisation: string | null;
+  closingDate: string | null;
+  recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN' | null;
+  lifecycle: OpportunityLifecycle;
+  reason: string;
+  filesSaved: boolean;
+}
+
+export interface LiveSessionView {
+  tenders: LiveSessionTender[];
+  /** Approved tenders on this website whose documents are not saved yet. */
+  approvedWaitingForDocuments: number;
 }
 
 export interface RecoveryJob {
@@ -217,6 +238,10 @@ export interface TenderAssistApi {
   startChangeCheck(portalId: string): Promise<{ jobId: string; count: number }>;
   /** While a run waits signed in ("What next?"): check the followed tenders again, no new sign-in. */
   checkChangesInRun(): Promise<void>;
+  /** While a run waits signed in: collect approved tenders' documents, no new sign-in. */
+  collectDocumentsInRun(): Promise<void>;
+  /** The live sign-in's tenders, to approve or reject on the spot. */
+  getLiveSession(): Promise<LiveSessionView>;
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
   getGoogleDrive(): Promise<GoogleDriveStatus>;

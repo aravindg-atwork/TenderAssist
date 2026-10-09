@@ -11,6 +11,15 @@ export interface TenderFileDocument {
   name: string;
   state: 'PENDING' | 'DOWNLOADED' | 'FAILED';
   error: string | null;
+  /** What was read inside it; null when not read (yet) or not a readable kind of file. */
+  read?: {
+    method: 'TEXT' | 'OCR' | 'MIXED' | 'NONE';
+    pages: number;
+    ocrPages: number;
+    intentWords: string[];
+    excludedWords: string[];
+    preview: string;
+  } | null;
 }
 
 export interface TenderFileView {
@@ -32,6 +41,8 @@ export interface TenderFileView {
   inMyTenders: boolean;
   /** A GeM bid: read from its bid document, with no My Tenders. */
   fromGem?: boolean;
+  /** Requirements found in the tender page and the text inside its documents, once documents were read. */
+  fromDocuments?: TenderField[];
 }
 
 /** The "Label: value" lines TenderAssist stores at the top of a tender's text. */
@@ -79,4 +90,20 @@ export function keyFactsFrom(fields: TenderField[]): TenderField[] {
     if (found) facts.push({ label: fact.name, value: found.value.replace(/\|\|/g, ' › ') });
   }
   return facts;
+}
+
+/**
+ * The rule-based reader can pick up the wrong words from a long document
+ * ("EMD: Detail", a row of dots for a contact). A value is shown only when it
+ * looks like an answer: an amount for EMD and fees, an email or number for a
+ * contact, a few real words otherwise.
+ */
+export function cleanRequirement(key: string, raw: string): string | null {
+  const value = raw.replace(/^[\s/:\-–.,;|]+/, '').replace(/\s+/g, ' ').trim().slice(0, 600);
+  const letters = (value.match(/[A-Za-z]/g) ?? []).length;
+  if (value.length < 4 || letters + (value.match(/\d/g) ?? []).length < 3 || /\.{4,}|_{4,}/.test(value)) return null;
+  if ((key === 'emd' || key === 'tenderFee') && !/\d|exempt|nil\b|not applicable|\bno\b|waived/i.test(value)) return null;
+  if (key === 'contact' && !/@|\d{5,}/.test(value)) return null;
+  if (key !== 'submissionDeadline' && key !== 'emd' && key !== 'tenderFee' && key !== 'contact' && value.split(' ').length < 3) return null;
+  return value;
 }

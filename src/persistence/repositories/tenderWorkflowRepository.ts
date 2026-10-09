@@ -23,6 +23,13 @@ export interface TenderDocumentRow {
   error: string | null;
   downloaded_at: string | null;
   updated_at: string;
+  /** The text inside the file, when read; null before reading or when it holds none. */
+  text_content?: string | null;
+  /** How it was read: TEXT (the PDF's own text), OCR, MIXED, or NONE (nothing readable). */
+  text_method?: 'TEXT' | 'OCR' | 'MIXED' | 'NONE' | null;
+  text_pages?: number | null;
+  text_ocr_pages?: number | null;
+  text_read_at?: string | null;
 }
 
 export interface TenderRequirementRow {
@@ -89,6 +96,13 @@ export class TenderWorkflowRepository {
     this.db.prepare(
       `UPDATE tender_documents SET state = 'FAILED', error = ?, updated_at = ? WHERE id = ?`
     ).run(error.slice(0, 2000), new Date().toISOString(), id);
+  }
+
+  /** Records what was read from inside a saved document. */
+  saveDocumentText(id: string, read: { text: string; method: 'TEXT' | 'OCR' | 'MIXED' | 'NONE'; pages: number; ocrPages: number }, at = new Date().toISOString()): void {
+    this.db.prepare(
+      `UPDATE tender_documents SET text_content = ?, text_method = ?, text_pages = ?, text_ocr_pages = ?, text_read_at = ? WHERE id = ?`
+    ).run(read.text || null, read.method, read.pages, read.ocrPages, at, id);
   }
 
   listDocuments(tenderId: string): TenderDocumentRow[] {
