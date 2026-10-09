@@ -19,7 +19,7 @@ import type { UpdateStatus } from './updateService.js';
 import type { PreflightReport } from '../system/preflight.js';
 import type { AutomationPacingSettings } from '../persistence/repositories/automationSettingsRepository.js';
 import type { TextSize } from '../persistence/repositories/displaySettingsRepository.js';
-import type { InboxView } from '../review/inbox.js';
+import type { InboxView, TenderSummary } from '../review/inbox.js';
 import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 
 import type { TendersView } from '../review/tenders.js';
@@ -104,6 +104,20 @@ export interface LiveSessionView {
   tenders: LiveSessionTender[];
   /** Approved tenders on this website whose documents are not saved yet. */
   approvedWaitingForDocuments: number;
+}
+
+/** One tender behind a number in the daily report. */
+export interface ReportTenderItem {
+  opportunityId: string;
+  tenderId: string;
+  title: string;
+  /** Published day it was found under. */
+  date: string;
+  closingDate: string | null;
+  verdict: 'KEEP' | 'UNCERTAIN' | 'REJECT' | 'NOT_RUN';
+  approved: boolean;
+  lifecycle: OpportunityLifecycle | null;
+  reason: string;
 }
 
 export interface DailyReportView extends DailyReport {
@@ -259,6 +273,10 @@ export interface TenderAssistApi {
   getDailyReport(portalId: string, from: string, to: string): Promise<DailyReportView>;
   /** Reads the website's public lists again for its daily totals (GePNIC websites; about two minutes). */
   refreshWebsiteTotals(portalId: string): Promise<void>;
+  /** The tenders behind a category in the daily report, over a day or a range of days. */
+  getReportTenders(portalId: string, from: string, to: string, category: string): Promise<ReportTenderItem[]>;
+  /** One tender's summary, to open its file. */
+  getTenderSummary(opportunityId: string): Promise<TenderSummary>;
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
   getGoogleDrive(): Promise<GoogleDriveStatus>;

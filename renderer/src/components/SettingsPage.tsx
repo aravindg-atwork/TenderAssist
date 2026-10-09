@@ -157,41 +157,76 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     window.tenderAssist.getAutomationPacing().then(setPacing).catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (chosenCategories.length === 0) return setError(`Add at least one category for ${selectedPortal.name}.`);
-    if (keywords.length === 0) return setError('Add at least one intent keyword.');
+  // What auto-save compares: everything on these pages except the password being typed.
+  const snapshot = JSON.stringify({ productCategories, categoriesByPortal, gemIncludeProducts, keywords, excludedKeywords, loginId, rememberPassword, publishing, pacing, portal: selectedPortalId });
+  const lastSaved = useRef<string | null>(null);
+  const loaded = Boolean(settings && credentialSettings && publishing && pacing);
+
+  /**
+   * Saves every part of Settings. "auto" runs a moment after a change: it
+   * waits quietly while something required is missing, and never saves a
+   * password still being typed (Next or Save changes does).
+   */
+  const saveAll = async (mode: 'explicit' | 'auto'): Promise<boolean> => {
+    if (chosenCategories.length === 0 || keywords.length === 0) {
+      if (mode === 'explicit') setError(chosenCategories.length === 0 ? `Add at least one category for ${selectedPortal.name}.` : 'Add at least one intent keyword.');
+      return false;
+    }
+    if (!publishing || !pacing || !credentialSettings) return false;
+    const savingSnapshot = snapshot;
     setSaving(true);
     setSaved(false);
     setError(null);
     const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories }, gemIncludeProducts };
+    const withCredentials = !gem && (mode === 'explicit' || password === '');
     try {
-      if (!publishing) throw new Error('Publishing settings are still loading.');
-      if (!pacing) throw new Error('Automation pacing settings are still loading.');
       const [next, nextCredentials, nextPublishing, nextPacing] = await Promise.all([
         window.tenderAssist.saveRunSettings(defaults),
         // GeM has no login to save.
-        gem ? Promise.resolve(credentialSettings!) : window.tenderAssist.savePortalCredentials(selectedPortalId, {
+        withCredentials ? window.tenderAssist.savePortalCredentials(selectedPortalId, {
           loginId,
           password: password || undefined,
           rememberPassword,
-        }),
+        }) : Promise.resolve(credentialSettings),
         window.tenderAssist.savePublishingSettings(selectedPortalId, publishing),
         window.tenderAssist.saveAutomationPacing(pacing),
       ]);
+      lastSaved.current = savingSnapshot;
       onSaved(next);
       setCredentialSettings(nextCredentials);
-      setRememberPassword(nextCredentials.hasSavedPassword);
-      setPassword('');
-      setPublishing(nextPublishing);
-      setPacing(nextPacing);
+      if (withCredentials) {
+        setRememberPassword(nextCredentials.hasSavedPassword);
+        if (mode === 'explicit') setPassword('');
+      }
+      if (mode === 'explicit') {
+        setPublishing(nextPublishing);
+        setPacing(nextPacing);
+      }
       setSaved(true);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    await saveAll('explicit');
+  };
+
+  // Auto-save: a moment after the last change, once everything has loaded.
+  useEffect(() => {
+    if (!loaded) return;
+    if (lastSaved.current === null) { lastSaved.current = snapshot; return; }
+    if (snapshot === lastSaved.current || saving) return;
+    const timer = window.setTimeout(() => { void saveAll('auto'); }, 1_200);
+    return () => window.clearTimeout(timer);
+    // saveAll reads the latest state through this render's closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, loaded, saving]);
 
   const choosePublishingFolder = async (kind: 'local' | 'drive') => {
     if (!publishing) return;
@@ -463,9 +498,24 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         </section>
       </div>
 
+      {(() => {
+        const index = SECTIONS.findIndex(([id]) => id === active);
+        const next = SECTIONS[index + 1];
+        return next ? (
+          <div className="settings__next">
+            <button type="button" className="btn btn--primary" disabled={!canSave}
+              onClick={() => void saveAll('explicit').then((ok) => { if (ok) setActive(next[0]); })}>
+              Next: {next[1]} →
+            </button>
+          </div>
+        ) : null;
+      })()}
+
       <div className="savebar" aria-live="polite">
         {error && <span className="savebar__error" role="alert">{error}</span>}
-        {!error && saved && <span className="savebar__ok">Saved. New searches use these settings.</span>}
+        {!error && saving && <span className="savebar__ok">Saving…</span>}
+        {!error && !saving && saved && <span className="savebar__ok">All changes saved. New searches use these settings.</span>}
+        {!error && !saving && !saved && password !== '' && <span className="savebar__ok">The new password is saved when you press Next or Save changes.</span>}
         <button className="btn btn--primary" type="submit" disabled={!canSave}>{saving ? 'Saving…' : 'Save changes'}</button>
       </div>
       {replacing && (

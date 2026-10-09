@@ -25,7 +25,7 @@ import { OpportunityRepository, type OpportunityRow } from '../persistence/repos
 import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, recordPageCorrigenda, syncJobOpportunities, syncTenderSighting } from '../orchestration/opportunitySync.js';
 import { automaticDownloadSelection } from '../orchestration/automaticSelection.js';
 import { describeSkipped, planDateBatch, type DateBatchPlan } from '../orchestration/dateBatch.js';
-import { buildInbox, type InboxView } from '../review/inbox.js';
+import { buildInbox, summarizeTender, type InboxView, type TenderSummary } from '../review/inbox.js';
 import { cleanRequirement, keyFactsFrom, parseDetailFields, type TenderFileView } from '../review/tenderFile.js';
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
@@ -66,6 +66,7 @@ import type {
   LiveSessionTender,
   LiveSessionView,
   DailyReportView,
+  ReportTenderItem,
 } from './ipcTypes.js';
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
 import { categoryHealth, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
@@ -2762,6 +2763,57 @@ ipcMain.handle('get-daily-report', (_event, portalId: unknown, from: unknown, to
     totalsReading: publicCountsReading !== null,
     gemProductsIncluded: gem ? runConfigurations.getDefaults().gemIncludeProducts : undefined,
   };
+});
+
+/**
+ * The tenders behind a number in the daily report: one category (or "Other
+ * categories") over a day or a range of days, each once, newest day first.
+ */
+ipcMain.handle('get-report-tenders', (_event, portalId: unknown, from: unknown, to: unknown, category: unknown): ReportTenderItem[] => {
+  const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  if (typeof from !== 'string' || typeof to !== 'string' || typeof category !== 'string') throw new Error('Choose a category and days.');
+  const gem = isGemPortal(portal);
+  const screening = new Map(opportunities.listAllWithScreening().map((row) => [row.id, row]));
+  const seen = new Map<string, ReportTenderItem>();
+  const runsInRange = jobs.listAll()
+    .filter((job) => !job.purpose || job.purpose === 'SEARCH')
+    .map((job) => ({ job, config: runConfigurations.getForJob(job.id) }))
+    .filter(({ config }) => config && config.portalId === portal.id && config.searchDate >= from && config.searchDate <= to)
+    .sort((a, b) => b.job.created_at.localeCompare(a.job.created_at));
+  for (const { job, config } of runsInRange) {
+    for (const tender of tenders.listForJob(job.id)) {
+      const key = tender.tender_portal_id ?? tender.tender_ref;
+      if (seen.has(key) || !tender.opportunity_id) continue;
+      const verdict = (workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id)) as ReportTenderItem['verdict'];
+      const approved = isApprovedTender(tender);
+      const inCategory = !gem || classifications.listForTender(tender.id).some((gate) => gate.gate === 'G2' && gate.result === 'PASS');
+      const name = tender.product_category || 'Not stated';
+      const matches = category === 'Other categories'
+        ? gem && !inCategory && verdict !== 'KEEP' && !approved
+        : name === category;
+      if (!matches) continue;
+      const row = screening.get(tender.opportunity_id);
+      seen.set(key, {
+        opportunityId: tender.opportunity_id,
+        tenderId: key,
+        title: tender.title,
+        date: config!.searchDate,
+        closingDate: row?.closing_date ?? tender.closing_date,
+        verdict,
+        approved,
+        lifecycle: row?.lifecycle ?? null,
+        reason: row ? explainScreening(row.recommendation, parseScreenedGates(row.screening_json)).sentence : '',
+      });
+    }
+  }
+  return [...seen.values()].sort((a, b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title));
+});
+
+/** One tender's summary, to open its file from anywhere (the daily report). */
+ipcMain.handle('get-tender-summary', (_event, opportunityId: unknown): TenderSummary => {
+  const row = opportunities.listAllWithScreening().find((entry) => entry.id === opportunityId);
+  if (!row) throw new Error('Tender not found.');
+  return summarizeTender(row);
 });
 
 ipcMain.handle('refresh-website-totals', async (_event, portalId: unknown): Promise<void> => {

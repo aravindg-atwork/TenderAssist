@@ -2,6 +2,23 @@
 
 Last updated: 8 Oct 2026. Pick up from **Next up**.
 
+## Done after 0.5.2 (9 Oct 2026; not yet in an installer)
+
+- **Reports page (daily report)**: per published day: tenders on the website, in your categories, shortlisted, need a look, rejected, approved; per-day and whole-range category tables; Last 7/14/30 days or Choose dates. Click a category to list its tenders (verdict, why, dates); click a tender to open its file and decide it there.
+  - Tamil Nadu "on the website": public "Tenders by Organisation" lists (`src/portal/publicTenderCounts.ts`), read after runs when older than 6 h and with Refresh website totals (about 2 minutes, 64 pages). Open tenders only: older days come out lower. Real read 9 Oct: 427 (9 Oct), 466, 419, 346, 329…
+  - GeM: every bid that started that day (from the day search), with GeM's own categories; "in your categories" = bids passing the category check (G2).
+  - Code: `src/review/dailyReport.ts` (tested), `daily_portal_counts` table (migration 016), `ReportsPage.tsx`.
+- **Typing like a person** (Settings → Speed → Typing): login ID and password typed one key at a time (70–220 ms, sometimes longer); separate from the click pause. "All at once" keeps the old way.
+- **CAPTCHA/DSC call**: taskbar flash and Windows alert sound once when the CAPTCHA or DSC signer step needs the operator. Automatic CAPTCHA solving was asked for and declined: it would get round the website's human check.
+- **Settings auto-save** about a second after a change (skipped while something required is missing; a password being typed is saved only by Next or Save changes), and **Next: <section> →** under each section.
+
+## Later: paid product (operator's plan, 9 Oct 2026; not started)
+
+- **Activation key**: the app asks for a key on first start and checks it; without a valid key it does not run searches.
+- **Subscriptions**: monthly renewal; the key carries an expiry; the app checks it online (with a grace period offline) and warns before it runs out.
+- **Admin website** for the founding company only (super-admins), never for users: list sign-ups, issue, renew, suspend and revoke keys, see each key's devices and expiry.
+- To decide first: how a key binds to a computer (one PC per key?), offline grace days, payment provider, and where the key server runs.
+
 ## Done in 0.5.2 (9 Oct 2026; local installer built)
 
 - **Reading inside documents** (`src/documents/`): PDFs by their own text, scanned pages and images by Windows' built-in OCR (Windows.Media.Ocr + Windows.Data.Pdf through PowerShell; nothing to install). Read after documents are saved (runs and "Collect documents"), then requirements are found from page + documents. Saved documents are caught up in the background 20 s after start-up.
