@@ -7,6 +7,10 @@
 ; stop to ask for permission.
 
 !macro customInstall
+  ; Windows caches a shortcut's icon by path: after installing over an older
+  ; build, the desktop icon can stay Electron's until the cache is refreshed.
+  ; Runs for silent updates too.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
   IfSilent prereqs_done
   SetDetailsPrint both
   DetailPrint "Checking for OpenWebStart and Java (needed for the DSC signer)..."

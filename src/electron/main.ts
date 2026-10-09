@@ -123,6 +123,10 @@ const dataPathEnv: NodeJS.ProcessEnv = !app.isPackaged && process.env.TENDERASSI
 // before it touches the shared WAL/SHM files.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
+// Windows ties the taskbar button to the installed shortcut (and its TA icon)
+// by this ID; it must match build.appId in package.json.
+if (process.platform === 'win32') app.setAppUserModelId('in.tenderassist.desktop');
+
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
