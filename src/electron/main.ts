@@ -77,7 +77,7 @@ import { extractTenderRequirements } from '../extraction/requirementExtractor.js
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
-import { driveFolderPath, GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser, type DriveCredentials } from '../publishing/googleDrive.js';
+import { driveFolderPath, GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInForIdToken, signInWithBrowser, type DriveCredentials } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
 import { detailTextFor, downloadCorrigendumDocuments, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { corrigendaSummary, isWatched, tenderPageFacts } from '../review/watchedTenders.js';
@@ -96,6 +96,10 @@ import { DEFAULT_PORTAL_ID, getPortalDefinition, isGemPortal, type PortalDefinit
 import { describeResumePlan, planResume, prepareForDocumentCollection } from '../orchestration/jobResume.js';
 import type { PaceAction } from '../orchestration/actionPacer.js';
 import { portalLockState, type PortalLockState } from './portalLock.js';
+import { CHECK_EVERY_MS } from '../licence/licence.js';
+import { LicenceStore, pcIdentity } from '../licence/licenceClient.js';
+import { LicenceManager, type LicenceView } from '../licence/licenceManager.js';
+import { LICENCE_PUBLIC_KEY, LICENCE_SERVER_URL } from '../licence/licenceServer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EMBEDDED_CDP_PORT = 18_000 + Math.floor(Math.random() * 10_000);
@@ -211,6 +215,40 @@ let activeRunContext: RunContext | undefined;
 let activeQuestion: RunQuestion | undefined;
 let pendingAnswer: ((answer: RunQuestionAnswer) => void) | undefined;
 const dscDownloadDirectory = join(getAppDataDir(dataPathEnv), 'dsc-downloads');
+// The licence key: enforced in installed builds (and in development with
+// TENDERASSIST_LICENCE=on). See src/licence/ and docs/licence-setup.md.
+const licence = new LicenceManager({
+  store: new LicenceStore(join(getAppDataDir(dataPathEnv), 'licence.json')),
+  appDataDir: getAppDataDir(dataPathEnv),
+  serverUrl: LICENCE_SERVER_URL,
+  publicKey: LICENCE_PUBLIC_KEY,
+  version: app.getVersion(),
+  enforced: app.isPackaged || process.env.TENDERASSIST_LICENCE === 'on',
+  identity: pcIdentity,
+  signIn: async () => {
+    const credentials = builtInGoogleClient('google-licence-client.json') ?? builtInGoogleClient();
+    if (!credentials) throw new Error('This copy of TenderAssist was built without Google sign-in. Ask for a build that includes it.');
+    try {
+      const { idToken } = await signInForIdToken(credentials, async (url) => {
+        googleSignInLink = url;
+        await shell.openExternal(url);
+      });
+      return idToken;
+    } finally {
+      googleSignInLink = null;
+    }
+  },
+});
+// claimRun() is synchronous, so it reads these; every licence change updates them.
+let licenceUsable = false;
+let licenceRefusal = 'TenderAssist is still checking its key. Try again in a moment.';
+function noteLicence(view: LicenceView): LicenceView {
+  licenceUsable = view.usable;
+  licenceRefusal = `${view.message || 'TenderAssist needs a valid key.'} ${view.contact}`.trim();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('licence-changed', view);
+  return view;
+}
+licence.onChange(noteLicence);
 const dscArtifacts = new Map<string, DscJnlpArtifact>();
 // Fresh sign-ins allowed while collecting documents before the run stops.
 const MAX_ACQUISITION_SIGN_INS = 3;
@@ -956,6 +994,13 @@ function outputPlanFor(jobId: string, portalId?: string) {
 
 ipcMain.handle('get-update-status', () => getUpdateStatus());
 ipcMain.handle('check-for-updates', () => checkForUpdates(() => mainWindow));
+
+ipcMain.handle('get-licence', async (): Promise<LicenceView> => noteLicence(await licence.view()));
+ipcMain.handle('activate-licence', async (_event, key: unknown): Promise<LicenceView> => {
+  if (typeof key !== 'string') throw new Error('Paste your TenderAssist key.');
+  return licence.activate(key);
+});
+ipcMain.handle('check-licence', (): Promise<LicenceView> => licence.check());
 ipcMain.handle('restart-to-install-update', (): void => restartToInstall());
 ipcMain.handle('run-preflight', (_event, portalId: string) => {
   const portal = getPortalDefinition(portalId);
@@ -1243,6 +1288,7 @@ interface RunContext {
 
 /** Claim the single active-run slot synchronously, before any await. */
 function claimRun(): { abortController: AbortController; paceAction: PaceAction } {
+  if (!licenceUsable) throw new Error(licenceRefusal);
   if (activeJobId) {
     throw new Error('A job is already running. Wait for it to finish before starting another.');
   }
@@ -1490,8 +1536,8 @@ async function decryptText(value: string | null): Promise<string | null> {
  * TenderAssist's own Google sign-in credential, packed into the build from
  * google-oauth-client.json (kept out of git). Operators never see it.
  */
-function builtInGoogleClient(): DriveCredentials | null {
-  try { return parseGoogleClientFile(readFileSync(join(app.getAppPath(), 'google-oauth-client.json'), 'utf8')); }
+function builtInGoogleClient(file = 'google-oauth-client.json'): DriveCredentials | null {
+  try { return parseGoogleClientFile(readFileSync(join(app.getAppPath(), file), 'utf8')); }
   catch { return null; }
 }
 
@@ -3209,6 +3255,11 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
     configureApplicationMenu();
     mainWindow?.webContents.once('did-finish-load', reportRestoreOutcome);
     configureUpdates(() => mainWindow);
+    // The key: read the saved answer at once, ask the server soon after, then
+    // every few hours; re-read hourly so a key that ends while open locks.
+    void licence.view().then(noteLicence).then(() => licence.check());
+    setInterval(() => { void licence.check(); }, CHECK_EVERY_MS);
+    setInterval(() => { void licence.view().then(noteLicence); }, 60 * 60 * 1000);
     if (app.isPackaged) {
       setTimeout(() => {
         void checkForUpdates(() => mainWindow).catch(() => {

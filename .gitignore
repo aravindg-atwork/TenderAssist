@@ -17,3 +17,11 @@ google-oauth-client.json
 .impeccable/questions/
 # Icon previews written by build/icon-source/make-icon.cjs.
 build/icon-source/preview-*.png
+
+# Licence signing key: goes into the Apps Script only, never committed.
+licence-server/secret/
+# Optional separate Google sign-in client for licences (packed into the build).
+google-licence-client.json
+
+# Bedrock relay token: local only, never committed.
+relay-token.txt

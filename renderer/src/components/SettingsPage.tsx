@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import { GoogleDriveSetting } from './GoogleDriveSetting';
+import { LicenceSetting } from './Licence';
 import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { CategoryHealth, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
@@ -259,7 +260,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   };
 
   // One section at a time: the side list switches between them.
-  const [active, setActive] = useState<'look' | 'login' | 'folders' | 'display' | 'speed' | 'updates'>('look');
+  const [active, setActive] = useState<'look' | 'login' | 'folders' | 'display' | 'speed' | 'updates' | 'licence'>('look');
   useEffect(() => {
     if (focusRequest?.section === 'relevance') setActive('look');
     if (focusRequest?.section === 'folders') setActive('folders');
@@ -270,7 +271,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const canSave = !saving && Boolean(credentialSettings && publishing && pacing);
   const SECTIONS = [
     ['look', 'What to look for'], ['login', 'Portal login'], ['folders', 'Folders'],
-    ['display', 'Display'], ['speed', 'Speed'], ['updates', 'Updates'],
+    ['display', 'Display'], ['speed', 'Speed'], ['updates', 'Updates'], ['licence', 'Licence'],
   ] as const;
 
   return (
@@ -496,6 +497,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             )}
           </div>
         </section>
+
+        <section id="settings-licence" hidden={active !== 'licence'} className="block"><LicenceSetting /></section>
       </div>
 
       {(() => {

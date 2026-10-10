@@ -79,6 +79,8 @@ function quoted(value: string): string {
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 }
 
+type BrowserSignInOptions = { fetch?: typeof fetch; timeoutMs?: number; signal?: AbortSignal };
+
 /**
  * Signs in with Google in the operator's own browser (the installed-app
  * loopback flow with PKCE) and returns a refresh token for Drive.
@@ -86,8 +88,33 @@ function quoted(value: string): string {
 export async function signInWithBrowser(
   credentials: DriveCredentials,
   openBrowser: (url: string) => Promise<void>,
-  options: { fetch?: typeof fetch; timeoutMs?: number; signal?: AbortSignal } = {},
+  options: BrowserSignInOptions = {},
 ): Promise<{ refreshToken: string }> {
+  const body = await authorizeInBrowser(credentials, openBrowser, { scope: DRIVE_SCOPE, offline: true }, options);
+  if (!body.refresh_token) throw new GoogleDriveError('Google did not complete the sign-in: no refresh token.');
+  return { refreshToken: body.refresh_token };
+}
+
+/**
+ * Signs in with Google only to learn who the person is (for the licence key):
+ * returns Google's ID token, which the key server checks with Google itself.
+ */
+export async function signInForIdToken(
+  credentials: DriveCredentials,
+  openBrowser: (url: string) => Promise<void>,
+  options: BrowserSignInOptions = {},
+): Promise<{ idToken: string }> {
+  const body = await authorizeInBrowser(credentials, openBrowser, { scope: 'openid email', offline: false }, options);
+  if (!body.id_token) throw new GoogleDriveError('Google did not complete the sign-in: no identity token.');
+  return { idToken: body.id_token };
+}
+
+async function authorizeInBrowser(
+  credentials: DriveCredentials,
+  openBrowser: (url: string) => Promise<void>,
+  access: { scope: string; offline: boolean },
+  options: BrowserSignInOptions,
+): Promise<{ refresh_token?: string; id_token?: string }> {
   const fetchImpl = options.fetch ?? fetch;
   const verifier = base64Url(randomBytes(48));
   const challenge = base64Url(createHash('sha256').update(verifier).digest());
@@ -114,8 +141,9 @@ export async function signInWithBrowser(
         redirectUri = `http://127.0.0.1:${port}`;
         const url = new URL(AUTH_URL);
         url.search = new URLSearchParams({
-          client_id: credentials.clientId, redirect_uri: redirectUri, response_type: 'code', scope: DRIVE_SCOPE,
-          code_challenge: challenge, code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent', state,
+          client_id: credentials.clientId, redirect_uri: redirectUri, response_type: 'code', scope: access.scope,
+          code_challenge: challenge, code_challenge_method: 'S256', state,
+          ...(access.offline ? { access_type: 'offline', prompt: 'consent' } : { prompt: 'select_account' }),
         }).toString();
         openBrowser(url.toString()).catch(reject);
       });
@@ -130,11 +158,11 @@ export async function signInWithBrowser(
         grant_type: 'authorization_code', code_verifier: verifier,
       }).toString(),
     });
-    const body = await response.json().catch(() => ({})) as { refresh_token?: string; error_description?: string; error?: string };
-    if (!response.ok || !body.refresh_token) {
+    const body = await response.json().catch(() => ({})) as { refresh_token?: string; id_token?: string; error_description?: string; error?: string };
+    if (!response.ok) {
       throw new GoogleDriveError(`Google did not complete the sign-in: ${body.error_description ?? body.error ?? `HTTP ${response.status}`}.`, response.status);
     }
-    return { refreshToken: body.refresh_token };
+    return body;
   } finally {
     server?.close();
   }

@@ -12,12 +12,17 @@ Last updated: 8 Oct 2026. Pick up from **Next up**.
 - **CAPTCHA/DSC call**: taskbar flash and Windows alert sound once when the CAPTCHA or DSC signer step needs the operator. Automatic CAPTCHA solving was asked for and declined: it would get round the website's human check.
 - **Settings auto-save** about a second after a change (skipped while something required is missing; a password being typed is saved only by Next or Save changes), and **Next: <section> →** under each section.
 
-## Later: paid product (operator's plan, 9 Oct 2026; not started)
+## Licence keys (10 Oct 2026; built, not yet live)
 
-- **Activation key**: the app asks for a key on first start and checks it; without a valid key it does not run searches.
-- **Subscriptions**: monthly renewal; the key carries an expiry; the app checks it online (with a grace period offline) and warns before it runs out.
-- **Admin website** for the founding company only (super-admins), never for users: list sign-ups, issue, renew, suspend and revoke keys, see each key's devices and expiry.
-- To decide first: how a key binds to a computer (one PC per key?), offline grace days, payment provider, and where the key server runs.
+Decided with the owner (10 Oct): a key belongs to **one Google account** and a number of **PCs set per key** (price per PC); after its last day come **grace days** (default 3, per key) with a warning, then a **full lock**; **3 days offline**; the admin "website" is a **Google Sheet + Apps Script** (also the key server). Setup and daily use: `docs/licence-setup.md`.
+
+- Sheet + server: `licence-server/` (Code.gs, NewKey.html, appsscript.json). Licences menu: New key… (trial/paid, PCs, grace, ready-to-send message), add/take days, suspend, reset PCs, free the Google account; live Days left / PCs in use; red/amber rows; morning email of keys ending. Answers signed RSA-SHA256; the private key is in `licence-server/secret/` (git-ignored) and the script's properties only.
+- App: `src/licence/` (rules, server client, manager; tested in `tests/licence/`). Activation = key + Google sign-in (`signInForIdToken`, `openid email`). Checks at start and every 6 h. `claimRun()` refuses every run when the key does not allow work. Screens: `renderer/src/components/Licence.tsx` (gate before the app, warning strip, Settings → Licence).
+- Installer: key page after the install folder (`build/installer.nsh` + `build/check-key.ps1`); refuses an unknown/ended key; saves it to `%APPDATA%\TenderAssist\licence-key.txt` for the first start. Skipped when the PC already has a licence and for silent updates.
+- **To go live:** make the sheet, deploy the web app, put its URL in `src/licence/licenceServer.ts` and `build/installer.nsh` (`npm run dist:*` refuses to build without it), make an In-production Google client for sign-in (`google-licence-client.json`; the Drive client is in Testing, so only test users could sign in).
+- **Checked 10 Oct** (Code.gs run unchanged in a local stand-in for Google, with Apps Script's redirect): key making, peek, activate, wrong account, PC limit, suspend, reset PCs, bad requests; the installer's check-key.ps1 (good, wrong, suspended, offline, quotes in the key); the installer compiles and its key page shows and refuses an empty key; the built app activated → shortened date (strip) → suspended (lock, runs refused) → renewed (Check again unlocks) → PCs reset (asks to activate again).
+- **Not yet seen running:** the script inside Google itself (menu, dialog, daily email), and a real Google sign-in.
+- Later: payment provider; self-serve renewal.
 
 ## Done in 0.5.2 (9 Oct 2026; local installer built)
 

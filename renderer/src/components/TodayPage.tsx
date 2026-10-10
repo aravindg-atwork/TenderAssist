@@ -202,10 +202,11 @@ export function TodayPage({
     if (mode === null && inbox) setMode(ordered.length > 0 ? 'decide' : 'find');
   }, [inbox, mode, ordered.length]);
 
+  // The stamp is the confirmation, so it shows even with Windows animations off
+  // (common on office PCs and remote sessions); it just lands without moving.
   const stampThen = useCallback((next: () => void, decision: OperatorDecision) => {
-    if (reducedMotion()) { next(); return; }
     setStamp(STAMP[decision]);
-    window.setTimeout(() => { next(); setStamp(null); }, 720);
+    window.setTimeout(() => { next(); setStamp(null); }, reducedMotion() ? 600 : 720);
   }, []);
 
   const decide = useCallback(async (item: InboxItem, decision: OperatorDecision, note?: string) => {

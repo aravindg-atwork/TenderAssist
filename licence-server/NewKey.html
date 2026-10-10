@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<base target="_top">
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 4px 2px; color: #1d2433; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; }
+  input, select, textarea { box-sizing: border-box; width: 100%; padding: 7px 8px; border: 1px solid #b9c3d3; border-radius: 6px; font: inherit; }
+  .row { display: flex; gap: 10px; } .row > div { flex: 1; }
+  .hint { margin-top: 3px; font-size: 12px; color: #5d6b84; }
+  button { margin-top: 16px; padding: 9px 16px; border: 0; border-radius: 6px; background: #1f63d1; color: #fff; font: 600 14px system-ui; cursor: pointer; }
+  button:disabled { opacity: 0.6; }
+  .error { margin-top: 10px; color: #b3261e; }
+  #done textarea { height: 230px; }
+</style>
+</head>
+<body>
+<form id="form">
+  <label for="customer">Customer</label>
+  <input id="customer" name="customer" required placeholder="Company or person">
+  <label for="contact">Phone or email</label>
+  <input id="contact" name="contact" placeholder="For your records">
+  <label for="account">Google account (optional)</label>
+  <input id="account" name="account" type="email" placeholder="Leave empty: the first account to sign in owns the key">
+  <div class="row">
+    <div>
+      <label for="plan">Plan</label>
+      <select id="plan" name="plan"><option>Trial</option><option>Paid</option></select>
+    </div>
+    <div>
+      <label for="pcs">PCs allowed</label>
+      <input id="pcs" name="pcs" type="number" min="1" value="1">
+    </div>
+  </div>
+  <div class="row">
+    <div id="daysBox">
+      <label for="days">Days</label>
+      <input id="days" name="days" type="number" min="1" value="14">
+    </div>
+    <div id="untilBox" hidden>
+      <label for="until">Last day</label>
+      <input id="until" name="until" type="date">
+    </div>
+    <div>
+      <label for="grace">Grace days</label>
+      <input id="grace" name="grace" type="number" min="0" value="3">
+    </div>
+  </div>
+  <p class="hint">After the last day, the app warns for the grace days, then locks.</p>
+  <label for="notes">Notes</label>
+  <input id="notes" name="notes">
+  <button id="make" type="submit">Make the key</button>
+  <p class="error" id="error"></p>
+</form>
+<div id="done" hidden>
+  <label for="message">Send this to the customer</label>
+  <textarea id="message" readonly></textarea>
+  <button id="copy" type="button">Copy</button>
+  <button type="button" onclick="google.script.host.close()" style="background:#5d6b84">Close</button>
+</div>
+<script>
+  var form = document.getElementById('form');
+  var plan = document.getElementById('plan');
+  plan.addEventListener('change', function () {
+    var paid = plan.value === 'Paid';
+    document.getElementById('untilBox').hidden = !paid;
+    document.getElementById('daysBox').hidden = paid;
+  });
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var button = document.getElementById('make');
+    var error = document.getElementById('error');
+    if (plan.value === 'Paid' && !form.until.value) { error.textContent = 'Choose the last day of the paid plan.'; return; }
+    button.disabled = true; error.textContent = '';
+    var data = {};
+    ['customer', 'contact', 'account', 'plan', 'pcs', 'days', 'until', 'grace', 'notes'].forEach(function (name) { data[name] = form[name].value; });
+    google.script.run
+      .withSuccessHandler(function (result) {
+        form.hidden = true;
+        document.getElementById('done').hidden = false;
+        document.getElementById('message').value = result.message;
+      })
+      .withFailureHandler(function (err) { button.disabled = false; error.textContent = err.message || String(err); })
+      .createKey(data);
+  });
+  document.getElementById('copy').addEventListener('click', function () {
+    var box = document.getElementById('message');
+    box.select(); document.execCommand('copy');
+    this.textContent = 'Copied';
+  });
+</script>
+</body>
+</html>

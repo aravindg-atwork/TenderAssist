@@ -15,8 +15,8 @@
     "renderer:build": "vite build --config renderer/vite.config.ts",
     "electron": "npm run build && npm run renderer:build && electron .",
     "package": "npm run build && npm run renderer:build && electron-builder --dir",
-    "dist:win": "npm run build && npm run renderer:build && electron-builder --win nsis --x64",
-    "dist:mac": "npm run build && npm run renderer:build && electron-builder --mac dmg zip --x64 --arm64"
+    "dist:win": "node build/check-release.cjs && npm run build && npm run renderer:build && electron-builder --win nsis --x64",
+    "dist:mac": "node build/check-release.cjs && npm run build && npm run renderer:build && electron-builder --mac dmg zip --x64 --arm64"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
@@ -55,7 +55,8 @@
       "renderer/dist/**/*",
       "src/persistence/migrations/**/*",
       "package.json",
-      "google-oauth-client.json"
+      "google-oauth-client.json",
+      "google-licence-client.json"
     ],
     "asar": true,
     "publish": [

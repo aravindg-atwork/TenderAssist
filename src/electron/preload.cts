@@ -1,6 +1,6 @@
 // src/electron/preload.cts
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { TenderAssistApi, AuthJobUpdate, AppNavigationCommand } from './ipcTypes.js';
+import type { TenderAssistApi, AuthJobUpdate, AppNavigationCommand, LicenceView } from './ipcTypes.js';
 import type { UpdateStatus } from './updateService.js';
 
 const api: TenderAssistApi = {
@@ -92,6 +92,14 @@ const api: TenderAssistApi = {
     const listener = (_event: IpcRendererEvent, state: { locked: boolean; overridden: boolean }) => callback(state);
     ipcRenderer.on('portal-lock', listener);
     return () => ipcRenderer.removeListener('portal-lock', listener);
+  },
+  getLicence: () => ipcRenderer.invoke('get-licence'),
+  activateLicence: (key) => ipcRenderer.invoke('activate-licence', key),
+  checkLicence: () => ipcRenderer.invoke('check-licence'),
+  onLicenceChange: (callback) => {
+    const listener = (_event: IpcRendererEvent, view: LicenceView) => callback(view);
+    ipcRenderer.on('licence-changed', listener);
+    return () => ipcRenderer.removeListener('licence-changed', listener);
   },
   onAppNavigation: (callback) => {
     const listener = (_event: IpcRendererEvent, command: AppNavigationCommand) => callback(command);
