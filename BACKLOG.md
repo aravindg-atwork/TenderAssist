@@ -223,8 +223,8 @@ Decided with the owner (10 Oct): a key belongs to **one Google account** and a n
 
 ## Next up
 
-- **Google Cloud (owner):** in the project of `google-oauth-client.json`: scopes `openid`, `email`, `drive.file` only; branding + privacy policy; Publish app. Put `google-oauth-client.json` in the project root of the build PC (it is not in this checkout). Its client ID into the key server's `GOOGLE_CLIENT_IDS`. See docs/google-drive-setup.md.
-- **Key server:** `node licence-server/deploy.cjs` (same URL), then Licences → Set up / repair for the Categories tabs.
+- **Google sign-in: done and checked 12 Oct.** Client tenderassist-510910 (openid, email, drive.file); GOOGLE_CLIENT_IDS set; key server deployed with the Categories tabs; GitHub secret GOOGLE_OAUTH_CLIENT_JSON set. Real test on the server: key Test 01 activated with Google, Drive signed in from the same sign-in, folder "TenderAssist Test" made in My Drive and found again.
+- **Code signing:** buy the SSL.com OV + eSigner certificate and add the ESIGNER_* secrets (docs/code-signing.md). Until then a tagged release needs the repository variable ALLOW_UNSIGNED=true.
 - Release as **0.6.0** (a feature release, so Today announces it), then check on a PC: activate (Drive box ticked) → type a folder name → run Tamil Nadu and GeM the same day → two sheets → switch to One sheet for the day.
 
 - Install `release/TenderAssist-Setup-0.5.0.exe` on a PC without Java (checks the Terms page, the OpenWebStart + Java setup, the new design) and run one real Tamil Nadu search (the run panel has only been checked in code). Then delete the "10-2026…" folders at the top of the Drive folder, then in Settings → Upload to Google Drive choose "Upload everything saved so far" and check "Claude TN Tenders- 2026-27" in Drive.

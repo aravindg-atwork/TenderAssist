@@ -516,7 +516,7 @@ function ensureSheet(name, headers) {
 }
 
 function showNewKey() {
-  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutputFromFile('NewKey').setWidth(440).setHeight(560), 'New TenderAssist key');
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutputFromFile('NewKey').setWidth(460).setHeight(680), 'New TenderAssist key');
 }
 
 /** Called from NewKey.html. Returns the key and the message to send. */
