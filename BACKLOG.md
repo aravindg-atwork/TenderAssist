@@ -225,7 +225,7 @@ Decided with the owner (10 Oct): a key belongs to **one Google account** and a n
 
 - **Google sign-in: done and checked 12 Oct.** Client tenderassist-510910 (openid, email, drive.file); GOOGLE_CLIENT_IDS set; key server deployed with the Categories tabs; GitHub secret GOOGLE_OAUTH_CLIENT_JSON set. Real test on the server: key Test 01 activated with Google, Drive signed in from the same sign-in, folder "TenderAssist Test" made in My Drive and found again.
 - **Code signing (in progress, takes time; owner, from 12 Oct):** buy an SSL.com OV code signing certificate with eSigner in the name of AssistingBeacon Private Limited (company documents, a publicly listed phone number, ID of the person ordering; 1-5 working days). Then add ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_CREDENTIAL_ID, ESIGNER_TOTP_SECRET as GitHub secrets (docs/code-signing.md) and remove ALLOW_UNSIGNED. Until then a tagged release needs the repository variable ALLOW_UNSIGNED=true, and Windows shows "Unknown publisher". After the first signed release, submit the installer to Microsoft (microsoft.com/wdsi/filesubmission) to build SmartScreen reputation.
-- Release as **0.6.0** (a feature release, so Today announces it), then check on a PC: activate (Drive box ticked) → type a folder name → run Tamil Nadu and GeM the same day → two sheets → switch to One sheet for the day.
+- **0.6.0 released 12 Oct (unsigned, ALLOW_UNSIGNED=true).** First version with the key check: every existing user sees Activate after the update; the owner sends each office a key from the sheet. Check on a PC: activate (Drive box ticked) → checklist → Tamil Nadu and GeM the same day → two sheets.
 
 - Install `release/TenderAssist-Setup-0.5.0.exe` on a PC without Java (checks the Terms page, the OpenWebStart + Java setup, the new design) and run one real Tamil Nadu search (the run panel has only been checked in code). Then delete the "10-2026…" folders at the top of the Drive folder, then in Settings → Upload to Google Drive choose "Upload everything saved so far" and check "Claude TN Tenders- 2026-27" in Drive.
   - In Settings → What to look for: add the recommended words and remove "AMC".
@@ -233,6 +233,8 @@ Decided with the owner (10 Oct): a key belongs to **one Google account** and a n
 - **Folder layout:** `October-2026 / DD-MM-YYYY / DD-MM-YYYY_SNO_<short title> / Documents + Eligibility.xlsx` + the day report sheet (month names since 8 Oct). Older days stay under `10-2026`; move them by hand if wanted.
 
 ## Later
+
+- **Own domain (owner, when bought):** host the getting-started guide there (now a private Claude page, https://claude.ai/artifact/JzDTzg8PVdjdxHgWFXwpf7; source docs/getting-started.md), with the privacy policy and terms. Use it as the Google sign-in home page, privacy link and authorised domain, and for an installer download page.
 
 - **Intent tenders listed in other categories** (operator's thought, 9 Oct: "the tender speaks louder than the category", but do not search every category). Idea: one extra Tamil Nadu search per day using the search form's Work/Item Title field with the intent words and no category, kept to the title screen. Needs a live check of how that field matches.
 
