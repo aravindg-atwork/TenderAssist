@@ -69,7 +69,16 @@ export interface PortalBounds {
   height: number;
 }
 
-export type SettingsSection = 'folders' | 'relevance';
+export type SettingsSection = 'folders' | 'relevance' | 'signer';
+
+/** OpenWebStart and Java 8 or newer, which the GePNIC portals' DSC signer runs on. */
+export interface SignerStatus {
+  /** Windows only. */
+  supported: boolean;
+  java: boolean;
+  openWebStart: boolean;
+  installing: boolean;
+}
 
 export interface AppNavigationCommand {
   view: 'inbox' | 'tenders' | 'jobs' | 'settings';
@@ -287,6 +296,12 @@ export interface TenderAssistApi {
   saveGoogleDrive(input: { folderName?: string; uploadMode?: 'SAVED' | 'APPROVED' }): Promise<GoogleDriveStatus>;
   /** Opens the Drive folder in the browser. */
   openGoogleDriveFolder(): Promise<void>;
+  /** Whether OpenWebStart and Java (for the DSC signer) are installed. */
+  getSignerStatus(): Promise<SignerStatus>;
+  /** Downloads and installs what the DSC signer is missing; Windows asks for permission. */
+  installSigner(): Promise<SignerStatus & { ok: boolean; message: string }>;
+  /** Each line of the DSC signer install as it happens. */
+  onSignerInstallProgress(callback: (line: string) => void): () => void;
   /** How each day's report sheets are split: one per website (default) or one for the day. */
   getReportSheets(): Promise<'PER_WEBSITE' | 'ONE_PER_DAY'>;
   /** Saves the split; saved days are rewritten the new way in the background. */

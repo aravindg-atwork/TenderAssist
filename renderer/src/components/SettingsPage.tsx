@@ -3,6 +3,7 @@ import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import { GoogleDriveSetting } from './GoogleDriveSetting';
 import { ReportSheetsSetting } from './ReportSheetsSetting';
+import { SignerSetting } from './SignerSetting';
 import { LicenceSetting } from './Licence';
 import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { CategoryHealth, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
@@ -261,17 +262,18 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   };
 
   // One section at a time: the side list switches between them.
-  const [active, setActive] = useState<'look' | 'login' | 'folders' | 'display' | 'speed' | 'updates' | 'licence'>('look');
+  const [active, setActive] = useState<'look' | 'login' | 'signer' | 'folders' | 'display' | 'speed' | 'updates' | 'licence'>('look');
   useEffect(() => {
     if (focusRequest?.section === 'relevance') setActive('look');
     if (focusRequest?.section === 'folders') setActive('folders');
+    if (focusRequest?.section === 'signer') setActive('signer');
   }, [focusRequest]);
 
   if (!settings) return <div className="page"><p className="page__empty">Loading settings…</p></div>;
 
   const canSave = !saving && Boolean(credentialSettings && publishing && pacing);
   const SECTIONS = [
-    ['look', 'What to look for'], ['login', 'Portal login'], ['folders', 'Folders'],
+    ['look', 'What to look for'], ['login', 'Portal login'], ['signer', 'DSC signer'], ['folders', 'Folders'],
     ['display', 'Display'], ['speed', 'Speed'], ['updates', 'Updates'], ['licence', 'Licence'],
   ] as const;
 
@@ -481,6 +483,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             ))}
           </div>
         </section>
+
+        <section id="settings-signer" hidden={active !== 'signer'} className="block"><SignerSetting /></section>
 
         <section id="settings-updates" hidden={active !== 'updates'} className="block">
           <h2>Updates</h2>

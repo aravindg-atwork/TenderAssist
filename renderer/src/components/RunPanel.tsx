@@ -6,7 +6,6 @@ import { PortalSelect } from './PortalSelect';
 import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
 import { plainError, plural } from '../words';
 
-const OPENWEBSTART_DOWNLOAD_URL = 'https://openwebstart.com/download/';
 // How long the DSC signer may take before help is offered.
 const SIGNER_HELP_DELAY_MS = 60_000;
 
@@ -306,8 +305,11 @@ export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, 
               <RefreshIcon /> Get a new DSC signer
             </button>
             {signerSlow && (
-              <button type="button" className="btn btn--quiet" onClick={() => act(() => window.tenderAssist.openHelpLink(OPENWEBSTART_DOWNLOAD_URL))}>
-                Download OpenWebStart
+              <button type="button" className="btn btn--quiet" disabled={busy} onClick={() => act(async () => {
+                const done = await window.tenderAssist.installSigner();
+                if (!done.ok) throw new Error(done.message);
+              })}>
+                {busy ? 'Installing OpenWebStart and Java…' : 'Install OpenWebStart and Java'}
               </button>
             )}
           </div>

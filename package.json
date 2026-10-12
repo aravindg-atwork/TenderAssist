@@ -119,6 +119,12 @@
     },
     "dmg": {
       "title": "TenderAssist ${version}"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/prereqs.ps1",
+        "to": "prereqs.ps1"
+      }
+    ]
   }
 }

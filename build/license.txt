@@ -1,42 +1,73 @@
-TENDERASSIST - TERMS AND CONDITIONS OF USE
+TENDERASSIST - END USER LICENCE AGREEMENT AND TERMS OF USE
+Version 2.0, effective 12 October 2026
 
-Please read these terms carefully. By selecting "I Agree" and installing TenderAssist, you accept them. If you do not agree, select "Cancel" and do not install the software.
+Please read this agreement carefully. It is a legal agreement between you (the person installing TenderAssist, and the organisation you install it for) and AssistingBeacon Private Limited ("we", "us"), the maker of TenderAssist.
 
-1. WHAT TENDERASSIST DOES
-TenderAssist helps you find and shortlist government tenders. It works inside your own signed-in session on the tender websites you choose (such as GePNIC state portals and GeM), searches for the dates you pick, reads tender details, and saves documents and summary sheets to folders you choose.
+Select "I accept the agreement" and then Next to install. If you do not accept, select "I do not accept" or Cancel: nothing will be installed.
 
-2. YOUR ACCOUNT AND YOUR DECISIONS
-2.1 You sign in to each portal yourself. CAPTCHA, your Digital Signature Certificate (DSC) and its PIN always stay with you; TenderAssist never asks for or stores your DSC PIN.
-2.2 TenderAssist suggests which tenders to keep or reject. It can be wrong. You remain responsible for checking every tender, its eligibility, documents, dates and values on the official portal before you act on it or submit a bid.
-2.3 You are responsible for using the portals in line with their own terms of use and the law that applies to you.
+1. DEFINITIONS
+"Software" means TenderAssist, its installer, updates, and documentation.
+"Key" means the licence key (TA-XXXXX-XXXXX-XXXXX-XXXXX) we issue to you.
+"Portal" means any government tender website the Software works with, such as GePNIC state portals and the Government e-Marketplace (GeM).
+"Your Data" means tenders, documents, notes, settings, sheets and files the Software saves for you.
 
-3. NO GUARANTEE
-TenderAssist is provided "as is". We do not guarantee that it will find every relevant tender, that the information it reads or saves is complete or accurate, or that it will work when a portal changes, is slow, or is unavailable. Always rely on the official portal as the source of truth.
+2. LICENCE
+2.1 Subject to this agreement and to a valid Key, we grant you a non-exclusive, non-transferable licence to install and use the Software on the number of computers your Key allows, for your organisation's own tender work.
+2.2 A Key is linked to one Google account and to a set number of computers. Moving the Key to another account or computer needs our help.
+2.3 You may not: sell, rent, sublicense or share the Software or your Key; copy it except for one backup; reverse engineer, decompile or modify it except where the law expressly allows; remove these terms or any notices; or use it to build a competing product.
+2.4 The Software is licensed, not sold. We and our licensors keep all rights, title and intellectual property in it.
 
-4. LIMITATION OF LIABILITY
-To the fullest extent the law allows, the makers of TenderAssist are not liable for any loss arising from its use, including a missed tender, a missed deadline, a rejected bid, lost data, or lost business or profit.
+3. TRIAL, FEES, EXPIRY
+3.1 A Key is valid until the last day shown to you. A trial Key is free and for evaluation.
+3.2 After the last day, the Software warns you for a short grace period and then stops starting new searches until the Key is renewed. Your Data stays on your computer and remains yours.
+3.3 The Software checks your Key with our key server when it starts and every few hours. It keeps working offline for up to 3 days after its last successful check.
+3.4 Fees, if any, are as agreed with us when the Key was issued. Fees paid are not refundable except where the law requires.
+3.5 We may suspend a Key that is shared, misused, or unpaid, after telling you where reasonably possible.
 
-5. YOUR DATA
-5.1 Your portal login ID and password are kept in your computer's secure store (Windows Credential Manager) and are only used to fill the portal's sign-in page.
-5.2 Tenders, notes and settings are kept on this computer. Files are copied to Google Drive only if you sign in to Google and link a folder in Settings; you can sign out at any time.
-5.3 TenderAssist does not sell or share your data.
+4. HOW THE SOFTWARE WORKS AND YOUR RESPONSIBILITIES
+4.1 The Software works inside your own signed-in session on the Portals you choose. You sign in yourself. You always type the CAPTCHA, and your Digital Signature Certificate (DSC) and its PIN stay with you; the Software never asks for, reads or stores your DSC PIN and never tries to get round a CAPTCHA.
+4.2 The Software suggests which tenders to keep or reject using words and categories you set. It can be wrong. You are responsible for checking every tender, its eligibility, documents, dates and values on the official Portal before you rely on it or submit a bid.
+4.3 You are responsible for using each Portal in line with its own terms of use and the law, and for the accuracy of anything you submit.
+4.4 Portals change without notice. When they do, parts of the Software may stop working until we update it.
 
-6. OTHER SOFTWARE INSTALLED WITH TENDERASSIST
-To run the portal's DSC signer, setup checks for OpenWebStart and Java 8 or newer. If either is missing, it downloads and installs:
+5. YOUR DATA AND PRIVACY
+5.1 On your computer: Your Data is saved on your computer in the folders you choose. Your Portal login ID and password are kept in Windows' secure storage, encrypted for your Windows account, and are used only to fill in the Portal's sign-in page.
+5.2 Google sign-in and Google Drive: you activate your Key by signing in with Google. We receive your Google account's email address, to link the Key to it. With your permission on Google's own consent screen, the Software can create files and folders in your Google Drive and upload approved tenders and report sheets there. It can only see and change files it created itself (Google's "drive.file" permission), never the rest of your Drive. The Google sign-in is stored on your computer, encrypted; your files go from your computer straight to your own Drive, and we cannot open them. You can sign out of Drive in Settings, or remove TenderAssist's access at myaccount.google.com/permissions, at any time.
+5.3 Key server: to check your Key, the Software sends us the Key, a one-way code made from your computer's ID (not the ID itself), your computer's name, the app version and, when activating, your Google email. We keep these, with the times of checks, to manage your licence.
+5.4 Shared website categories: when one of your searches reads a Portal's list of tender categories, the Software sends that public list to our key server, so every TenderAssist user learns about renamed or removed categories quickly. Only the Portal's public category names are sent, with your customer name in our records; never your tenders, searches or files.
+5.5 We do not sell Your Data, do not show you advertising, and do not send your tenders, documents or Portal passwords to us.
+5.6 We process the limited personal data above under India's Digital Personal Data Protection Act, 2023, only to provide the licence and features described here. You may ask us to see, correct or delete it (deleting it ends the Key) by writing to the contact below.
+5.7 If you export a support bundle from the Software and send it to us, we use it only to help you. It never contains your passwords or Google sign-in.
+
+6. OTHER SOFTWARE (OPTIONAL)
+Signing in to GePNIC Portals with a DSC needs the Portal's DSC signer, which runs on OpenWebStart and Java 8 or newer. The installer looks for them. If they are missing, it offers to install them, and does so only if you tick that option:
   - OpenWebStart (by Karakun AG), licensed under the GNU General Public License v2 with the Classpath Exception; and
   - Eclipse Temurin 8 (Java, by the Eclipse Foundation), licensed under the GNU General Public License v2 with the Classpath Exception.
-Each is downloaded from its official release page and checked against its published checksum before it is installed. By continuing you also accept their licences. Windows may ask for administrator permission to install them.
+Each is downloaded from its official release page and checked against its published checksum before it is installed. Their own licences apply to them. You can also install them later from TenderAssist's Settings. GeM does not need them.
 
 7. UPDATES
-TenderAssist checks for new versions and may download and install updates automatically.
+The Software checks for new versions, downloads them, and installs them when you restart it or close it. Updates are covered by this agreement unless they come with new terms.
 
-8. USE AND COPYING
-You may install and use TenderAssist for your organisation's own tender work. You may not sell, sublicense, or reverse engineer it, or remove these terms.
+8. NO WARRANTY
+The Software is provided "as is" and "as available". To the fullest extent the law allows, we give no warranty, express or implied, including of merchantability, fitness for a particular purpose, accuracy, or that it will find every relevant tender, work without interruption, or keep working when a Portal changes. Always rely on the official Portal as the source of truth.
 
-9. CHANGES TO THESE TERMS
-Later versions may come with updated terms, shown when you install them.
+9. LIMITATION OF LIABILITY
+9.1 To the fullest extent the law allows, we are not liable for any indirect, incidental, special or consequential loss, including a missed tender or deadline, a rejected or disqualified bid, lost data, or lost business, revenue or profit.
+9.2 Our total liability for any claim relating to the Software is limited to the fees you paid us for it in the 12 months before the claim (or INR 1,000 if you paid nothing).
+9.3 Nothing in this agreement limits liability that cannot be limited by law.
 
-10. GOVERNING LAW
-These terms are governed by the laws of India. Any dispute is subject to the jurisdiction of the courts of Chennai, Tamil Nadu.
+10. TERMINATION
+This agreement lasts until it ends. It ends automatically if you break it, or when your Key ends and is not renewed. You may end it at any time by uninstalling the Software. When it ends you must stop using the Software. Sections 2.4, 5, 8, 9, 11 and 12 continue after it ends.
 
-By selecting "I Agree" you confirm that you have read and accept these terms.
+11. CHANGES
+We may update these terms. New terms apply to versions installed after they are published; we will show them when you install or update to such a version.
+
+12. GOVERNING LAW AND DISPUTES
+This agreement is governed by the laws of India. The courts of Chennai, Tamil Nadu have exclusive jurisdiction over any dispute arising from it.
+
+13. CONTACT AND GRIEVANCES
+AssistingBeacon Private Limited
+Email: aravindg@bowandbaan.com
+Write to us about this agreement, your Key, your personal data, or any complaint. We aim to reply within 7 working days.
+
+By selecting "I accept the agreement" you confirm that you have read, understood and accept this agreement, and that you have authority to accept it for your organisation.

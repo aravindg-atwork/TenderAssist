@@ -469,10 +469,10 @@ export function TodayPage({
             {blocker && (
               <div className="alert alert--stop" role="alert">
                 <AlertIcon /><p><strong>{blocker.label}.</strong> {blocker.message}</p>
-                {blocker.helpUrl && (
-                  <button type="button" className="btn btn--line btn--sm" onClick={() => void window.tenderAssist.openHelpLink(blocker.helpUrl!)}>
-                    {blocker.id === 'jnlp' ? 'Download OpenWebStart' : 'Get help'}
-                  </button>
+                {blocker.id === 'jnlp' ? (
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => onOpenSettings('signer')}>Install the DSC signer</button>
+                ) : blocker.helpUrl && (
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => void window.tenderAssist.openHelpLink(blocker.helpUrl!)}>Get help</button>
                 )}
               </div>
             )}

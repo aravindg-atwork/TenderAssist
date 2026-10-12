@@ -66,6 +66,13 @@ const api: TenderAssistApi = {
   checkGoogleDrive: () => ipcRenderer.invoke('check-google-drive'),
   disconnectGoogleDrive: () => ipcRenderer.invoke('disconnect-google-drive'),
   openGoogleDriveFolder: () => ipcRenderer.invoke('open-google-drive-folder'),
+  getSignerStatus: () => ipcRenderer.invoke('get-signer-status'),
+  installSigner: () => ipcRenderer.invoke('install-signer'),
+  onSignerInstallProgress: (callback: (line: string) => void) => {
+    const listener = (_event: IpcRendererEvent, line: string) => callback(line);
+    ipcRenderer.on('signer-install-progress', listener);
+    return () => ipcRenderer.removeListener('signer-install-progress', listener);
+  },
   getReportSheets: () => ipcRenderer.invoke('get-report-sheets'),
   saveReportSheets: (mode: string) => ipcRenderer.invoke('save-report-sheets', mode),
   uploadEverythingToGoogleDrive: () => ipcRenderer.invoke('upload-everything-to-google-drive'),

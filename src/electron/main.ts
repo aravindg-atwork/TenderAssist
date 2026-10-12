@@ -63,6 +63,7 @@ import type {
   AuthJobUpdate,
   SettingsSection,
   GoogleDriveStatus,
+  SignerStatus,
   LiveSessionTender,
   LiveSessionView,
   DailyReportView,
@@ -1229,6 +1230,68 @@ function startSigner(executable: string, jnlpPath: string): Promise<void> {
     });
   });
 }
+
+/**
+ * The DSC signer's needs (OpenWebStart, Java 8 or newer), checked and
+ * installed with the installer's own script (build/prereqs.ps1, packed next
+ * to the app), so Settings can install them when the operator skipped them
+ * during setup.
+ */
+function prereqsScript(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'prereqs.ps1') : join(app.getAppPath(), 'build', 'prereqs.ps1');
+}
+
+function runPrereqs(args: string[], onLine?: (line: string) => void): Promise<{ code: number; lines: string[] }> {
+  return new Promise((resolveRun, rejectRun) => {
+    const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    const child = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', prereqsScript(), ...args], { windowsHide: true });
+    const lines: string[] = [];
+    let pending = '';
+    const take = (chunk: Buffer) => {
+      pending += chunk.toString('utf8');
+      const parts = pending.split(/\r?\n/);
+      pending = parts.pop() ?? '';
+      for (const line of parts.map((part) => part.trim()).filter(Boolean)) { lines.push(line); onLine?.(line); }
+    };
+    child.stdout.on('data', take);
+    child.stderr.on('data', take);
+    child.once('error', rejectRun);
+    child.once('close', (code) => { if (pending.trim()) { lines.push(pending.trim()); onLine?.(pending.trim()); } resolveRun({ code: code ?? 1, lines }); });
+  });
+}
+
+async function signerStatus(): Promise<SignerStatus> {
+  if (process.platform !== 'win32') return { supported: false, java: false, openWebStart: false, installing: signerInstalling };
+  const { lines } = await runPrereqs(['-DetectOnly']);
+  return { supported: true, java: lines.includes('java=yes'), openWebStart: lines.includes('openwebstart=yes'), installing: signerInstalling };
+}
+
+let signerInstalling = false;
+
+ipcMain.handle('get-signer-status', (): Promise<SignerStatus> => signerStatus());
+
+/** Downloads (checked by SHA-256) and installs what is missing; Windows asks for permission once. Progress lines go to 'signer-install-progress'. */
+ipcMain.handle('install-signer', async (): Promise<SignerStatus & { ok: boolean; message: string }> => {
+  if (process.platform !== 'win32') throw new Error('The DSC signer setup is for Windows.');
+  if (signerInstalling) throw new Error('The DSC signer is already being installed.');
+  signerInstalling = true;
+  try {
+    const { code, lines } = await runPrereqs([], (line) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('signer-install-progress', line);
+    });
+    signerInstalling = false;
+    const status = await signerStatus();
+    const ok = status.java && status.openWebStart;
+    const message = ok
+      ? 'OpenWebStart and Java are installed. The DSC signer can run.'
+      : code === 3 ? 'Windows permission was not given, so nothing was installed. Try again and choose Yes when Windows asks.'
+        : code === 2 ? 'The download did not finish. Check the internet connection and try again.'
+          : `Not everything installed (${lines[lines.length - 1] ?? `code ${code}`}). Try again, or install OpenWebStart from openwebstart.com.`;
+    return { ...status, ok, message };
+  } finally {
+    signerInstalling = false;
+  }
+});
 
 ipcMain.handle('open-help-link', async (_event, url: unknown): Promise<void> => {
   // Only fixed help pages, never a URL chosen by page content.

@@ -23,7 +23,7 @@ export interface JnlpLauncher {
 }
 
 export const MISSING_SIGNER_MESSAGE =
-  'OpenWebStart (Java) is not installed, so the DSC signer cannot open and sign-in cannot finish. Install OpenWebStart, then start the job again.';
+  'OpenWebStart (Java) is not installed, so the DSC signer cannot open and sign-in cannot finish. Install it from Settings > DSC signer, then start the search again.';
 
 /** The default value from `reg query <key> /ve` output, or null. */
 export function parseRegDefaultValue(output: string): string | null {

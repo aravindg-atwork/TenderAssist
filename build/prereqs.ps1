@@ -8,10 +8,13 @@
 # missing. Nothing here stops TenderAssist from installing: if a step fails,
 # the app still offers the OpenWebStart download before a search.
 #
+#   -DetectOnly  report what is there (java=yes|no, openwebstart=yes|no); exit 0 when both
+#               are, else 11 (Java missing), 12 (OpenWebStart missing) or 13 (both)
 #   -DryRun   detect and download only; install nothing
 #   -Install  internal: the elevated half that runs the downloaded installers
 
 param(
+  [switch]$DetectOnly,
   [switch]$DryRun,
   [switch]$Install,
   [string]$JavaMsi = '',
@@ -188,6 +191,18 @@ function Test-Admin {
 # ---------- Main ----------
 
 if ($Install) { exit (Install-Downloaded) }
+
+if ($DetectOnly) {
+  # One line each, read by the installer's DSC signer page and by TenderAssist's Settings.
+  $javaNow = Test-Java8OrNewer
+  $owsNow = Test-OpenWebStart
+  # For testing the installer page on a PC that has both: TENDERASSIST_TEST_SIGNER_MISSING=1.
+  if ($env:TENDERASSIST_TEST_SIGNER_MISSING -eq '1') { $javaNow = $null; $owsNow = $null }
+  [Console]::Out.WriteLine("java=$(if ($javaNow) { 'yes' } else { 'no' })")
+  [Console]::Out.WriteLine("openwebstart=$(if ($owsNow) { 'yes' } else { 'no' })")
+  if ($javaNow -and $owsNow) { exit 0 }
+  exit (10 + $(if ($javaNow) { 0 } else { 1 }) + $(if ($owsNow) { 0 } else { 2 }))
+}
 
 $folder = Join-Path $env:TEMP 'TenderAssist-setup'
 New-Item -ItemType Directory -Force -Path $folder | Out-Null
