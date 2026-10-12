@@ -64,13 +64,15 @@ import type {
   SettingsSection,
   GoogleDriveStatus,
   SignerStatus,
+  SetupChecklist,
+  SetupStep,
   LiveSessionTender,
   LiveSessionView,
   DailyReportView,
   ReportTenderItem,
 } from './ipcTypes.js';
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
-import { categoryHealth, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
+import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
 import { typeAllAtOnce, typeLikeAPerson, type PortalCredentials } from '../browser/portalLoginController.js';
 import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type OcrEngine } from '../documents/documentText.js';
 import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windowsOcr.js';
@@ -81,6 +83,7 @@ import { resolveOutputStructure } from '../publishing/outputStructure.js';
 import { driveFolderLink, driveFolderNameParts, driveFolderPath, GoogleDriveClient, GoogleDriveError, parseGoogleClientFile, signInWithGoogle, type DriveCredentials, type GoogleSignIn } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
 import { ReportSheetSettingsRepository } from '../persistence/repositories/reportSheetSettingsRepository.js';
+import { SetupChecklistRepository } from '../persistence/repositories/setupChecklistRepository.js';
 import type { JobOutputPlan } from '../persistence/repositories/jobOutputRepository.js';
 import { detailTextFor, downloadCorrigendumDocuments, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { corrigendaSummary, isWatched, tenderPageFacts } from '../review/watchedTenders.js';
@@ -167,6 +170,7 @@ const jobOutputs = new JobOutputRepository(db);
 const opportunities = new OpportunityRepository(db);
 const googleDriveSettings = new GoogleDriveSettingsRepository(db);
 const reportSheetSettings = new ReportSheetSettingsRepository(db);
+const setupState = new SetupChecklistRepository(db);
 const dailyCounts = new DailyCountRepository(db);
 const opportunitySync = { tenders, classifications, opportunities, workflow };
 
@@ -854,6 +858,11 @@ async function gemCategoryCodes(portal: PortalDefinition): Promise<Map<string, s
   const { services, products } = await gemCategoryLists(portal);
   const codes = new Map<string, string>();
   for (const [name, code] of Object.entries({ ...products.codes, ...services.codes })) codes.set(name.toLocaleLowerCase(), code);
+  // Also by the category alone, as GeM's example after " - " changes (inChosenCategory looks it up that way).
+  for (const [name, code] of Object.entries({ ...products.codes, ...services.codes })) {
+    const key = `category:${gemCategoryKey(name)}`;
+    if (!codes.has(key)) codes.set(key, code);
+  }
   return codes;
 }
 
@@ -882,7 +891,7 @@ ipcMain.handle('get-category-health', async (_event, portalId: string): Promise<
   // Before Start: take in category changes other offices saw today (never waits more than 5 seconds).
   await Promise.race([pullSharedCategories(10 * 60 * 1000), new Promise((resolveWait) => setTimeout(resolveWait, 5_000))]);
   const portal = getPortalDefinition(portalId);
-  return categoryHealth(await categoryListForHealth(portal), categoriesForPortal(runConfigurations.getDefaults(), portal));
+  return categoryHealth(await categoryListForHealth(portal), categoriesForPortal(runConfigurations.getDefaults(), portal), new Date(), isGemPortal(portal) ? gemCategoryKey : undefined);
 });
 
 ipcMain.handle('suggest-category-replacements', async (_event, portalId: string, missingName: string): Promise<ReplacementAdvice> => {
@@ -1268,7 +1277,66 @@ async function signerStatus(): Promise<SignerStatus> {
 
 let signerInstalling = false;
 
-ipcMain.handle('get-signer-status', (): Promise<SignerStatus> => signerStatus());
+ipcMain.handle('get-signer-status', (): Promise<SignerStatus> => { signerChecked = null; return signerStatus(); });
+
+// The DSC signer check runs PowerShell (about a second); the checklist reuses it for a minute.
+let signerChecked: { at: number; status: SignerStatus } | null = null;
+async function signerStatusCached(): Promise<SignerStatus> {
+  if (!signerChecked || Date.now() - signerChecked.at > 60_000) signerChecked = { at: Date.now(), status: await signerStatus() };
+  return signerChecked.status;
+}
+
+/**
+ * The first-time setup checklist. Most steps are read from the app itself
+ * (activation, login, DSC signer, folders, Drive); the word lists are ticked
+ * by the operator after checking them. A PC already in use (it has runs)
+ * starts complete, so existing offices never see it.
+ */
+async function setupChecklist(): Promise<SetupChecklist> {
+  let state = setupState.get();
+  if (!state) state = setupState.save({ ...SetupChecklistRepository.empty(), completedAt: jobs.listAll().length > 0 ? new Date().toISOString() : null });
+  const defaults = runConfigurations.getDefaults();
+  const portal = state.portalId ? getPortalDefinition(state.portalId) : null;
+  const needsSignIn = portal ? !isGemPortal(portal) : true;
+  const licenceView = await licence.view();
+  const login = portal && needsSignIn ? portalCredentials.get(portal.id) : null;
+  const signer = needsSignIn && process.platform === 'win32' ? await signerStatusCached() : null;
+  const categories = portal ? categoriesForPortal(defaults, portal) : defaults.productCategories;
+  const outputRoot = publishingSettings.get(portal?.id ?? DEFAULT_PORTAL_ID).localOutputRoot;
+  const drive = googleDriveSettings.get();
+  const steps: SetupStep[] = [
+    { id: 'activate', automatic: true, done: !licenceView.enforced || licenceView.usable,
+      detail: licenceView.account ? `Activated for ${licenceView.account}` : licenceView.enforced ? 'Not activated yet' : 'Activated' },
+    { id: 'website', automatic: false, done: Boolean(portal), detail: portal ? portal.name : 'Not chosen yet' },
+    needsSignIn
+      ? { id: 'login', automatic: true, done: Boolean(login?.loginId), detail: login?.loginId ? `Login ID ${login.loginId}${login.encryptedPasswordBase64 ? ', password remembered' : ''}` : 'Not saved yet' }
+      : { id: 'login', automatic: true, done: true, notNeeded: true, detail: `${portal?.name ?? 'This website'} has no sign-in` },
+    !needsSignIn
+      ? { id: 'signer', automatic: true, done: true, notNeeded: true, detail: `${portal?.name ?? 'This website'} has no DSC sign-in` }
+      : { id: 'signer', automatic: true, done: process.platform !== 'win32' || Boolean(signer?.java && signer.openWebStart),
+        detail: !signer ? 'Windows only' : signer.java && signer.openWebStart ? 'OpenWebStart and Java installed' : `Missing: ${[!signer.java && 'Java', !signer.openWebStart && 'OpenWebStart'].filter(Boolean).join(' and ')}` },
+    { id: 'categories', automatic: false, done: Boolean(state.confirmed.categories) && categories.length > 0, detail: `${categories.length} ${categories.length === 1 ? 'category' : 'categories'} chosen` },
+    { id: 'intent', automatic: false, done: Boolean(state.confirmed.intent) && defaults.keywords.length > 0, detail: `${defaults.keywords.length} intent words` },
+    { id: 'excluded', automatic: false, done: Boolean(state.confirmed.excluded), detail: `${defaults.excludedKeywords.length} excluded words` },
+    { id: 'folder', automatic: true, done: Boolean(outputRoot), detail: outputRoot || 'Not set' },
+    { id: 'drive', automatic: true, done: Boolean(drive.folderName) && driveSignInUsable(),
+      detail: drive.folderName && driveSignInUsable() ? `My Drive / ${drive.folderName}` : !driveSignInUsable() ? 'Not signed in to Google' : 'No folder name yet' },
+  ];
+  const allDone = steps.every((step) => step.done);
+  if (allDone && !state.completedAt) state = setupState.save({ ...state, completedAt: new Date().toISOString() });
+  return { steps, portalId: state.portalId, complete: Boolean(state.completedAt) };
+}
+
+ipcMain.handle('get-setup-checklist', (): Promise<SetupChecklist> => setupChecklist());
+
+ipcMain.handle('save-setup-checklist', (_event, change: unknown): Promise<SetupChecklist> => {
+  const value = (change ?? {}) as { portalId?: unknown; confirm?: unknown };
+  const state = setupState.get() ?? SetupChecklistRepository.empty();
+  if (typeof value.portalId === 'string') state.portalId = getPortalDefinition(value.portalId).id;
+  if (value.confirm === 'categories' || value.confirm === 'intent' || value.confirm === 'excluded') state.confirmed = { ...state.confirmed, [value.confirm]: new Date().toISOString() };
+  setupState.save(state);
+  return setupChecklist();
+});
 
 /** Downloads (checked by SHA-256) and installs what is missing; Windows asks for permission once. Progress lines go to 'signer-install-progress'. */
 ipcMain.handle('install-signer', async (): Promise<SignerStatus & { ok: boolean; message: string }> => {

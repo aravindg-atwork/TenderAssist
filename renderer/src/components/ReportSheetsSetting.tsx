@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { plainError } from '../words';
+import { InfoTip } from './InfoTip';
 
 type Mode = 'PER_WEBSITE' | 'ONE_PER_DAY';
 
@@ -21,12 +22,12 @@ export function ReportSheetsSetting() {
 
   return (
     <>
-      <h3 className="block__sub">Report sheets</h3>
+      <h3 className="block__sub">Report sheets<InfoTip label="report sheets">An Excel sheet in each day folder listing the tenders kept that day, in your office’s columns (TDR number, department, value, dates, EMD, links to the tender and its documents). It is rewritten when you approve or reject a tender later.</InfoTip></h3>
       <p className="block__lede">Each day folder has a report sheet of the tenders kept that day. Several searches on one day, on one website, always share its sheet.</p>
       <div className="choices" role="radiogroup" aria-label="Report sheets">
         {([
-          ['PER_WEBSITE', 'A sheet for each website', 'Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx, Approved-Tenders-12-10-2026 - GeM.xlsx. Recommended.'],
-          ['ONE_PER_DAY', 'One sheet for the day', 'Every website’s tenders in Approved-Tenders-12-10-2026.xlsx, with a Website column.'],
+          ['PER_WEBSITE', 'A sheet for each website', 'One per website, such as “… - Tamil Nadu.xlsx” and “… - GeM.xlsx”. Recommended.'],
+          ['ONE_PER_DAY', 'One sheet for the day', 'Every website’s tenders in one sheet, with a Website column.'],
         ] as const).map(([value, label, hint]) => (
           <label key={value} className={mode === value ? 'choice is-chosen' : 'choice'}>
             <input type="radio" name="report-sheets" checked={mode === value} disabled={!mode} onChange={() => void choose(value)} />

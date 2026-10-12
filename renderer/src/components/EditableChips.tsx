@@ -1,4 +1,5 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { InfoTip } from './InfoTip';
 import { ChipRemoveIcon, PlusIcon } from './icons';
 
 export interface EditableChipsProps {
@@ -8,10 +9,14 @@ export interface EditableChipsProps {
   values: string[];
   onChange: (values: string[]) => void;
   placeholder: string;
+  /** What the list is for, behind an (i) beside its heading. */
+  info?: ReactNode;
 }
 
-export function EditableChips({ id, label, helper, values, onChange, placeholder }: EditableChipsProps) {
+export function EditableChips({ id, label, helper, values, onChange, placeholder, info }: EditableChipsProps) {
   const [draft, setDraft] = useState('');
+  // Remove all asks twice, so one stray click never empties a list.
+  const [confirmClear, setConfirmClear] = useState(false);
 
   // Several words can be added at once, separated by commas or new lines (pasted from a list).
   const addDraft = () => {
@@ -33,7 +38,15 @@ export function EditableChips({ id, label, helper, values, onChange, placeholder
 
   return (
     <fieldset className="settings-fieldset">
-      <legend>{label} <span className="count">{values.length}</span></legend>
+      <legend>{label} <span className="count">{values.length}</span>{info && <InfoTip label={label.toLowerCase()}>{info}</InfoTip>}
+        {values.length > 1 && (
+          <button type="button" className={confirmClear ? 'btn btn--reject btn--small chips__clear' : 'btn btn--quiet btn--small chips__clear'}
+            onClick={() => { if (confirmClear) { onChange([]); setConfirmClear(false); } else setConfirmClear(true); }}
+            onBlur={() => setConfirmClear(false)}>
+            {confirmClear ? `Select again to remove all ${values.length}` : 'Remove all'}
+          </button>
+        )}
+      </legend>
       <p className="field-helper" id={`${id}-helper`}>{helper}</p>
       <div className="chip-list" aria-live="polite">
         {values.length === 0 && <span className="chip-list__empty">None yet.</span>}

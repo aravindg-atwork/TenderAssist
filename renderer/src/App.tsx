@@ -40,6 +40,8 @@ export function App() {
   const [report, setReport] = useState<{ jobIds: string[]; message: string | null } | null>(null);
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
   const [waiting, setWaiting] = useState(0);
+  // The first-time setup step still open (from the checklist on Today); null once set up.
+  const [setupNext, setSetupNext] = useState<{ title: string } | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<{ section: SettingsSection; requestId: number } | null>(null);
   const [portalId, setPortalIdState] = useState(() => {
     try { return localStorage.getItem('tenderassist.portal') || DEFAULT_PORTAL_ID; } catch { return DEFAULT_PORTAL_ID; }
@@ -137,6 +139,7 @@ export function App() {
         <header className="topbar">
           <span className="topbar__next">
             {showWorkspace ? <>Searching <strong>{portal.name}</strong></>
+              : setupNext ? <>Setting up: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>{setupNext.title.charAt(0).toLowerCase() + setupNext.title.slice(1)}</button></>
               : settings && !settings.configured ? <>Next: <button type="button" className="topbar__link" onClick={() => openSettings('relevance')}>tell TenderAssist what to look for</button></>
                 : waiting > 0 ? <>Next: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>decide {waiting} {waiting === 1 ? 'tender' : 'tenders'}</button></>
                   : <>Next: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>find today’s tenders</button></>}
@@ -183,6 +186,7 @@ export function App() {
             finishedRun={finishedRun}
             onDismissFinished={() => setFinishedRun(null)}
             onSettingsSaved={setSettings}
+            onSetupNext={setSetupNext}
           />
         ) : view === 'tenders' ? (
           <TendersPage onInboxCount={setWaiting} />

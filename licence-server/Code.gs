@@ -125,6 +125,28 @@ function decide(row, request, pcs, now) {
   return result;
 }
 
+/**
+ * Activation with Google alone (no key typed, for a customer's next PC): the
+ * key already linked to that Google account. candidates: [{ row, pcIds }].
+ * Prefers a key this PC is already on, then one with a PC free, then the one
+ * ending last; only working keys count. Returns the row, or null.
+ */
+function pickKeyForAccount(candidates, account, pcId, now) {
+  var working = candidates.filter(function (c) {
+    var window = keyWindow(c.row);
+    var status = c.row[COL['Status']];
+    return sameAccount(c.row[COL['Google account']], account) && window && status !== 'Suspended' && status !== 'Revoked' && window.graceUntil.getTime() > now.getTime();
+  });
+  if (!working.length) return null;
+  var allowed = function (c) { return Math.max(1, Math.round(Number(c.row[COL['PCs allowed']]) || 1)); };
+  var known = working.filter(function (c) { return c.pcIds.indexOf(pcId) >= 0; });
+  if (known.length) return known[0].row;
+  var free = working.filter(function (c) { return c.pcIds.length < allowed(c); });
+  var pool = free.length ? free : working;
+  pool.sort(function (a, b) { return keyWindow(b.row).endsAt.getTime() - keyWindow(a.row).endsAt.getTime(); });
+  return pool[0].row;
+}
+
 /** Category names compared as the app compares them: case and spacing do not matter. */
 function categoryKey(name) {
   return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -230,9 +252,20 @@ function doPost(e) {
   if ((body.action !== 'activate' && body.action !== 'check') || !pcId) {
     return json({ ok: false, code: 'bad-request', message: 'The request was incomplete.' });
   }
-  if (!key) return json({ ok: false, code: 'unknown-key', message: 'This key is not recognised. Check it, or ask for a new one.' });
   var account = '';
   if (body.action === 'activate') account = verifiedGoogleEmail(String(body.idToken || ''));
+  // Activating with Google alone (no key typed): the key linked to that account.
+  if (!key && body.action === 'activate' && !String(body.key || '').trim()) {
+    if (!account) return json({ ok: false, code: 'sign-in-failed', message: 'Google sign-in could not be confirmed. Try again.' });
+    var mine = keyRowsForAccount(account);
+    var picked = pickKeyForAccount(mine.map(function (r) { return { row: r, pcIds: pcRows(normaliseKey(r[COL['Key']])).map(function (pc) { return pc.row[PC_COL['PC ID']]; }) }; }), account, pcId, new Date());
+    if (!picked) {
+      log('', account, String(body.pcName || '').slice(0, 80), 'activate', 'no-key-for-account');
+      return json({ ok: false, code: 'no-key-for-account', message: 'No working TenderAssist key is linked to ' + account + ' yet. Paste the key you were given, or sign in with the Google account that first activated it.', contact: contactLine() });
+    }
+    key = normaliseKey(picked[COL['Key']]);
+  }
+  if (!key) return json({ ok: false, code: 'unknown-key', message: 'This key is not recognised. Check it, or ask for a new one.' });
 
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -399,6 +432,11 @@ function findKeyRow(key) {
     if (normaliseKey(rows[i][COL['Key']]) === key) return { sheet: sheet, index: i, row: rows[i] };
   }
   return null;
+}
+
+/** Every key row linked to this Google account. */
+function keyRowsForAccount(account) {
+  return dataRows(sheetNamed(KEYS), KEY_HEADERS.length).filter(function (row) { return row[COL['Key']] && sameAccount(row[COL['Google account']], account); });
 }
 
 function pcRows(key) {

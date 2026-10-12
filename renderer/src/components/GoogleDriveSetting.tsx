@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { GoogleDriveStatus } from '../../../src/electron/ipcTypes';
 import { absoluteDateTime } from '../format';
 import { plainError } from '../words';
+import { InfoTip } from './InfoTip';
 
 /** Where today's files land on Drive, to show the layout under the folder name. */
 function todayOnDrive(): { month: string; day: string } {
@@ -56,7 +57,7 @@ export function GoogleDriveSetting() {
 
   return (
     <fieldset className="settings-fieldset">
-      <legend>Upload to Google Drive</legend>
+      <legend>Upload to Google Drive<InfoTip label="the Google Drive upload">TenderAssist uses the Google account that activated your key. It makes the folder you name in that account’s My Drive and can only see the files it made itself, never the rest of your Drive. Share the folder in Drive with colleagues as you like.</InfoTip></legend>
       <p className="field-helper">
         Type a folder name. TenderAssist makes that folder in your Google Drive and, after every search, uploads each approved tender’s folder
         (documents and eligibility sheet) and the day’s report sheet into it, a folder for each month and inside it a folder for each day.

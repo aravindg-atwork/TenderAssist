@@ -22,6 +22,7 @@ const server = (() => {
       ok: boolean; code: string; message: string; bindAccount?: string; addPc?: boolean; licence?: Record<string, unknown>;
     };
     pemFrom(text: string): string;
+    pickKeyForAccount(candidates: Array<{ row: unknown[]; pcIds: string[] }>, account: string, pcId: string, now: Date): unknown[] | null;
     KEY_HEADERS: string[];
   };
 })();
@@ -102,5 +103,24 @@ describe('licence build settings', () => {
   it('gives the installer the same key server as the app', () => {
     const installer = /!define LICENCE_SERVER_URL "([^"]*)"/.exec(readFileSync(join(root, 'build', 'installer.nsh'), 'utf8'))?.[1];
     expect(installer).toBe(LICENCE_SERVER_URL);
+  });
+});
+
+describe('activating a further PC with Google alone', () => {
+  const mine = 'ops@acme.in';
+  it('finds the working key linked to the account, preferring one with a PC free', () => {
+    const full = row({ Key: 'TA-AAAAA-AAAAA-AAAAA-AAAAA', 'Google account': mine, 'PCs allowed': 1 });
+    const room = row({ Key: 'TA-BBBBB-BBBBB-BBBBB-BBBBB', 'Google account': mine, 'PCs allowed': 3 });
+    const picked = server.pickKeyForAccount([{ row: full, pcIds: ['pc-9'] }, { row: room, pcIds: ['pc-9'] }], 'OPS@acme.in', 'pc-2', NOW);
+    expect(picked?.[server.KEY_HEADERS.indexOf('Key')]).toBe('TA-BBBBB-BBBBB-BBBBB-BBBBB');
+  });
+
+  it('prefers a key this PC is already on, and ignores other accounts and ended or suspended keys', () => {
+    const onIt = row({ Key: 'TA-CCCCC-CCCCC-CCCCC-CCCCC', 'Google account': mine, 'PCs allowed': 1 });
+    const other = row({ Key: 'TA-DDDDD-DDDDD-DDDDD-DDDDD', 'Google account': 'someone@else.in', 'PCs allowed': 5 });
+    const ended = row({ Key: 'TA-EEEEE-EEEEE-EEEEE-EEEEE', 'Google account': mine, 'Expires on': new server.SheetDate(2026, 8, 1) });
+    const stopped = row({ Key: 'TA-FFFFF-FFFFF-FFFFF-FFFFF', 'Google account': mine, Status: 'Suspended' });
+    expect(server.pickKeyForAccount([{ row: onIt, pcIds: ['pc-2'] }, { row: other, pcIds: [] }], mine, 'pc-2', NOW)?.[0]).toBe('TA-CCCCC-CCCCC-CCCCC-CCCCC');
+    expect(server.pickKeyForAccount([{ row: other, pcIds: [] }, { row: ended, pcIds: [] }, { row: stopped, pcIds: [] }], mine, 'pc-2', NOW)).toBeNull();
   });
 });

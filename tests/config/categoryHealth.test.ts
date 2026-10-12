@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { categoryHealth, mergeCategoryHistory, suggestReplacements, type CategoryHealthInput } from '../../src/config/categoryHealth.js';
+import { categoryHealth, gemCategoryKey, mergeCategoryHistory, suggestReplacements, type CategoryHealthInput } from '../../src/config/categoryHealth.js';
 
 const DAY1 = '2026-10-08T04:00:00.000Z';
 const DAY2 = '2026-10-09T03:48:00.000Z';
@@ -62,5 +62,14 @@ describe('suggestReplacements', () => {
   it('never suggests a category already chosen', () => {
     const advice = suggestReplacements(twoReads(), 'Information Technology', ['Info. Tech. Services'], []);
     expect(advice.suggestions.map((item) => item.name)).not.toContain('Info. Tech. Services');
+  });
+});
+
+describe('GeM categories whose example changed', () => {
+  it('counts a GeM category as on the list when only its example after " - " differs', () => {
+    const list = { categories: ['Software Support Services 2.0 - Microsoft; Office Suite Software; Maintenance Services'], readAt: '2026-10-12T00:00:00.000Z' };
+    const chosen = ['Software Support Services 2.0 - Microsoft; Operating System Software; Maintenance Services', 'Software Support Service'];
+    expect(categoryHealth(list, chosen, new Date('2026-10-12'), gemCategoryKey).missing.map((m) => m.name)).toEqual(['Software Support Service']);
+    expect(categoryHealth(list, chosen, new Date('2026-10-12')).missing).toHaveLength(2);
   });
 });

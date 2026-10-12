@@ -16,6 +16,13 @@ const DAY_MS = 86_400_000;
 
 export const categoryKey = (name: string) => name.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
 
+/**
+ * GeM shows each category with an example after " - " ("Software Support
+ * Services 2.0 - Microsoft; Office Suite…"), and the example changes as GeM
+ * rotates it. The category is the part before " - ".
+ */
+export const gemCategoryKey = (name: string) => categoryKey(name.split(' - ')[0]);
+
 /** The history after one more read of the list: everything on it was seen at `readAt`. */
 export function mergeCategoryHistory(previous: CategoryHistory | undefined, categories: readonly string[], readAt: string): CategoryHistory {
   const next: CategoryHistory = { ...(previous ?? {}) };
@@ -53,11 +60,17 @@ export interface CategoryHealth {
   newOnWebsite: string[];
 }
 
-export function categoryHealth(list: CategoryHealthInput, chosen: readonly string[], now = new Date()): CategoryHealth {
+export function categoryHealth(
+  list: CategoryHealthInput,
+  chosen: readonly string[],
+  now = new Date(),
+  /** How two names count as the same category; GeM compares the name before its changing " - " example (`gemCategoryKey`). */
+  keyOf: (name: string) => string = categoryKey,
+): CategoryHealth {
   if (list.categories.length === 0 || !list.readAt) return { readAt: list.readAt, missing: [], newOnWebsite: [] };
-  const onList = new Set(list.categories.map(categoryKey));
-  const chosenKeys = new Set(chosen.map(categoryKey));
-  const missing = chosen.filter((name) => !onList.has(categoryKey(name))).map((name): MissingCategory => {
+  const onList = new Set(list.categories.map(keyOf));
+  const chosenKeys = new Set(chosen.map(keyOf));
+  const missing = chosen.filter((name) => !onList.has(keyOf(name))).map((name): MissingCategory => {
     const lastSeen = list.history?.[categoryKey(name)]?.lastSeen ?? null;
     // Never seen: count from when TenderAssist started keeping the history.
     const goneSince = Date.parse(lastSeen ?? list.historySince ?? list.readAt!);
@@ -67,7 +80,7 @@ export function categoryHealth(list: CategoryHealthInput, chosen: readonly strin
   const newOnWebsite = since
     ? list.categories.filter((name) => {
       const firstSeen = list.history?.[categoryKey(name)]?.firstSeen;
-      return firstSeen !== undefined && firstSeen > since && !chosenKeys.has(categoryKey(name));
+      return firstSeen !== undefined && firstSeen > since && !chosenKeys.has(keyOf(name));
     })
     : [];
   return { readAt: list.readAt, missing, newOnWebsite };

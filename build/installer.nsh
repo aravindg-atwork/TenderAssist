@@ -89,7 +89,7 @@ Function LicenceKeyPage
   ; Already activated on this PC (a reinstall or a manual upgrade): no need to ask.
   IfFileExists "$APPDATA\TenderAssist\licence.json" 0 +2
     Abort
-  !insertmacro MUI_HEADER_TEXT "Activation key" "Paste the TenderAssist key you were given."
+  !insertmacro MUI_HEADER_TEXT "Activation key" "Paste the TenderAssist key you were given (or leave it empty on a further computer)."
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
@@ -99,7 +99,7 @@ Function LicenceKeyPage
   Pop $0
   ${NSD_CreateText} 0 30u 100% 14u "$LicenceKey"
   Pop $LicenceKeyField
-  ${NSD_CreateLabel} 0 54u 100% 36u "When TenderAssist first opens, it asks you to sign in with Google. The key is linked to that Google account."
+  ${NSD_CreateLabel} 0 54u 100% 50u "When TenderAssist first opens, it asks you to sign in with Google. The key is linked to that Google account.$\r$\n$\r$\nAlready use TenderAssist on another computer? Leave the key empty: signing in with the same Google account is enough."
   Pop $0
   ${NSD_SetFocus} $LicenceKeyField
   nsDialogs::Show
@@ -107,9 +107,9 @@ FunctionEnd
 
 Function LicenceKeyPageLeave
   ${NSD_GetText} $LicenceKeyField $LicenceKey
+  ; Empty: a further PC of a customer; the app activates it with Google alone.
   ${If} $LicenceKey == ""
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Paste your activation key to continue."
-    Abort
+    Return
   ${EndIf}
   InitPluginsDir
   File "/oname=$PLUGINSDIR\check-key.ps1" "${BUILD_RESOURCES_DIR}\check-key.ps1"

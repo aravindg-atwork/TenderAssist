@@ -108,17 +108,21 @@ export class LicenceManager {
     };
   }
 
-  /** Activates this PC with a key: Google sign-in, then the key server. */
+  /**
+   * Activates this PC: Google sign-in, then the key server. With no key typed
+   * (a customer's next PC), the server uses the key linked to that Google account.
+   */
   async activate(keyText: string): Promise<LicenceView> {
-    const key = normaliseLicenceKey(keyText);
-    if (!key) throw new Error('That is not a TenderAssist key. It looks like TA-XXXXX-XXXXX-XXXXX-XXXXX.');
+    const typed = keyText.trim();
+    const key = typed ? normaliseLicenceKey(typed) : '';
+    if (key === null) throw new Error('That is not a TenderAssist key. It looks like TA-XXXXX-XXXXX-XXXXX-XXXXX.');
     const { pcId, pcName } = await this.identity();
     const idToken = await this.deps.signIn();
     const previous = this.deps.store.read();
     try {
       const answer = await callLicenceServer(this.deps.serverUrl, this.deps.publicKey,
         { action: 'activate', key, pcId, pcName, version: this.deps.version, idToken }, this.deps.fetch);
-      this.deps.store.write({ key, signed: answer.signed, contact: answer.contact, latestSeen: answer.licence.checkedAt });
+      this.deps.store.write({ key: answer.licence.key, signed: answer.signed, contact: answer.contact, latestSeen: answer.licence.checkedAt });
       forgetInstallerKey(this.deps.appDataDir);
       this.lastProblem = null;
     } catch (error) {

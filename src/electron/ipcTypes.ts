@@ -69,9 +69,27 @@ export interface PortalBounds {
   height: number;
 }
 
-export type SettingsSection = 'folders' | 'relevance' | 'signer';
+export type SettingsSection = 'folders' | 'relevance' | 'signer' | 'login' | 'categories' | 'intent' | 'excluded';
 
 /** OpenWebStart and Java 8 or newer, which the GePNIC portals' DSC signer runs on. */
+/** One step of the first-time setup checklist. */
+export interface SetupStep {
+  id: 'activate' | 'website' | 'login' | 'signer' | 'categories' | 'intent' | 'excluded' | 'folder' | 'drive';
+  done: boolean;
+  /** Ticked by TenderAssist itself (true) or by the operator after checking (false). */
+  automatic: boolean;
+  /** Not needed for the chosen website (GeM has no sign-in, so no login or DSC signer). */
+  notNeeded?: boolean;
+  /** A short line of what is set now: the website, the login ID, the folder… */
+  detail: string;
+}
+
+export interface SetupChecklist {
+  steps: SetupStep[];
+  portalId: string | null;
+  complete: boolean;
+}
+
 export interface SignerStatus {
   /** Windows only. */
   supported: boolean;
@@ -298,6 +316,10 @@ export interface TenderAssistApi {
   openGoogleDriveFolder(): Promise<void>;
   /** Whether OpenWebStart and Java (for the DSC signer) are installed. */
   getSignerStatus(): Promise<SignerStatus>;
+  /** The first-time setup checklist, worked out from the app's state. */
+  getSetupChecklist(): Promise<SetupChecklist>;
+  /** Saves a checklist choice: the website (step 2) or a word list the operator has checked. */
+  saveSetupChecklist(change: { portalId?: string; confirm?: 'categories' | 'intent' | 'excluded' }): Promise<SetupChecklist>;
   /** Downloads and installs what the DSC signer is missing; Windows asks for permission. */
   installSigner(): Promise<SignerStatus & { ok: boolean; message: string }>;
   /** Each line of the DSC signer install as it happens. */

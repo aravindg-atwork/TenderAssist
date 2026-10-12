@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { InfoTip } from './InfoTip';
 import { CheckIcon, ChipRemoveIcon, PlusIcon } from './icons';
 import { absoluteDateTime } from '../format';
 import type { CategoryHealth, PortalCategoryList } from '../../../src/electron/ipcTypes';
@@ -21,6 +22,10 @@ export interface CategoryPickerProps {
   onReplace?: (names: string[]) => void;
   /** The operator has seen the new categories. */
   onNewLooked?: () => void;
+  /** What categories are for, behind an (i) beside the heading. */
+  info?: ReactNode;
+  /** How a chosen name is matched to the website's list; GeM ignores its changing example after " - ". */
+  keyOf?: (name: string) => string;
 }
 
 // GeM with products has thousands of categories; draw only the first ones and let typing narrow them.
@@ -39,7 +44,7 @@ function splitCategory(value: string): { name: string; detail: string } {
 const sameName = (a: string, b: string) => a.toLocaleLowerCase() === b.toLocaleLowerCase();
 
 /** Categories to search, picked from the website's own Product Category list. */
-export function CategoryPicker({ portalName, websiteList, values, onChange, startingList = DEFAULT_RUN_DEFAULTS.productCategories, unknownListHint, health, onReplace, onNewLooked }: CategoryPickerProps) {
+export function CategoryPicker({ portalName, websiteList, values, onChange, startingList = DEFAULT_RUN_DEFAULTS.productCategories, unknownListHint, health, onReplace, onNewLooked, info, keyOf }: CategoryPickerProps) {
   const [filter, setFilter] = useState('');
   const known = (websiteList?.categories.length ?? 0) > 0;
   const options = useMemo(() => {
@@ -70,7 +75,7 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
 
   return (
     <fieldset className="settings-fieldset">
-      <legend>Categories to search <span className="count">{values.length}</span></legend>
+      <legend>Categories to search <span className="count">{values.length}</span>{info && <InfoTip label="categories to search">{info}</InfoTip>}</legend>
       <p className="field-helper" id="category-picker-helper">
         {known
           ? `${portalName} only. ${websiteList!.categories.length} categories, read ${absoluteDateTime(websiteList!.readAt!)}.`
@@ -79,7 +84,7 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
       <ul className="cat-list" aria-live="polite" aria-label="Chosen categories">
         {values.length === 0 && <li className="cat-list__empty">No categories chosen yet. Find one below.</li>}
         {values.map((value) => {
-          const missing = known && !options.some((option) => sameName(option, value));
+          const missing = known && !options.some((option) => keyOf ? keyOf(option) === keyOf(value) : sameName(option, value));
           const { name, detail } = splitCategory(value);
           const info = missing ? missingInfo(value) : undefined;
           const missingText = info ? (info.longGone ? 'Gone two weeks or more. Remove it?' : missingSince(info)) : 'Not on the website’s list';
@@ -152,7 +157,7 @@ export function CategoryPicker({ portalName, websiteList, values, onChange, star
           <li className="pick-list__empty">{choices.length - MAX_SHOWN} more. Type part of a name to find them.</li>
         )}
         {choices.length === 0 && !canAddTyped && chosenMatches.length === 0 && (
-          <li className="pick-list__empty">{query ? 'No category matches that.' : 'Every category is already chosen.'}</li>
+          <li className="pick-list__empty">{query ? 'No category matches that.' : known ? 'Every category is already chosen.' : `Type a category name to add it. The full ${portalName} list appears after your first search.`}</li>
         )}
       </ul>
     </fieldset>

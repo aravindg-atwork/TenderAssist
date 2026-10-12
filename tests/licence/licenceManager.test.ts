@@ -71,6 +71,14 @@ describe('the app licence', () => {
     expect(JSON.parse(readFileSync(join(dir, 'licence.json'), 'utf8')).key).toBe(KEY);
   });
 
+  it('activates a further PC with Google alone: no key typed, the server picks the account’s key', async () => {
+    const { manager, sent, dir } = setup([signedReply({ pcsInUse: 2 })]);
+    const view = await manager.activate('   ');
+    expect(sent[0]).toMatchObject({ action: 'activate', key: '', idToken: 'id-token-1' });
+    expect(view).toMatchObject({ usable: true, key: KEY, pcsInUse: 2 });
+    expect(JSON.parse(readFileSync(join(dir, 'licence.json'), 'utf8')).key).toBe(KEY);
+  });
+
   it('refuses text that is not a key before opening any sign-in', async () => {
     const { manager, signIns } = setup([]);
     await expect(manager.activate('hello')).rejects.toThrow(/not a TenderAssist key/);

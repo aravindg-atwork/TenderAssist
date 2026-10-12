@@ -9,6 +9,7 @@ import type { TenderRepository, TenderRow } from '../persistence/repositories/te
 import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
 import type { RunConfiguration } from '../config/runConfiguration.js';
+import { gemCategoryKey } from '../config/categoryHealth.js';
 import type { AuthJobUpdate } from '../orchestration/authJobRunner.js';
 import type { RunQuestionAnswer } from '../orchestration/runQuestion.js';
 import { evaluateExcludedScope, evaluateIntentKeywords, evaluateTenderIntent, type TextGateResult } from '../classification/intentGates.js';
@@ -68,7 +69,8 @@ export interface GemRunDeps {
  * before " - " is compared instead.
  */
 export function inChosenCategory(bid: Pick<GemBid, 'category' | 'categoryCode'>, chosen: string, codes?: ReadonlyMap<string, string>): boolean {
-  const code = codes?.get(chosen.replace(/\s+/g, ' ').trim().toLocaleLowerCase());
+  // The exact entry first, then the category alone: GeM's example after " - " changes over time.
+  const code = codes?.get(chosen.replace(/\s+/g, ' ').trim().toLocaleLowerCase()) ?? codes?.get(`category:${gemCategoryKey(chosen)}`);
   if (code) return (bid.categoryCode ?? '').split(',').map((part) => part.trim()).includes(code);
   return sameCategory(categoryOf(chosen), bid.category);
 }

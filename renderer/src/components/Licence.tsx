@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { SUPPORT_EMAIL } from '../../../src/config/support';
 import type { LicenceView } from '../../../src/electron/ipcTypes';
 import { plainError } from '../words';
 import { BrandMark } from './icons';
@@ -18,7 +19,7 @@ function useLicence(): [LicenceView | null, (view: LicenceView) => void, string 
   return [view, setView, error];
 }
 
-/** Paste a key, then Google sign-in in the browser. */
+/** Paste a key (or, on a further PC of the same account, leave it empty), then Google sign-in in the browser. */
 function KeyEntry({ initial, onDone, label = 'Continue with Google' }: { initial: string; onDone: (view: LicenceView) => void; label?: string }) {
   const [key, setKey] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -34,14 +35,15 @@ function KeyEntry({ initial, onDone, label = 'Continue with Google' }: { initial
     <div className="licence__entry">
       <label className="field">
         <span>Your key</span>
+        <span className="hint">Already use TenderAssist on another computer? Leave this empty and sign in with the same Google account.</span>
         <input value={key} onChange={(event) => setKey(event.target.value)} placeholder="TA-XXXXX-XXXXX-XXXXX-XXXXX" spellCheck={false} autoComplete="off"
           className="licence__key" disabled={busy}
-          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (key.trim()) void activate(); } }} />
+          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void activate(); } }} />
       </label>
-      <button type="button" className="btn btn--primary btn--lg" disabled={busy || !key.trim()} onClick={() => void activate()}>
+      <button type="button" className="btn btn--primary btn--lg" disabled={busy} onClick={() => void activate()}>
         {busy ? 'Finish signing in in your browser…' : label}
       </button>
-      {busy && <p className="hint">A Google sign-in page opened in your browser. Choose the account this key is for, and leave the Google Drive box ticked so tenders can be saved to your Drive.</p>}
+      {busy && <p className="hint">A Google sign-in page opened in your browser. {key.trim() ? 'Choose the account this key is for' : 'Choose the Google account that already has your key'}, and leave the Google Drive box ticked so tenders can be saved to your Drive.</p>}
       {error && <p className="licence__error" role="alert">{error}</p>}
     </div>
   );
@@ -87,7 +89,8 @@ function LicenceScreen({ view, onView }: { view: LicenceView; onView: (view: Lic
           </div>
         )}
         {!firstTime && view.standing === 'ended' && <p className="hint">Renewed already? Press Check again.</p>}
-        {view.contact && <p className="licence__contact">{view.contact}</p>}
+        {view.contact ? <p className="licence__contact">{view.contact}</p>
+          : firstTime && <p className="licence__contact">No key yet, or it does not work? Write to <strong>{SUPPORT_EMAIL}</strong>.</p>}
       </section>
     </div>
   );

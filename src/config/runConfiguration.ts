@@ -38,7 +38,6 @@ export const DEFAULT_GEM_CATEGORIES: readonly string[] = [
   'Hiring Of Professionals For Application Development And Maintenance - Data Science And Analytics Role; Data Analyst; 3 Years And Less Than 6 Years',
   'E-learning Content Development - Non-igot; Restructure & Rewrite Content, Storyboarding With Production Support; Hindi, English, Tamil, Kannada, Telugu, Bengali, Assamese; Mobile And Laptop/desktop Both; Textiles & Clothing; Type Of Content; Na; Refe..',
   'Interactive Content Creation Services',
-  'Software Support Service',
   'Software Support Services 2.0 - Microsoft; Operating System Software; Maintenance Services; Not Applicable; General Service Provider',
   'Hiring Of Agency For It Projects- Milestone Basis',
   'Design, Development, Implementation, And Maintenance Of Websites, Web Portal, Web-enabled Application And Mobile Apps - Open Source Solution (oss)',

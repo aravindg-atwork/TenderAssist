@@ -10,6 +10,7 @@ import { TenderFile, type FileAction } from './TenderFile';
 import { TenderTray, type TrayGroup } from './TenderTray';
 import { Tracking } from './Tracking';
 import { UpdateBanner } from './UpdateBanner';
+import { SetupChecklist } from './SetupChecklist';
 import { compactRupees, deadline, portalMark } from './TenderCard';
 import { AlertIcon, ArrowRightIcon, BackIcon, CheckIcon, ClockIcon, CrossIcon, ListIcon, NoteIcon } from './icons';
 import { plainError } from '../words';
@@ -28,6 +29,8 @@ export interface TodayPageProps {
   onDismissFinished: () => void;
   /** Settings changed here (a category replacement); the app keeps the new copy. */
   onSettingsSaved: (settings: RunSettingsState) => void;
+  /** The first open setup step, for the top bar; null once setup is complete. */
+  onSetupNext?: (next: { title: string } | null) => void;
 }
 
 const isoOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -85,7 +88,7 @@ const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce
 
 /** Today: one next step at a time. Decide what is waiting, or find new tenders. */
 export function TodayPage({
-  settings, selectedPortalId, onPortalChange, onOpenSettings, onRunStarted, onOpenRun, onInboxCount, finishedRun, onDismissFinished, onSettingsSaved,
+  settings, selectedPortalId, onPortalChange, onOpenSettings, onRunStarted, onOpenRun, onInboxCount, finishedRun, onDismissFinished, onSettingsSaved, onSetupNext,
 }: TodayPageProps) {
   const [mode, setMode] = useState<'decide' | 'find' | null>(null);
   const [from, setFrom] = useState(todayIso());
@@ -393,6 +396,7 @@ export function TodayPage({
         </div>
       </header>
       <UpdateBanner running={false} />
+      <SetupChecklist onOpenSettings={onOpenSettings} onPortalChange={onPortalChange} onNext={onSetupNext} compact={mode !== 'find'} />
 
       {mode === 'find' ? (
         <div className="find">
@@ -686,7 +690,7 @@ function Consignment({ item, busy, stamp, actions, driveSet, onDetails }: {
             {action.kind === 'later' && <ClockIcon />} {action.label}
           </button>
         ))}
-        {primary?.id === 'approve' && <span className="consignment__hint">{driveSet ? 'Approving saves its files and copies them to Drive.' : 'Approving saves its files.'}</span>}
+        {primary?.id === 'approve' && <span className="consignment__hint">{driveSet ? 'Approving saves its files and copies them to Drive.' : 'Approving saves its files on this computer. For a copy in Google Drive too, name a Drive folder in Settings > Folders.'}</span>}
       </footer>
 
       {stamp && <Postmark text={stamp.text} tone={stamp.tone} />}

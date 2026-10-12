@@ -4,6 +4,12 @@ import { TextSizeSetting } from './TextSizeSetting';
 import { GoogleDriveSetting } from './GoogleDriveSetting';
 import { ReportSheetsSetting } from './ReportSheetsSetting';
 import { SignerSetting } from './SignerSetting';
+import { InfoTip } from './InfoTip';
+import { gemCategoryKey } from '../../../src/config/categoryHealth';
+
+const CATEGORY_INFO = <>The website’s own tender categories, such as “Information Technology”. TenderAssist only reads tenders listed in the categories chosen here, so choose the ones your kind of work appears in. The website’s full list appears after your first search.</>;
+const INTENT_INFO = <>Words for the work you bid for. A tender is kept when its <strong>title</strong> has one of the single words (like “website”), or its title or details have one of the phrases (like “website development”). Use your own work’s words: the starting list is for software, website and e-learning work.</>;
+const EXCLUDED_INFO = <>Words that mean “not for us”, such as “civil works” or “furniture”. A tender whose title or category has one of them is rejected straight away, even if it also has an intent word.</>;
 import { LicenceSetting } from './Licence';
 import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { CategoryHealth, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
@@ -267,6 +273,13 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     if (focusRequest?.section === 'relevance') setActive('look');
     if (focusRequest?.section === 'folders') setActive('folders');
     if (focusRequest?.section === 'signer') setActive('signer');
+    if (focusRequest?.section === 'login') setActive('login');
+    if (focusRequest?.section === 'categories' || focusRequest?.section === 'intent' || focusRequest?.section === 'excluded') {
+      setActive('look');
+      // After the section shows: bring that list into view.
+      const target = `look-${focusRequest.section}`;
+      setTimeout(() => document.getElementById(target)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+    }
   }, [focusRequest]);
 
   if (!settings) return <div className="page"><p className="page__empty">Loading settings…</p></div>;
@@ -290,7 +303,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
 
       <div className="settings__body">
         <section id="settings-look" hidden={active !== 'look'} className="block" ref={relevanceSectionRef} tabIndex={-1}>
-          <h2>What to look for</h2>
+          <h2>What to look for<InfoTip label="what to look for">TenderAssist searches the website for tenders in your <strong>categories</strong>, keeps the ones whose words match your <strong>intent words</strong>, and rejects the ones with an <strong>excluded word</strong>. Anything it is unsure about, it asks you.</InfoTip></h2>
           {!settings.configured && (
             <div className="notice notice--attention">Check the starting values below, then select Save changes at the bottom once before your first search.</div>
           )}
@@ -301,7 +314,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           {gem ? (
             <>
               <p className="block__lede">Bids in these categories are kept when they mention an intent word.</p>
-              <CategoryPicker portalName="GeM" websiteList={websiteCategories}
+              <div id="look-categories" />
+              <CategoryPicker portalName="GeM" websiteList={websiteCategories} info={CATEGORY_INFO} keyOf={gemCategoryKey}
                 values={chosenCategories} onChange={setChosenCategories} startingList={DEFAULT_GEM_CATEGORIES} {...categoryHelp}
                 unknownListHint="GeM’s category list could not be read just now; these are the starting categories. Check the internet connection and open Settings again." />
               <label className="check">
@@ -313,11 +327,13 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           ) : (
             <>
               <p className="block__lede">Tenders in these categories are kept when they mention an intent word.</p>
-              <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories}
+              <div id="look-categories" />
+              <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories} info={CATEGORY_INFO}
                 values={chosenCategories} onChange={setChosenCategories} {...categoryHelp} />
             </>
           )}
-          <EditableChips id="intent-keyword-entry" label="Intent words"
+          <div id="look-intent" />
+          <EditableChips id="intent-keyword-entry" label="Intent words" info={INTENT_INFO}
             helper="A single word (like “website”) counts only in a tender’s title. A phrase (like “website development”) also counts in its details."
             values={keywords} onChange={setKeywords} placeholder="Add an intent word or phrase" />
           {broadWords.length > 0 && (
@@ -337,7 +353,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           )}
           <WordSuggestionList title="Suggested intent words, from tenders you approved" suggestions={suggestions?.intent ?? []}
             current={keywords} onAdd={(phrase) => setKeywords([...keywords, phrase])} />
-          <EditableChips id="excluded-keyword-entry" label="Excluded words"
+          <div id="look-excluded" />
+          <EditableChips id="excluded-keyword-entry" label="Excluded words" info={EXCLUDED_INFO}
             helper="A tender whose title or category has one of these is rejected without opening it."
             values={excludedKeywords} onChange={setExcludedKeywords} placeholder="Add an excluded word" />
           <WordSuggestionList title="Suggested excluded words, from tenders you rejected" suggestions={suggestions?.excluded ?? []}
@@ -348,7 +365,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         </section>
 
         <section id="settings-login" hidden={active !== 'login'} className="block">
-          <h2>Portal login</h2>
+          <h2>Portal login<InfoTip label="the portal login">Your login ID and password for the tender website. At sign-in TenderAssist fills them in; you still type the CAPTCHA and your DSC PIN yourself. The password is locked to your Windows account and is never shown again. GeM needs no login.</InfoTip></h2>
           <p className="block__lede">Your login ID and password are filled in for you. You still type the CAPTCHA and your DSC PIN yourself.</p>
           <label className="field field--wide" htmlFor="settings-portal">
             <span>Website</span>
@@ -388,9 +405,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
         </section>
 
         <section id="settings-folders" hidden={active !== 'folders'} className="block" ref={foldersSectionRef} tabIndex={-1}>
-          <h2>Folders</h2>
+          <h2>Folders<InfoTip label="folders">Where tenders are saved on this computer, how each day’s report sheet is split, and the Google Drive folder approved tenders are uploaded to. The computer folder is set for you; the Drive folder needs only a name.</InfoTip></h2>
           <p className="block__lede">Each month gets a folder, each date a folder inside it, and each kept tender a folder inside that with its documents (and the zip, where the website offers one) and eligibility sheet. Approved tenders are uploaded to your Google Drive folder.</p>
-          <label className="field field--wide" htmlFor="local-output-root"><span>Save tenders in</span></label>
+          <label className="field field--wide" htmlFor="local-output-root"><span>Save tenders in<InfoTip label="the save folder">The folder on this computer where every tender’s documents and the report sheets are saved. It is set for you (DocumentsTenderAssist); choose another only if your office keeps files elsewhere.</InfoTip></span></label>
           <div className="picker">
             <input id="local-output-root" type="text" value={publishing?.localOutputRoot ?? ''}
               onChange={(event) => publishing && setPublishing({ ...publishing, localOutputRoot: event.target.value })} />
@@ -398,15 +415,15 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           </div>
           <ReportSheetsSetting />
           <GoogleDriveSetting />
-          <label className="field field--wide" htmlFor="drive-output-root"><span>Or copy approved tenders to a Google Drive for desktop folder <small>optional</small></span></label>
-          <div className="picker">
-            <input id="drive-output-root" type="text" value={publishing?.driveOutputRoot ?? ''}
-              onChange={(event) => publishing && setPublishing({ ...publishing, driveOutputRoot: event.target.value })}
-              placeholder="Your Google Drive for desktop folder" />
-            <button className="btn btn--quiet" type="button" onClick={() => choosePublishingFolder('drive')}>Choose…</button>
-          </div>
           <details className="disclosure" ref={folderCustomizerRef}>
-            <summary>Change folder and file names</summary>
+            <summary>More folder options: names, and a Google Drive for desktop copy</summary>
+            <label className="field field--wide" htmlFor="drive-output-root"><span>Also copy approved tenders to a Google Drive for desktop folder <small>optional; not needed when the Drive folder above is named</small></span></label>
+            <div className="picker">
+              <input id="drive-output-root" type="text" value={publishing?.driveOutputRoot ?? ''}
+                onChange={(event) => publishing && setPublishing({ ...publishing, driveOutputRoot: event.target.value })}
+                placeholder="Your Google Drive for desktop folder" />
+              <button className="btn btn--quiet" type="button" onClick={() => choosePublishingFolder('drive')}>Choose…</button>
+            </div>
             <p className="hint">Use {'{DD}'}, {'{MM}'} (10), {'{MONTH}'} (October), {'{YYYY}'}, {'{SNO}'} and {'{TITLE}'}. The tender folder must keep {'{SNO}'} so tenders never overwrite each other.</p>
             <div className="field-grid">
               <label className="field"><span>Month folder</span><input value={publishing?.structure.monthFolderTemplate ?? ''} onChange={(event) => updateStructure('monthFolderTemplate', event.target.value)} /></label>

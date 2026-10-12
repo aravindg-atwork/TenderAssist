@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SignerStatus } from '../../../src/electron/ipcTypes';
 import { plainError } from '../words';
+import { InfoTip } from './InfoTip';
 
 /**
  * Settings → DSC signer: OpenWebStart and Java, which the GePNIC portals' DSC
@@ -37,7 +38,7 @@ export function SignerSetting() {
 
   return (
     <>
-      <h2>DSC signer</h2>
+      <h2>DSC signer<InfoTip label="the DSC signer">When you sign in to a GePNIC website, it hands you a small program, the DSC signer, that reads your Digital Signature Certificate from its USB token. That program needs OpenWebStart and Java on this computer. Install them once here; after that, TenderAssist opens the signer for you at each sign-in.</InfoTip></h2>
       <p className="block__lede">
         Tamil Nadu and other GePNIC tender websites sign you in with your Digital Signature Certificate through a small “DSC signer” program from the website.
         It runs on OpenWebStart and Java 8 or newer. GeM does not need them.

@@ -60,7 +60,8 @@ export async function callLicenceServer(
   }
   const signed = { payload: reply.payload, signature: reply.signature };
   const licence = verifySignedLicence(signed, publicKeyPem);
-  if (!licence || licence.key !== body.key || licence.pcId !== body.pcId) {
+  // With no key sent (Google alone), the server picked the key linked to the account.
+  if (!licence || (body.key && licence.key !== body.key) || licence.pcId !== body.pcId) {
     throw new LicenceServerError('The key server\'s answer could not be trusted. Try again later.', 'bad-signature');
   }
   return { licence, signed, contact: reply.contact ?? '' };

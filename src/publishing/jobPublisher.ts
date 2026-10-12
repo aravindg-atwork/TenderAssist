@@ -29,7 +29,10 @@ export type ReportSheetMode = 'PER_WEBSITE' | 'ONE_PER_DAY';
 /** The file name of a day sheet: "Approved-Tenders-12-10-2026 - GeM.xlsx", or the plain name for one sheet per day. */
 export function daySheetFileName(fileName: string, mode: ReportSheetMode, portalName: string): string {
   if (mode === 'ONE_PER_DAY') return fileName;
-  const website = portalName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/\s+/g, ' ').trim() || 'Website';
+  // The short form of the website's name: "GeM (Government e-Marketplace)" → "GeM", "Bharat Electronics Limited (BEL)" → "BEL".
+  const bracketed = /^(.+?)\s*\(([^()]+)\)\s*$/.exec(portalName.trim());
+  const short = bracketed ? [bracketed[1], bracketed[2]].sort((a, b) => a.length - b.length)[0] : portalName;
+  const website = short.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/\s+/g, ' ').trim() || 'Website';
   return fileName.replace(/\.xlsx$/i, ` - ${website}.xlsx`);
 }
 

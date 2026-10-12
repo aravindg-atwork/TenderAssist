@@ -170,6 +170,8 @@ describe('day report sheet names', () => {
   it('names a sheet per website by default, or one sheet for the day', () => {
     expect(daySheetFileName(base, 'PER_WEBSITE', 'Tamil Nadu')).toBe('Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx');
     expect(daySheetFileName(base, 'PER_WEBSITE', 'GeM: Bids')).toBe('Approved-Tenders-12-10-2026 - GeM- Bids.xlsx');
+    expect(daySheetFileName(base, 'PER_WEBSITE', 'GeM (Government e-Marketplace)')).toBe('Approved-Tenders-12-10-2026 - GeM.xlsx');
+    expect(daySheetFileName(base, 'PER_WEBSITE', 'Bharat Electronics Limited (BEL)')).toBe('Approved-Tenders-12-10-2026 - BEL.xlsx');
     expect(daySheetFileName(base, 'ONE_PER_DAY', 'Tamil Nadu')).toBe(base);
   });
 

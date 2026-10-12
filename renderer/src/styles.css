@@ -1106,3 +1106,63 @@ textarea {
 .licence-strip { position: fixed; left: 50%; bottom: 16px; z-index: 50; display: flex; align-items: center; gap: 12px; max-width: min(720px, calc(100vw - 32px)); padding: 8px 8px 8px 16px; border-radius: 12px; transform: translateX(-50%); box-shadow: var(--shadow-3); font-size: 0.9375rem; font-weight: 600; }
 .licence-strip--ending { background: var(--amber-soft); color: var(--amber-ink); }
 .licence-strip--grace { background: var(--red-soft); color: var(--red-ink); }
+
+/* (i): a plain-words explanation beside a heading or a setup step. */
+.infotip__btn {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; margin-left: 6px; padding: 0;
+  border: 1.5px solid var(--blue-ink); border-radius: 50%; background: var(--sheet); color: var(--blue-ink);
+  font: italic 700 12px/1 Georgia, "Times New Roman", serif; cursor: pointer; vertical-align: 2px;
+}
+.infotip__btn:hover, .infotip__btn[aria-expanded="true"] { background: var(--blue-ink); color: #fff; }
+.infotip__btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.infotip__btn--inline { cursor: default; margin: 0 2px; }
+.infotip__body {
+  display: block; margin: 8px 0 4px; padding: 10px 12px; max-width: 64ch;
+  border-left: 3px solid var(--blue); border-radius: 0 8px 8px 0; background: var(--blue-soft);
+  color: var(--ink-2); font-size: 0.875rem; font-weight: 400; line-height: 1.5; letter-spacing: 0;
+}
+
+/* First-time setup checklist on Today. */
+.setup { margin: 0 0 20px; padding: 22px 24px; border-radius: var(--r-sheet); background: var(--sheet); box-shadow: var(--shadow-2); max-width: 860px; }
+.setup__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.setup__head h2 { font-size: 1.25rem; }
+.setup__count { font-family: var(--font-post); font-size: 1.05rem; font-weight: 600; color: var(--ink-3); letter-spacing: 0.02em; }
+.setup__lede { margin: 6px 0 12px; color: var(--ink-3); font-size: 0.9375rem; }
+.setup__bar { height: 6px; border-radius: 99px; background: var(--slate-soft); overflow: hidden; margin-bottom: 14px; }
+.setup__bar span { display: block; height: 100%; background: var(--green); border-radius: 99px; transition: width 300ms var(--ease); }
+.setup__steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.setup__step { display: grid; grid-template-columns: 30px 1fr; gap: 12px; padding: 10px 8px; border-radius: 10px; }
+.setup__step.is-next { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--blue); }
+.setup__tick {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  border: 1.5px solid var(--line-strong); color: var(--ink-3); font: 600 0.95rem var(--font-post);
+}
+.setup__step.is-done .setup__tick { border-color: var(--green); background: var(--green); color: #fff; }
+.setup__step.is-next .setup__tick { border-color: var(--blue); color: var(--blue-ink); }
+.setup__title { font-weight: 650; color: var(--ink); display: flex; align-items: center; flex-wrap: wrap; gap: 0 2px; }
+.setup__step.is-done .setup__title > span:first-child { color: var(--ink-3); }
+.setup__title .infotip__body { flex-basis: 100%; }
+.setup__auto { margin-left: 8px; padding: 1px 8px; border-radius: 99px; background: var(--slate-soft); color: var(--slate); font-size: 0.75rem; font-weight: 600; }
+.setup__detail { display: block; margin-top: 2px; color: var(--ink-3); font-size: 0.875rem; overflow-wrap: anywhere; }
+.setup__actions { margin-top: 8px; }
+.setup__pair { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.setup__choices { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.setup__choice {
+  display: grid; gap: 2px; min-width: 150px; padding: 8px 14px; text-align: left; cursor: pointer;
+  border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--sheet); color: var(--ink); font: inherit;
+}
+.setup__choice span { color: var(--ink-3); font-size: 0.8125rem; }
+.setup__choice:hover:not(:disabled) { border-color: var(--ink-3); }
+.setup__choice.is-on { border-color: var(--blue); background: var(--blue-soft); box-shadow: inset 0 0 0 1px var(--blue); }
+.setup__other { min-height: 44px; padding: 0 10px; border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--sheet); }
+@media (max-width: 700px) { .setup { padding: 16px; } .setup__choice { min-width: 0; flex: 1 1 140px; } }
+.settings-fieldset legend { flex-wrap: wrap; }
+.settings-fieldset legend .infotip__body, .block h2 .infotip__body { flex-basis: 100%; }
+.block h2 .infotip__body { font-size: 0.9375rem; }
+
+/* Lists the setup checklist jumps to: land with the heading in view. */
+#look-categories, #look-intent, #look-excluded { scroll-margin-top: 24px; }
+.chips__clear { margin-left: auto; }
+.setup--compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 18px; }
+.setup--compact .setup__bar { flex: 1 1 120px; margin: 0; }
+.setup--compact .setup__detail { margin: 0; }
