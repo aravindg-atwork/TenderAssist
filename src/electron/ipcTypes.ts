@@ -164,8 +164,9 @@ export interface GoogleDriveStatus {
   available: boolean;
   /** The Google sign-in address while a sign-in waits, to open it in another browser. */
   signInLink: string | null;
+  /** Empty until the folder is found or made in My Drive. */
   folderId: string;
-  /** The folder's name on Drive, once checked. */
+  /** The folder name typed in Settings ("Tenders" or "Office/Tenders"). */
   folderName: string;
   /** The Google account uploads are made as, once signed in. */
   accountEmail: string;
@@ -282,8 +283,14 @@ export interface TenderAssistApi {
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
   getGoogleDrive(): Promise<GoogleDriveStatus>;
-  /** Saves the Drive folder link (checked straight away when signed in). */
-  saveGoogleDrive(input: { folderLink?: string; uploadMode?: 'SAVED' | 'APPROVED' }): Promise<GoogleDriveStatus>;
+  /** Saves the Drive folder name; the folder is found or made in My Drive straight away when signed in. */
+  saveGoogleDrive(input: { folderName?: string; uploadMode?: 'SAVED' | 'APPROVED' }): Promise<GoogleDriveStatus>;
+  /** Opens the Drive folder in the browser. */
+  openGoogleDriveFolder(): Promise<void>;
+  /** How each day's report sheets are split: one per website (default) or one for the day. */
+  getReportSheets(): Promise<'PER_WEBSITE' | 'ONE_PER_DAY'>;
+  /** Saves the split; saved days are rewritten the new way in the background. */
+  saveReportSheets(mode: 'PER_WEBSITE' | 'ONE_PER_DAY'): Promise<'PER_WEBSITE' | 'ONE_PER_DAY'>;
   /** Uploads every tender folder and report sheet saved on this computer; unchanged files are skipped. Resolves when done. */
   uploadEverythingToGoogleDrive(): Promise<GoogleDriveStatus>;
   /** Opens Google sign-in in the browser and waits for it to finish. */

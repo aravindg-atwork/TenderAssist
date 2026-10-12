@@ -9,6 +9,7 @@ import { CategoryReplacement, withReplacements } from './CategoryReplacement';
 import { TenderFile, type FileAction } from './TenderFile';
 import { TenderTray, type TrayGroup } from './TenderTray';
 import { Tracking } from './Tracking';
+import { UpdateBanner } from './UpdateBanner';
 import { compactRupees, deadline, portalMark } from './TenderCard';
 import { AlertIcon, ArrowRightIcon, BackIcon, CheckIcon, ClockIcon, CrossIcon, ListIcon, NoteIcon } from './icons';
 import { plainError } from '../words';
@@ -391,6 +392,7 @@ export function TodayPage({
           <button type="button" role="tab" aria-selected={mode === 'find'} className="switch__opt" onClick={() => setMode('find')}>Find tenders</button>
         </div>
       </header>
+      <UpdateBanner running={false} />
 
       {mode === 'find' ? (
         <div className="find">

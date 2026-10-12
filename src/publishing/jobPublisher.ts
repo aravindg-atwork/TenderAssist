@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { FinalClassification } from '../persistence/repositories/classificationRepository.js';
@@ -15,6 +15,28 @@ export interface PublishableTender {
   requirements?: TenderRequirementRow;
   /** Stable S.No within the day folder; defaults to the item's position. */
   serialNumber?: number;
+  /** The website this tender came from, when one sheet holds several websites. */
+  portal?: { url: string; name: string };
+}
+
+/**
+ * How a day's report sheets are split. PER_WEBSITE (the default): one sheet
+ * per website per day, every run of that website that day in it.
+ * ONE_PER_DAY: every website's tenders of the day in a single sheet.
+ */
+export type ReportSheetMode = 'PER_WEBSITE' | 'ONE_PER_DAY';
+
+/** The file name of a day sheet: "Approved-Tenders-12-10-2026 - GeM.xlsx", or the plain name for one sheet per day. */
+export function daySheetFileName(fileName: string, mode: ReportSheetMode, portalName: string): string {
+  if (mode === 'ONE_PER_DAY') return fileName;
+  const website = portalName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/\s+/g, ' ').trim() || 'Website';
+  return fileName.replace(/\.xlsx$/i, ` - ${website}.xlsx`);
+}
+
+/** Whether a file is one of the day's report sheets, under any name TenderAssist gave it (website, "(run N)", or plain). */
+export function isDaySheet(fileName: string, name: string): boolean {
+  const stem = fileName.replace(/\.xlsx$/i, '').toLocaleLowerCase();
+  return /\.xlsx$/i.test(name) && name.toLocaleLowerCase().startsWith(stem) && !name.startsWith('~$');
 }
 
 function requirementData(row?: TenderRequirementRow): Record<string, string | null> {
@@ -150,6 +172,7 @@ export function approvedWorkbookName(fileName: string, runNumber: number): strin
  * Closing date / Submission deadline (Bid End Date).
  */
 const EARLIER_COLUMNS = [
+  { header: 'Website', key: 'website', width: 18 },
   { header: 'Reference', key: 'reference', width: 22 },
   { header: 'Full title', key: 'title', width: 52 },
   { header: 'Decision', key: 'decision', width: 15 },
@@ -175,8 +198,10 @@ export async function publishJobWorkbook(
   items: PublishableTender[],
   structure: OutputStructureSettings = DEFAULT_OUTPUT_STRUCTURE,
   runNumber = 1,
-  /** The website, for tenders with no page of their own to link to. */
-  portal?: { url: string; name: string }
+  /** The website, for tenders with no page of their own to link to (an item's own portal comes first). */
+  portal?: { url: string; name: string },
+  /** The sheet's file name; by default the day workbook, with "(run N)" for later runs. */
+  workbookFileName?: string
 ): Promise<{ jobDirectory: string; workbookPath: string }> {
   const jobDirectory = jobOutputDirectory(outputRoot, searchDate, jobId, structure);
   mkdirSync(jobDirectory, { recursive: true });
@@ -192,13 +217,14 @@ export async function publishJobWorkbook(
     const req = requirementData(item.requirements);
     const tenderDirectory = tenderOutputDirectory(jobDirectory, item.tender, serialNumber, structure, searchDate);
     const documentsDirectory = tenderDocumentsDirectory(jobDirectory, item.tender, serialNumber, structure, searchDate);
+    const website = item.portal ?? portal;
     const row = reportRow({
       tender: item.tender,
       serialNumber,
       eligibility: req.eligibility,
       emd: req.emd,
-      portalUrl: portal?.url,
-      portalName: portal?.name,
+      portalUrl: website?.url,
+      portalName: website?.name,
       // Relative, so the link also works in the copy on Drive.
       documentsFolder: item.documents.some((document) => document.state === 'DOWNLOADED')
         ? relative(jobDirectory, documentsDirectory).split(sep).join('/')
@@ -208,6 +234,7 @@ export async function publishJobWorkbook(
       ...row,
       viewTenderLink: row.viewTenderLink ? { text: row.viewTenderLink.text, hyperlink: row.viewTenderLink.target } : '',
       tenderDocumentLink: row.tenderDocumentLink ? { text: row.tenderDocumentLink.text, hyperlink: row.tenderDocumentLink.target } : '',
+      website: website?.name ?? '',
       reference: item.tender.tender_ref,
       title: item.tender.title,
       decision: item.manualReview?.decision ?? item.automaticDecision,
@@ -240,7 +267,7 @@ export async function publishJobWorkbook(
       if (cell.value) cell.font = { color: { argb: 'FF1F4E9E' }, underline: true };
     }
   }
-  const workbookPath = join(jobDirectory, approvedWorkbookName(resolveOutputStructure(structure, searchDate).approvedWorkbook, runNumber));
+  const workbookPath = join(jobDirectory, workbookFileName ?? approvedWorkbookName(resolveOutputStructure(structure, searchDate).approvedWorkbook, runNumber));
   await workbook.xlsx.writeFile(workbookPath);
   return { jobDirectory, workbookPath };
 }
@@ -278,10 +305,14 @@ export function mirrorReportSheetsToDrive(localJobDirectory: string, localOutput
   }
   const destination = join(driveRoot, relativePath);
   if (resolve(destination).toLocaleLowerCase() === resolve(localJobDirectory).toLocaleLowerCase()) return [];
-  // The first run's sheet and any "(run N)" sheets of later runs on the same day.
-  const stem = approvedWorkbookFileName.replace(/\.xlsx$/i, '').toLocaleLowerCase();
-  const sheets = readdirSync(localJobDirectory).filter((name) => /\.xlsx$/i.test(name) && name.toLocaleLowerCase().startsWith(stem));
+  // The day's sheets, one per website or one for the day.
+  const sheets = readdirSync(localJobDirectory).filter((name) => isDaySheet(approvedWorkbookFileName, name));
   mkdirSync(destination, { recursive: true });
+  // Sheets under names no longer used here (an older "(run 2)" sheet, the other split) go from the copy too.
+  const kept = new Set(sheets.map((name) => name.toLocaleLowerCase()));
+  for (const name of readdirSync(destination)) {
+    if (isDaySheet(approvedWorkbookFileName, name) && !kept.has(name.toLocaleLowerCase())) rmSync(join(destination, name), { force: true });
+  }
   return sheets.map((name) => {
     copyFileSync(join(localJobDirectory, name), join(destination, name));
     return join(destination, name);

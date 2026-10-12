@@ -54,6 +54,8 @@ export interface PostProcessingDeps {
   downloader?: DocumentDownloader;
   /** Reads the text inside the saved documents (PDFs, with OCR for scans) before requirements are found. */
   readDocuments?: (tenders: TenderRow[], report: (message: string) => void) => Promise<void>;
+  /** Writes the day's report sheets (every run saving into the day folder) instead of a sheet for this run alone. */
+  publishDaySheets?: (jobId: string) => Promise<void>;
 }
 
 function safeFileName(value: string, index: number, url: string): string {
@@ -230,7 +232,8 @@ export async function runPostProcessing(
     throwIfCancellationRequested(deps.signal);
     onUpdate(snapshot('PUBLISHING'));
     // Saved locally only. A tender goes to Drive when the operator approves it.
-    await publishJobWorkbook(plan.outputRoot, outputDate, jobId, approved.map((tender) => ({
+    if (deps.publishDaySheets) await deps.publishDaySheets(jobId);
+    else await publishJobWorkbook(plan.outputRoot, outputDate, jobId, approved.map((tender) => ({
       tender,
       automaticDecision: deps.classifications.getFinalForTender(tender.id),
       manualReview: deps.workflow.getReview(tender.id),

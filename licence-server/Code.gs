@@ -17,6 +17,15 @@ var KEY_HEADERS = ['Key', 'Customer', 'Contact', 'Google account', 'Plan', 'PCs 
   'Status', 'Days left', 'PCs in use', 'Last seen', 'App version', 'Notes'];
 var PC_HEADERS = ['Key', 'PC ID', 'PC name', 'Google account', 'First seen', 'Last seen', 'App version'];
 var LOG_HEADERS = ['Time', 'Key', 'Google account', 'PC name', 'Action', 'Result'];
+// Website categories, shared by every TenderAssist: when one office's search
+// reads a website's category list, the change reaches every other office.
+var CATEGORIES = 'Categories';
+var CATEGORY_CHANGES = 'Category changes';
+var CATEGORY_HEADERS = ['Website', 'Category', 'Code', 'First seen', 'Last seen', 'Gone since'];
+var CATEGORY_CHANGE_HEADERS = ['Time', 'Website', 'Change', 'Category', 'Customer'];
+var CAT_COL = {}; CATEGORY_HEADERS.forEach(function (name, index) { CAT_COL[name] = index; });
+/** A list much shorter than the one known is a half-loaded page, not a website change. */
+var MIN_LIST_SHARE = 0.5;
 
 var COL = {}; KEY_HEADERS.forEach(function (name, index) { COL[name] = index; });
 var PC_COL = {}; PC_HEADERS.forEach(function (name, index) { PC_COL[name] = index; });
@@ -116,6 +125,58 @@ function decide(row, request, pcs, now) {
   return result;
 }
 
+/** Category names compared as the app compares them: case and spacing do not matter. */
+function categoryKey(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * One office's read of a website's category list, merged into the shared rows
+ * of that website. rows: [{ category, code, firstSeen, lastSeen, goneSince }]
+ * (dates as ISO text). list: [{ name, code }]. Returns { accepted, reason?,
+ * rows, changes: [{ change: 'New' | 'Gone' | 'Back', category }] }. A read
+ * older than the latest one known, or far shorter than the list known, is
+ * ignored.
+ */
+function mergeCategoryReport(rows, list, readAt) {
+  var known = rows.filter(function (row) { return !row.goneSince; });
+  var latest = rows.reduce(function (max, row) { return row.lastSeen > max ? row.lastSeen : max; }, '');
+  if (!list.length) return { accepted: false, reason: 'empty', rows: rows, changes: [] };
+  if (latest && readAt <= latest) return { accepted: false, reason: 'older', rows: rows, changes: [] };
+  if (known.length && list.length < known.length * MIN_LIST_SHARE) return { accepted: false, reason: 'too-short', rows: rows, changes: [] };
+  var byKey = {};
+  var next = rows.map(function (row) { var copy = Object.assign({}, row); byKey[categoryKey(row.category)] = copy; return copy; });
+  var listed = {};
+  var changes = [];
+  list.forEach(function (entry) {
+    var name = String(entry.name || '').trim().replace(/\s+/g, ' ').slice(0, 200);
+    var key = categoryKey(name);
+    if (!key || listed[key]) return;
+    listed[key] = true;
+    var row = byKey[key];
+    if (!row) {
+      row = { category: name, code: String(entry.code || ''), firstSeen: readAt, lastSeen: readAt, goneSince: '' };
+      next.push(row);
+      byKey[key] = row;
+      // The very first list of a website is its starting point, not a change.
+      if (rows.length) changes.push({ change: 'New', category: name });
+      return;
+    }
+    if (row.goneSince) changes.push({ change: 'Back', category: row.category });
+    row.category = name;
+    row.code = String(entry.code || row.code || '');
+    row.lastSeen = readAt;
+    row.goneSince = '';
+  });
+  next.forEach(function (row) {
+    if (!listed[categoryKey(row.category)] && !row.goneSince) {
+      row.goneSince = readAt;
+      changes.push({ change: 'Gone', category: row.category });
+    }
+  });
+  return { accepted: true, rows: next, changes: changes };
+}
+
 function maskEmail(email) {
   var parts = String(email).split('@');
   if (parts.length !== 2) return 'another account';
@@ -165,6 +226,7 @@ function doPost(e) {
   catch (err) { return json({ ok: false, code: 'bad-request', message: 'The request could not be read.' }); }
   var key = normaliseKey(body.key);
   var pcId = String(body.pcId || '').slice(0, 128);
+  if ((body.action === 'categories' || body.action === 'report-categories') && pcId) return categoriesRequest(body, key, pcId);
   if ((body.action !== 'activate' && body.action !== 'check') || !pcId) {
     return json({ ok: false, code: 'bad-request', message: 'The request was incomplete.' });
   }
@@ -192,6 +254,75 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * The shared website categories. Only a PC already activated on a working key
+ * may read them or report a list.
+ *   categories: { portals: { <website>: { categories: [{ name, code, firstSeen, lastSeen, goneSince }], readAt } } }
+ *   report-categories: { website, list: [{ name, code }], readAt } → { ok, accepted, changes }
+ */
+function categoriesRequest(body, key, pcId) {
+  var found = key ? findKeyRow(key) : null;
+  var allowed = found && decide(found.row, { action: 'check', pcId: pcId }, pcRows(key).map(function (pc) { return pc.row[PC_COL['PC ID']]; }), new Date());
+  if (!allowed || !allowed.ok || !allowed.licence || allowed.licence.status !== 'Active') {
+    return json({ ok: false, code: 'not-allowed', message: 'Shared categories need an active key on this PC.' });
+  }
+  var sheet = book().getSheetByName(CATEGORIES) || ensureSheet(CATEGORIES, CATEGORY_HEADERS);
+  if (body.action === 'categories') {
+    var portals = {};
+    dataRows(sheet, CATEGORY_HEADERS.length).forEach(function (row) {
+      var website = String(row[CAT_COL['Website']]);
+      var entry = portals[website] || (portals[website] = { categories: [], readAt: '' });
+      var item = categoryRow(row);
+      entry.categories.push({ name: item.category, code: item.code, firstSeen: item.firstSeen, lastSeen: item.lastSeen, goneSince: item.goneSince });
+      if (item.lastSeen > entry.readAt) entry.readAt = item.lastSeen;
+    });
+    return json({ ok: true, portals: portals });
+  }
+
+  var website = String(body.website || '').slice(0, 80);
+  var readAt = isoOrEmpty(body.readAt);
+  var list = Array.isArray(body.list) ? body.list.slice(0, 5000) : [];
+  if (!website || !readAt) return json({ ok: false, code: 'bad-request', message: 'The category list was incomplete.' });
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var all = dataRows(sheet, CATEGORY_HEADERS.length);
+    var mine = [];
+    var others = [];
+    all.forEach(function (row) { (String(row[CAT_COL['Website']]) === website ? mine : others).push(row); });
+    var merged = mergeCategoryReport(mine.map(categoryRow), list, readAt);
+    if (!merged.accepted) return json({ ok: true, accepted: false, reason: merged.reason, changes: [] });
+    var rows = others.concat(merged.rows.map(function (item) {
+      return [website, item.category, item.code, new Date(item.firstSeen), new Date(item.lastSeen), item.goneSince ? new Date(item.goneSince) : ''];
+    }));
+    if (all.length) sheet.getRange(2, 1, all.length, CATEGORY_HEADERS.length).clearContent();
+    if (rows.length) sheet.getRange(2, 1, rows.length, CATEGORY_HEADERS.length).setValues(rows);
+    var customer = String(found.row[COL['Customer']] || key);
+    var changeSheet = book().getSheetByName(CATEGORY_CHANGES) || ensureSheet(CATEGORY_CHANGES, CATEGORY_CHANGE_HEADERS);
+    merged.changes.forEach(function (change) { changeSheet.appendRow([new Date(readAt), website, change.change, change.category, customer]); });
+    return json({ ok: true, accepted: true, changes: merged.changes });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** A Categories row as plain values (dates as ISO text). */
+function categoryRow(row) {
+  return {
+    category: String(row[CAT_COL['Category']] || ''),
+    code: String(row[CAT_COL['Code']] || ''),
+    firstSeen: isoOrEmpty(row[CAT_COL['First seen']]),
+    lastSeen: isoOrEmpty(row[CAT_COL['Last seen']]),
+    goneSince: isoOrEmpty(row[CAT_COL['Gone since']]),
+  };
+}
+
+function isoOrEmpty(value) {
+  if (value === '' || value == null) return '';
+  var date = value instanceof Date ? value : new Date(String(value));
+  return isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
 /** The email of a Google ID token made for TenderAssist's own sign-in, or '' when it is not one. */
@@ -320,6 +451,8 @@ function prepareSheet() {
   var keys = ensureSheet(KEYS, KEY_HEADERS);
   ensureSheet(PCS, PC_HEADERS);
   ensureSheet(LOG, LOG_HEADERS);
+  ensureSheet(CATEGORIES, CATEGORY_HEADERS);
+  ensureSheet(CATEGORY_CHANGES, CATEGORY_CHANGE_HEADERS);
   var settings = ss.getSheetByName(SETTINGS) || ss.insertSheet(SETTINGS);
   if (!settings.getRange('A1').getValue()) {
     settings.getRange('A1:B2').setValues([['Setting', 'Value'], ['Contact shown to customers', '']]);

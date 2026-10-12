@@ -3,10 +3,22 @@ import type { GoogleDriveStatus } from '../../../src/electron/ipcTypes';
 import { absoluteDateTime } from '../format';
 import { plainError } from '../words';
 
-/** Upload approved tenders straight to a Google Drive folder: paste the folder, sign in once. */
+/** Where today's files land on Drive, to show the layout under the folder name. */
+function todayOnDrive(): { month: string; day: string } {
+  const now = new Date();
+  const month = `${now.toLocaleString('en-GB', { month: 'long' })}-${now.getFullYear()}`;
+  const day = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+  return { month, day };
+}
+
+/**
+ * Upload tenders to Google Drive: type a folder name. TenderAssist makes the
+ * folder in My Drive (month and day folders inside), signed in with the same
+ * Google account that activated the key.
+ */
 export function GoogleDriveSetting() {
   const [status, setStatus] = useState<GoogleDriveStatus | null>(null);
-  const [folderLink, setFolderLink] = useState('');
+  const [folderName, setFolderName] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -14,7 +26,7 @@ export function GoogleDriveSetting() {
 
   const apply = (next: GoogleDriveStatus) => {
     setStatus(next);
-    setFolderLink(next.folderId ? `https://drive.google.com/drive/folders/${next.folderId}` : '');
+    setFolderName(next.folderName);
   };
   useEffect(() => { window.tenderAssist.getGoogleDrive().then(apply).catch((err) => setError(plainError(err))); }, []);
 
@@ -38,70 +50,93 @@ export function GoogleDriveSetting() {
   };
 
   if (!status) return null;
-  const savedLink = status.folderId ? `https://drive.google.com/drive/folders/${status.folderId}` : '';
-  const folderChanged = folderLink.trim() !== savedLink;
+  const nameChanged = folderName.trim() !== status.folderName;
+  const shownName = folderName.trim() || 'your folder';
+  const { month, day } = todayOnDrive();
 
   return (
     <fieldset className="settings-fieldset">
       <legend>Upload to Google Drive</legend>
       <p className="field-helper">
-        Drive keeps the same files as this computer: after every search, each saved tender’s folder (documents and eligibility sheet) and the day’s report sheet are uploaded to your
-        Drive folder, in the same layout as on this computer. Files already uploaded are not sent again.
+        Type a folder name. TenderAssist makes that folder in your Google Drive and, after every search, uploads each approved tender’s folder
+        (documents and eligibility sheet) and the day’s report sheet into it, a folder for each month and inside it a folder for each day.
+        Files already uploaded are not sent again.
       </p>
       {!status.available ? (
         <p className="notice notice--attention" role="note">This copy of TenderAssist was built without Google sign-in, so it cannot upload to Drive.</p>
       ) : status.signedIn ? (
         <p className="notice notice--done" role="status">
-          Signed in as <strong>{status.accountEmail || 'your Google account'}</strong>. Uploading to
-          {' '}<strong>{status.folderName || 'your Drive folder'}</strong>.
+          Signed in as <strong>{status.accountEmail || 'your Google account'}</strong>
+          {status.folderName ? <>. Uploading to <strong>My Drive / {status.folderName}</strong>.</> : '. Type a folder name below to start uploading.'}
           {status.lastUpload && ` Last upload ${absoluteDateTime(status.lastUpload.at)}: ${status.lastUpload.uploaded} uploaded${status.lastUpload.failed ? `, ${status.lastUpload.failed} not uploaded` : ''}.`}
         </p>
       ) : (
-        <p className="hint">Not signed in yet: paste your Drive folder link, save it, then sign in to Google.</p>
+        <p className="hint">Not signed in to Google. The Google account that activated your key is used for Drive; sign in again below if it was signed out.</p>
       )}
-      <label className="field field--wide" htmlFor="drive-folder-link"><span>Drive folder link</span>
-        <input id="drive-folder-link" type="url" value={folderLink} onChange={(event) => setFolderLink(event.target.value)}
-          placeholder="https://drive.google.com/drive/folders/…" disabled={!status.available} />
+      <label className="field field--wide" htmlFor="drive-folder-name"><span>Folder name in your Google Drive</span>
+        <input id="drive-folder-name" type="text" value={folderName} maxLength={240} onChange={(event) => setFolderName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && nameChanged && busy === null) {
+              event.preventDefault();
+              void act('save', () => window.tenderAssist.saveGoogleDrive({ folderName }), 'Folder name saved.');
+            }
+          }}
+          placeholder="Tenders 2026-27" disabled={!status.available} />
       </label>
+      <p className="hint">
+        On Drive: My Drive / {shownName} / {month} / {day} / <em>each tender’s folder</em> and the day’s report sheet.
+        If you already have a folder with this name, TenderAssist makes its own next to it: it can only see folders it made.
+      </p>
       <div className="now__actions">
-        {folderChanged && (
-          <button type="button" className="btn btn--quiet" disabled={busy !== null || !status.available}
-            onClick={() => act('save', () => window.tenderAssist.saveGoogleDrive({ folderLink }), 'Folder saved.')}>
-            {busy === 'save' ? 'Saving…' : 'Save the folder'}
+        {nameChanged && (
+          <button type="button" className="btn btn--primary" disabled={busy !== null || !status.available}
+            onClick={() => act('save', () => window.tenderAssist.saveGoogleDrive({ folderName }),
+              status.signedIn ? `Folder “${folderName.trim()}” is ready in your Drive.` : 'Folder name saved. It is made in Drive once you are signed in.')}>
+            {busy === 'save' ? 'Saving…' : 'Save the folder name'}
           </button>
         )}
-        <button type="button" className="btn btn--primary" disabled={busy !== null || !status.available || !status.folderId || folderChanged}
-          onClick={() => act('connect', () => window.tenderAssist.connectGoogleDrive(), 'Signed in. Approved tenders will be uploaded to Drive.')}>
-          {busy === 'connect' ? 'Finish signing in in your browser…' : status.signedIn ? 'Sign in again' : 'Sign in to Google'}
-        </button>
+        {status.available && !status.signedIn && (
+          <button type="button" className="btn btn--primary" disabled={busy !== null}
+            onClick={() => act('connect', () => window.tenderAssist.connectGoogleDrive(), 'Signed in. Tenders will be uploaded to Drive.')}>
+            {busy === 'connect' ? 'Finish signing in in your browser…' : 'Sign in to Google'}
+          </button>
+        )}
+        {status.signedIn && status.folderId && !nameChanged && (
+          <button type="button" className="btn btn--quiet" disabled={busy !== null}
+            onClick={() => { setError(null); window.tenderAssist.openGoogleDriveFolder().catch((err) => setError(plainError(err))); }}>
+            Open in Drive
+          </button>
+        )}
         {status.signedIn && busy !== 'connect' && (
           <>
             <button type="button" className="btn btn--quiet" disabled={busy !== null}
-              onClick={() => act('check', () => window.tenderAssist.checkGoogleDrive(), 'Google Drive is reachable and the folder can be written to.')}>
+              onClick={() => act('check', () => window.tenderAssist.checkGoogleDrive(), 'Google Drive is reachable and the folder is ready.')}>
               {busy === 'check' ? 'Checking…' : 'Check the connection'}
             </button>
             <button type="button" className="btn btn--quiet btn--small" disabled={busy !== null}
-              onClick={() => act('disconnect', () => window.tenderAssist.disconnectGoogleDrive(), 'Signed out. Nothing more will be uploaded until you sign in again.')}>
-              Sign out
+              onClick={() => act('connect', () => window.tenderAssist.connectGoogleDrive(), 'Signed in again.')}>
+              Use another Google account
+            </button>
+            <button type="button" className="btn btn--quiet btn--small" disabled={busy !== null}
+              onClick={() => act('disconnect', () => window.tenderAssist.disconnectGoogleDrive(), 'Signed out of Drive. Nothing more will be uploaded until you sign in again.')}>
+              Sign out of Drive
             </button>
           </>
         )}
       </div>
-      {status.signedIn && (
-        <>
-          <p className="hint">
-            <button type="button" className="btn btn--quiet btn--small" disabled={busy !== null}
-              onClick={() => act('upload', () => window.tenderAssist.uploadEverythingToGoogleDrive(), 'Upload finished. Files already on Drive were not sent again.')}>
-              {busy === 'upload' ? 'Uploading… this can take a few minutes' : 'Upload everything saved so far'}
-            </button>{' '}
-            Sends every tender folder and report sheet already on this computer. Anything already on Drive and unchanged is skipped.
-          </p>
-        </>
+      {status.signedIn && status.folderName && (
+        <p className="hint">
+          <button type="button" className="btn btn--quiet btn--small" disabled={busy !== null}
+            onClick={() => act('upload', () => window.tenderAssist.uploadEverythingToGoogleDrive(), 'Upload finished. Files already on Drive were not sent again.')}>
+            {busy === 'upload' ? 'Uploading… this can take a few minutes' : 'Upload everything saved so far'}
+          </button>{' '}
+          Sends every approved tender folder and report sheet already on this computer. Anything already on Drive and unchanged is skipped.
+        </p>
       )}
       {busy === 'connect' && status.signInLink && (
         <p className="hint" role="status">
-          Sign in to Google in the browser window that opened. If no window opened, or it shows an error, copy the sign-in link and open it
-          in another browser or a private (Incognito) window.{' '}
+          Sign in to Google in the browser window that opened and leave the Google Drive box ticked. If no window opened, or it shows an error,
+          copy the sign-in link and open it in another browser or a private (Incognito) window.{' '}
           <button type="button" className="btn btn--quiet btn--small"
             onClick={() => { void navigator.clipboard.writeText(status.signInLink!).then(() => setCopied(true)); }}>
             {copied ? 'Link copied' : 'Copy the sign-in link'}

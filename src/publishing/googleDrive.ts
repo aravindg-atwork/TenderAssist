@@ -1,7 +1,8 @@
 // Uploads tender folders straight to a Google Drive folder through Google's
 // Drive API, with no Google app on the computer. The operator signs in once
-// in their browser; TenderAssist keeps the refresh token (encrypted by the
-// caller) and uploads with it. See docs/google-drive-setup.md.
+// in their browser (the same sign-in that activates the licence key);
+// TenderAssist keeps the refresh token (encrypted by the caller) and uploads
+// into a folder it makes in My Drive. See docs/google-drive-setup.md.
 
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -12,8 +13,15 @@ const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
-/** Full Drive access: the folder already exists, so the narrower "files this app made" scope cannot write into it. */
-export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
+/**
+ * Drive access to the files and folders TenderAssist makes, nothing else.
+ * TenderAssist makes the upload folder itself (by the name typed in
+ * Settings), so it never needs to see the rest of the operator's Drive, and
+ * Google treats this as a non-sensitive scope (no security assessment).
+ */
+export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+/** One sign-in for the licence (who the person is) and for Drive uploads. */
+export const SIGN_IN_SCOPE = `openid email ${DRIVE_SCOPE}`;
 const FOLDER_TYPE = 'application/vnd.google-apps.folder';
 const RETRY_DELAYS_MS = [1_000, 3_000, 8_000, 20_000];
 
@@ -58,12 +66,31 @@ export function driveFolderPath(outputRoot: string, folder: string): string[] {
   return path.split(/[\\/]+/).filter(Boolean);
 }
 
-/** The folder id from a Drive folder link (or the id itself). */
-export function parseDriveFolderId(input: string): string | null {
-  const value = input.trim();
-  const fromLink = /\/folders\/([A-Za-z0-9_-]{10,})/.exec(value)?.[1] ?? /[?&]id=([A-Za-z0-9_-]{10,})/.exec(value)?.[1];
-  if (fromLink) return fromLink;
-  return /^[A-Za-z0-9_-]{10,}$/.test(value) ? value : null;
+/**
+ * The folders to make in My Drive for the name typed in Settings:
+ * "Tenders 2026-27" gives one folder, "Office/Tenders" a folder inside a
+ * folder. Spaces around each part are tidied; empty parts are ignored.
+ */
+export function driveFolderNameParts(input: string): string[] {
+  const parts = input.split(/[\\/]+/).map((part) => part.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  if (parts.some((part) => part === '.' || part === '..')) throw new GoogleDriveError('A Drive folder name cannot be "." or "..".');
+  if (parts.some((part) => part.length > 120)) throw new GoogleDriveError('That Drive folder name is too long. Keep it under 120 characters.');
+  return parts;
+}
+
+/** The address of a Drive folder, to open it in the browser. */
+export function driveFolderLink(folderId: string): string {
+  return `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}`;
+}
+
+/** The email in a Google ID token (handed over by Google's own token endpoint, so not checked again here). */
+export function idTokenEmail(idToken: string): string {
+  try {
+    const payload = JSON.parse(Buffer.from(idToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as { email?: unknown };
+    return typeof payload.email === 'string' ? payload.email : '';
+  } catch {
+    return '';
+  }
 }
 
 function base64Url(buffer: Buffer): string {
@@ -81,40 +108,40 @@ function quoted(value: string): string {
 
 type BrowserSignInOptions = { fetch?: typeof fetch; timeoutMs?: number; signal?: AbortSignal };
 
-/**
- * Signs in with Google in the operator's own browser (the installed-app
- * loopback flow with PKCE) and returns a refresh token for Drive.
- */
-export async function signInWithBrowser(
-  credentials: DriveCredentials,
-  openBrowser: (url: string) => Promise<void>,
-  options: BrowserSignInOptions = {},
-): Promise<{ refreshToken: string }> {
-  const body = await authorizeInBrowser(credentials, openBrowser, { scope: DRIVE_SCOPE, offline: true }, options);
-  if (!body.refresh_token) throw new GoogleDriveError('Google did not complete the sign-in: no refresh token.');
-  return { refreshToken: body.refresh_token };
+export interface GoogleSignIn {
+  /** For the licence key server, which checks it with Google itself. */
+  idToken: string;
+  /** For Drive uploads; the caller keeps it encrypted. */
+  refreshToken: string;
+  email: string;
 }
 
 /**
- * Signs in with Google only to learn who the person is (for the licence key):
- * returns Google's ID token, which the key server checks with Google itself.
+ * Signs in with Google in the operator's own browser (the installed-app
+ * loopback flow with PKCE). One sign-in answers both needs: who the person
+ * is (the licence key) and permission to upload to Drive.
  */
-export async function signInForIdToken(
+export async function signInWithGoogle(
   credentials: DriveCredentials,
   openBrowser: (url: string) => Promise<void>,
   options: BrowserSignInOptions = {},
-): Promise<{ idToken: string }> {
-  const body = await authorizeInBrowser(credentials, openBrowser, { scope: 'openid email', offline: false }, options);
+): Promise<GoogleSignIn> {
+  const body = await authorizeInBrowser(credentials, openBrowser, SIGN_IN_SCOPE, options);
   if (!body.id_token) throw new GoogleDriveError('Google did not complete the sign-in: no identity token.');
-  return { idToken: body.id_token };
+  if (!body.refresh_token) throw new GoogleDriveError('Google did not complete the sign-in: no refresh token.');
+  // Google lets the person untick Drive on the consent page.
+  if (body.scope && !body.scope.split(' ').includes(DRIVE_SCOPE)) {
+    throw new GoogleDriveError('Google Drive was not allowed. Sign in again and leave the Google Drive box ticked, so TenderAssist can save tenders to your Drive.');
+  }
+  return { idToken: body.id_token, refreshToken: body.refresh_token, email: idTokenEmail(body.id_token) };
 }
 
 async function authorizeInBrowser(
   credentials: DriveCredentials,
   openBrowser: (url: string) => Promise<void>,
-  access: { scope: string; offline: boolean },
+  scope: string,
   options: BrowserSignInOptions,
-): Promise<{ refresh_token?: string; id_token?: string }> {
+): Promise<{ refresh_token?: string; id_token?: string; scope?: string }> {
   const fetchImpl = options.fetch ?? fetch;
   const verifier = base64Url(randomBytes(48));
   const challenge = base64Url(createHash('sha256').update(verifier).digest());
@@ -141,9 +168,10 @@ async function authorizeInBrowser(
         redirectUri = `http://127.0.0.1:${port}`;
         const url = new URL(AUTH_URL);
         url.search = new URLSearchParams({
-          client_id: credentials.clientId, redirect_uri: redirectUri, response_type: 'code', scope: access.scope,
+          client_id: credentials.clientId, redirect_uri: redirectUri, response_type: 'code', scope,
           code_challenge: challenge, code_challenge_method: 'S256', state,
-          ...(access.offline ? { access_type: 'offline', prompt: 'consent' } : { prompt: 'select_account' }),
+          // consent: Google hands over a refresh token every time; select_account: pick the key's account.
+          access_type: 'offline', prompt: 'consent select_account',
         }).toString();
         openBrowser(url.toString()).catch(reject);
       });
@@ -158,7 +186,7 @@ async function authorizeInBrowser(
         grant_type: 'authorization_code', code_verifier: verifier,
       }).toString(),
     });
-    const body = await response.json().catch(() => ({})) as { refresh_token?: string; id_token?: string; error_description?: string; error?: string };
+    const body = await response.json().catch(() => ({})) as { refresh_token?: string; id_token?: string; scope?: string; error_description?: string; error?: string };
     if (!response.ok) {
       throw new GoogleDriveError(`Google did not complete the sign-in: ${body.error_description ?? body.error ?? `HTTP ${response.status}`}.`, response.status);
     }
@@ -204,7 +232,7 @@ export class GoogleDriveClient {
   async folder(folderId: string): Promise<{ id: string; name: string }> {
     const item = await this.json<DriveItem & { capabilities?: { canAddChildren?: boolean }; trashed?: boolean }>(
       `${API}/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType,trashed,capabilities(canAddChildren)&supportsAllDrives=true`);
-    if (item.mimeType !== FOLDER_TYPE || item.trashed) throw new GoogleDriveError('That Drive link is not a folder (or it is in the bin).');
+    if (item.mimeType !== FOLDER_TYPE || item.trashed) throw new GoogleDriveError(`“${item.name}” on Drive is in the bin.`, 404);
     if (item.capabilities?.canAddChildren === false) throw new GoogleDriveError(`You can see “${item.name}” but cannot add files to it. Ask its owner for Editor access.`);
     return { id: item.id, name: item.name };
   }
@@ -215,6 +243,27 @@ export class GoogleDriveClient {
     const list = await this.json<{ files?: DriveItem[] }>(
       `${API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,md5Checksum)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`);
     return list.files?.[0] ?? null;
+  }
+
+  /** The files (not folders) directly in a folder. */
+  async files(parentId: string): Promise<DriveItem[]> {
+    const q = [`${quoted(parentId)} in parents`, 'trashed = false', `mimeType != '${FOLDER_TYPE}'`].join(' and ');
+    const found: DriveItem[] = [];
+    let pageToken = '';
+    do {
+      const list = await this.json<{ files?: DriveItem[]; nextPageToken?: string }>(
+        `${API}/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,md5Checksum)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`);
+      found.push(...(list.files ?? []));
+      pageToken = list.nextPageToken ?? '';
+    } while (pageToken);
+    return found;
+  }
+
+  /** Moves a file to Drive's bin (it can be restored from there for 30 days). */
+  async binFile(fileId: string): Promise<void> {
+    await this.request(`${API}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, {
+      method: 'PATCH', body: JSON.stringify({ trashed: true }), headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   /** The folder with this name inside a folder, made if missing. */
@@ -309,7 +358,7 @@ export class GoogleDriveClient {
         throw new GoogleDriveError('The Google Drive API is switched off in the Google Cloud project. Open console.cloud.google.com → APIs & Services → Library → Google Drive API → Enable, wait a few minutes, then try again.', status);
       }
       throw new GoogleDriveError(status === 404
-        ? 'The Drive folder was not found. Check the folder link, and that the signed-in account can open it.'
+        ? 'The Drive folder was not found. It may have been deleted, or made by another Google account.'
         : `Google Drive refused the request (HTTP ${status}${detail ? `: ${detail}` : ''}).`, status);
     }
   }

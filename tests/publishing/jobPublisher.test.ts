@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { folderTitle, jobOutputDirectory, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
+import { daySheetFileName, folderTitle, isDaySheet, jobOutputDirectory, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
 import type { TenderRow } from '../../src/persistence/repositories/tenderRepository.js';
 import { DEFAULT_OUTPUT_STRUCTURE } from '../../src/publishing/outputStructure.js';
 
@@ -25,7 +25,7 @@ describe('publishJobWorkbook', () => {
     } satisfies TenderRow;
     const output = await publishJobWorkbook(root, '2026-09-22', 'job-12345678', [{
       tender, automaticDecision: 'KEEP', documents: [],
-    }]);
+    }], DEFAULT_OUTPUT_STRUCTURE, 1, { url: 'https://tntenders.gov.in/nicgep/app', name: 'Tamil Nadu' });
     expect(output.jobDirectory).toBe(join(root, 'September-2026', '22-09-2026'));
     expect(output.workbookPath).toBe(join(output.jobDirectory, 'Approved-Tenders-22-09-2026.xlsx'));
     const workbook = new ExcelJS.Workbook();
@@ -36,10 +36,11 @@ describe('publishJobWorkbook', () => {
       'Project Nature', 'Tender Value', 'Bid Start Date', 'Bid End Date', 'EMD', 'Pre-bid Meeting Date', 'Eligibility',
       'Eligibility Notes', 'View Tender Link', 'Tender Document Link', 'Corrigenda',
       // The earlier columns follow, without the ones the office's set already has.
-      'Reference', 'Full title', 'Decision', 'Decision source', 'Review reason', 'Category', 'Organisation', 'State',
+      'Website', 'Reference', 'Full title', 'Decision', 'Decision source', 'Review reason', 'Category', 'Organisation', 'State',
       'Published date', 'Scope', 'Tender fee', 'Submission method', 'Contact', 'Extraction confidence', 'Documents downloaded', 'Tender folder']);
-    expect(sheet.getCell('Q2').value).toBe('REF-1');
-    expect(sheet.getCell('R2').value).toBe(tender.title);
+    expect(sheet.getCell('Q2').value).toBe('Tamil Nadu');
+    expect(sheet.getCell('R2').value).toBe('REF-1');
+    expect(sheet.getCell('S2').value).toBe(tender.title);
     expect(sheet.getCell('A2').value).toBe(1);
     expect(sheet.getCell('B2').value).toBe('PORTAL-1');
     expect(sheet.getCell('C2').value).toBe('Information Technology Department');
@@ -160,5 +161,40 @@ describe('tender folder names', () => {
     mkdirSync(join(day, '06-10-2026_2_Custom Bid for Services - Website redesign'));
     expect(tenderOutputDirectory(day, tender, 2, DEFAULT_OUTPUT_STRUCTURE, '2026-10-06')).toBe(join(day, '06-10-2026_2_Custom Bid for Services - Website redesign'));
     rmSync(day, { recursive: true, force: true });
+  });
+});
+
+describe('day report sheet names', () => {
+  const base = 'Approved-Tenders-12-10-2026.xlsx';
+
+  it('names a sheet per website by default, or one sheet for the day', () => {
+    expect(daySheetFileName(base, 'PER_WEBSITE', 'Tamil Nadu')).toBe('Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx');
+    expect(daySheetFileName(base, 'PER_WEBSITE', 'GeM: Bids')).toBe('Approved-Tenders-12-10-2026 - GeM- Bids.xlsx');
+    expect(daySheetFileName(base, 'ONE_PER_DAY', 'Tamil Nadu')).toBe(base);
+  });
+
+  it('knows every name TenderAssist has given a day sheet, and nothing else', () => {
+    for (const name of [base, 'Approved-Tenders-12-10-2026 (run 2).xlsx', 'Approved-Tenders-12-10-2026 - GeM.xlsx', 'approved-tenders-12-10-2026.XLSX']) {
+      expect(isDaySheet(base, name)).toBe(true);
+    }
+    for (const name of ['Eligibility.xlsx', '~$Approved-Tenders-12-10-2026.xlsx', 'Approved-Tenders-11-10-2026.xlsx', 'Approved-Tenders-12-10-2026.pdf']) {
+      expect(isDaySheet(base, name)).toBe(false);
+    }
+  });
+
+  it('removes sheets under old names from the Drive for desktop copy', () => {
+    const root = mkdtempSync(join(tmpdir(), 'tenderassist-sheets-'));
+    const local = join(root, 'local', 'October-2026', '12-10-2026');
+    const drive = join(root, 'drive');
+    mkdirSync(local, { recursive: true });
+    mkdirSync(join(drive, 'October-2026', '12-10-2026'), { recursive: true });
+    writeFileSync(join(local, 'Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx'), 'tn');
+    writeFileSync(join(drive, 'October-2026', '12-10-2026', 'Approved-Tenders-12-10-2026 (run 2).xlsx'), 'old');
+    writeFileSync(join(drive, 'October-2026', '12-10-2026', 'Notes.xlsx'), 'mine');
+    mirrorReportSheetsToDrive(local, join(root, 'local'), drive, base);
+    expect(existsSync(join(drive, 'October-2026', '12-10-2026', 'Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx'))).toBe(true);
+    expect(existsSync(join(drive, 'October-2026', '12-10-2026', 'Approved-Tenders-12-10-2026 (run 2).xlsx'))).toBe(false);
+    expect(existsSync(join(drive, 'October-2026', '12-10-2026', 'Notes.xlsx'))).toBe(true);
+    rmSync(root, { recursive: true, force: true });
   });
 });

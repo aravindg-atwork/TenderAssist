@@ -3,13 +3,16 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { driveFolderPath, GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInWithBrowser } from '../../src/publishing/googleDrive.js';
+import { DRIVE_SCOPE, driveFolderNameParts, driveFolderPath, GoogleDriveClient, idTokenEmail, parseGoogleClientFile, signInWithGoogle } from '../../src/publishing/googleDrive.js';
 
-interface Item { id: string; name: string; mimeType: string; parents: string[]; content?: Buffer; md5Checksum?: string }
+interface Item { id: string; name: string; mimeType: string; parents: string[]; content?: Buffer; md5Checksum?: string; trashed?: boolean }
 
 /** A small stand-in for Google's Drive API: enough to check what TenderAssist sends. */
 function fakeDrive(options: { busyFirst?: number; badGrant?: boolean } = {}) {
-  const items = new Map<string, Item>([['ROOT', { id: 'ROOT', name: 'Tenders', mimeType: 'application/vnd.google-apps.folder', parents: [] }]]);
+  const items = new Map<string, Item>([
+    ['ROOT', { id: 'ROOT', name: 'Tenders', mimeType: 'application/vnd.google-apps.folder', parents: [] }],
+    ['root', { id: 'root', name: 'My Drive', mimeType: 'application/vnd.google-apps.folder', parents: [] }],
+  ]);
   const sessions = new Map<string, { id?: string; name?: string; parents?: string[] }>();
   let next = 1;
   let busy = options.busyFirst ?? 0;
@@ -34,7 +37,7 @@ function fakeDrive(options: { busyFirst?: number; badGrant?: boolean } = {}) {
       const parent = /'([^']+)' in parents/.exec(q)?.[1];
       const name = /name = '((?:[^'\\]|\\.)*)'/.exec(q)?.[1]?.replace(/\\(.)/g, '$1');
       const folderOnly = q.includes('mimeType');
-      return json({ files: [...items.values()].filter((item) => item.parents.includes(parent!) && item.name === name && (!folderOnly || item.mimeType.endsWith('folder'))) });
+      return json({ files: [...items.values()].filter((item) => item.parents.includes(parent!) && item.name === name && !item.trashed && (!folderOnly || item.mimeType.endsWith('folder'))) });
     }
     if (url.pathname === '/drive/v3/files' && method === 'POST') {
       const body = JSON.parse(String(init.body)) as Item;
@@ -64,10 +67,22 @@ function fakeDrive(options: { busyFirst?: number; badGrant?: boolean } = {}) {
 }
 
 describe('uploading to Google Drive', () => {
-  it('reads the folder id from a Drive link', () => {
-    expect(parseDriveFolderId('https://drive.google.com/drive/folders/1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2?usp=drive_link')).toBe('1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2');
-    expect(parseDriveFolderId('https://drive.google.com/open?id=1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2')).toBe('1ExsDTIIiwpEICyz8zGlwasUPgNBwODm2');
-    expect(parseDriveFolderId('not a link')).toBeNull();
+  it('turns the typed folder name into the folders to make in My Drive', () => {
+    expect(driveFolderNameParts('  Tenders   2026-27 ')).toEqual(['Tenders 2026-27']);
+    expect(driveFolderNameParts('Office / Tenders\\2026')).toEqual(['Office', 'Tenders', '2026']);
+    expect(driveFolderNameParts('')).toEqual([]);
+    expect(() => driveFolderNameParts('Office/../Tenders')).toThrow(/cannot be/);
+  });
+
+  it('makes the named folder in My Drive once, then finds it again; a binned folder counts as gone', async () => {
+    const drive = fakeDrive();
+    const client = new GoogleDriveClient({ clientId: 'id', clientSecret: 'secret' }, 'refresh', { fetch: drive.fetchImpl, retryDelaysMs: [] });
+    const made = await client.ensurePath('root', driveFolderNameParts('Office/Tenders 2026-27'));
+    expect(await client.ensurePath('root', ['Office', 'Tenders 2026-27'])).toBe(made);
+    expect([...drive.items.values()].filter((item) => item.mimeType.endsWith('folder')).map((item) => item.name).sort())
+      .toEqual(['My Drive', 'Office', 'Tenders', 'Tenders 2026-27']);
+    drive.items.get(made)!.trashed = true;
+    await expect(client.folder(made)).rejects.toMatchObject({ status: 404 });
   });
 
   it('copies a tender folder into the same layout, sends nothing twice, and replaces a changed file', async () => {
@@ -91,7 +106,7 @@ describe('uploading to Google Drive', () => {
     // Again: the same folders are found, unchanged files are not sent.
     const again = await client.putFolder(await client.ensureFolder(await client.ensurePath('ROOT', ['10-2026', '06-10-2026']), '06-10-2026_1_Website redesign'), tender);
     expect(again).toEqual({ uploaded: 0, unchanged: 2 });
-    expect([...drive.items.values()].filter((item) => item.mimeType.endsWith('folder'))).toHaveLength(5);
+    expect([...drive.items.values()].filter((item) => item.mimeType.endsWith('folder'))).toHaveLength(6); // with My Drive
 
     writeFileSync(join(tender, 'Eligibility.xlsx'), 'sheet v2');
     expect(await client.putFolder(await client.ensureFolder(day, '06-10-2026_1_Website redesign'), tender)).toEqual({ uploaded: 1, unchanged: 1 });
@@ -100,7 +115,7 @@ describe('uploading to Google Drive', () => {
     rmSync(local, { recursive: true, force: true });
   });
 
-  it('says plainly when the sign-in has expired, and when the folder link is wrong', async () => {
+  it('says plainly when the sign-in has expired, and when the folder is gone', async () => {
     const expired = new GoogleDriveClient({ clientId: 'id', clientSecret: 'secret' }, 'refresh', { fetch: fakeDrive({ badGrant: true }).fetchImpl, retryDelaysMs: [] });
     await expect(expired.account()).rejects.toThrow(/Sign in to Google again/);
     const client = new GoogleDriveClient({ clientId: 'id', clientSecret: 'secret' }, 'refresh', { fetch: fakeDrive().fetchImpl, retryDelaysMs: [] });
@@ -109,30 +124,44 @@ describe('uploading to Google Drive', () => {
 });
 
 describe('signing in to Google in the browser', () => {
-  it('opens Google sign-in, receives the code on this computer, and keeps the refresh token', async () => {
+  const idToken = `x.${Buffer.from(JSON.stringify({ email: 'office@example.com' })).toString('base64url')}.sig`;
+  const fakeGoogle = (answer: Record<string, unknown>, posted: URLSearchParams[] = []) => (async (_url: string, init: RequestInit) => {
+    posted.push(new URLSearchParams(String(init.body)));
+    return new Response(JSON.stringify(answer), { status: 200 });
+  }) as unknown as typeof fetch;
+  // The "browser": Google sends it back to TenderAssist with a code.
+  const approve = (check: (auth: URL) => void = () => {}) => async (url: string) => {
+    const auth = new URL(url);
+    check(auth);
+    const back = new URL(auth.searchParams.get('redirect_uri')!);
+    back.searchParams.set('code', 'code-xyz');
+    back.searchParams.set('state', auth.searchParams.get('state')!);
+    setTimeout(() => { void fetch(back.toString()); }, 10);
+  };
+
+  it('one sign-in gives the licence its identity and Drive its refresh token', async () => {
     const posted: URLSearchParams[] = [];
-    const fakeFetch = (async (_url: string, init: RequestInit) => {
-      posted.push(new URLSearchParams(String(init.body)));
-      return new Response(JSON.stringify({ access_token: 'a', refresh_token: 'refresh-123' }), { status: 200 });
-    }) as unknown as typeof fetch;
-    const result = await signInWithBrowser({ clientId: 'client-1', clientSecret: 'secret-1' }, async (url) => {
-      // The "browser": Google sends it back to TenderAssist with a code.
-      const auth = new URL(url);
-      expect(auth.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/drive');
+    const result = await signInWithGoogle({ clientId: 'client-1', clientSecret: 'secret-1' }, approve((auth) => {
+      expect(auth.searchParams.get('scope')).toBe(`openid email ${DRIVE_SCOPE}`);
+      expect(DRIVE_SCOPE).toBe('https://www.googleapis.com/auth/drive.file');
+      expect(auth.searchParams.get('access_type')).toBe('offline');
       expect(auth.searchParams.get('code_challenge_method')).toBe('S256');
-      const back = new URL(auth.searchParams.get('redirect_uri')!);
-      back.searchParams.set('code', 'code-xyz');
-      back.searchParams.set('state', auth.searchParams.get('state')!);
-      setTimeout(() => { void fetch(back.toString()); }, 10);
-    }, { fetch: fakeFetch, timeoutMs: 5_000 });
-    expect(result).toEqual({ refreshToken: 'refresh-123' });
+    }), { fetch: fakeGoogle({ access_token: 'a', refresh_token: 'refresh-123', id_token: idToken, scope: `openid ${DRIVE_SCOPE} https://www.googleapis.com/auth/userinfo.email` }, posted), timeoutMs: 5_000 });
+    expect(result).toEqual({ idToken, refreshToken: 'refresh-123', email: 'office@example.com' });
     expect(posted[0].get('code')).toBe('code-xyz');
     expect(posted[0].get('client_secret')).toBe('secret-1');
     expect(posted[0].get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{40,}$/);
   });
 
+  it('refuses a sign-in where Drive was unticked', async () => {
+    await expect(signInWithGoogle({ clientId: 'c', clientSecret: 's' }, approve(),
+      { fetch: fakeGoogle({ access_token: 'a', refresh_token: 'r', id_token: idToken, scope: 'openid https://www.googleapis.com/auth/userinfo.email' }), timeoutMs: 5_000 }))
+      .rejects.toThrow(/Google Drive was not allowed/);
+    expect(idTokenEmail('not a token')).toBe('');
+  });
+
   it('reports a cancelled sign-in plainly', async () => {
-    await expect(signInWithBrowser({ clientId: 'c', clientSecret: 's' }, async (url) => {
+    await expect(signInWithGoogle({ clientId: 'c', clientSecret: 's' }, async (url) => {
       const back = new URL(new URL(url).searchParams.get('redirect_uri')!);
       back.searchParams.set('error', 'access_denied');
       setTimeout(() => { void fetch(back.toString()); }, 10);

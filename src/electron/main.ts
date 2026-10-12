@@ -2,7 +2,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
 import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createReadStream, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir, arch, release } from 'node:os';
 import { createDatabase, withTransaction } from '../persistence/db.js';
@@ -75,10 +75,12 @@ import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type
 import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windowsOcr.js';
 import { extractTenderRequirements } from '../extraction/requirementExtractor.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
-import { mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory } from '../publishing/jobPublisher.js';
+import { daySheetFileName, isDaySheet, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory, type PublishableTender, type ReportSheetMode } from '../publishing/jobPublisher.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
-import { driveFolderPath, GoogleDriveClient, parseDriveFolderId, parseGoogleClientFile, signInForIdToken, signInWithBrowser, type DriveCredentials } from '../publishing/googleDrive.js';
+import { driveFolderLink, driveFolderNameParts, driveFolderPath, GoogleDriveClient, GoogleDriveError, parseGoogleClientFile, signInWithGoogle, type DriveCredentials, type GoogleSignIn } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
+import { ReportSheetSettingsRepository } from '../persistence/repositories/reportSheetSettingsRepository.js';
+import type { JobOutputPlan } from '../persistence/repositories/jobOutputRepository.js';
 import { detailTextFor, downloadCorrigendumDocuments, downloadDetailDocuments, navigateToMyTenders, reviewTendersFromMyTenders } from '../browser/myTendersController.js';
 import { corrigendaSummary, isWatched, tenderPageFacts } from '../review/watchedTenders.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
@@ -98,6 +100,7 @@ import type { PaceAction } from '../orchestration/actionPacer.js';
 import { portalLockState, type PortalLockState } from './portalLock.js';
 import { CHECK_EVERY_MS } from '../licence/licence.js';
 import { LicenceStore, pcIdentity } from '../licence/licenceClient.js';
+import { fetchSharedCategories, reportCategoryList, sharedListToApply } from '../licence/sharedCategories.js';
 import { LicenceManager, type LicenceView } from '../licence/licenceManager.js';
 import { LICENCE_PUBLIC_KEY, LICENCE_SERVER_URL } from '../licence/licenceServer.js';
 
@@ -162,6 +165,7 @@ const displaySettings = new DisplaySettingsRepository(db);
 const jobOutputs = new JobOutputRepository(db);
 const opportunities = new OpportunityRepository(db);
 const googleDriveSettings = new GoogleDriveSettingsRepository(db);
+const reportSheetSettings = new ReportSheetSettingsRepository(db);
 const dailyCounts = new DailyCountRepository(db);
 const opportunitySync = { tenders, classifications, opportunities, workflow };
 
@@ -217,8 +221,9 @@ let pendingAnswer: ((answer: RunQuestionAnswer) => void) | undefined;
 const dscDownloadDirectory = join(getAppDataDir(dataPathEnv), 'dsc-downloads');
 // The licence key: enforced in installed builds (and in development with
 // TENDERASSIST_LICENCE=on). See src/licence/ and docs/licence-setup.md.
+const licenceStore = new LicenceStore(join(getAppDataDir(dataPathEnv), 'licence.json'));
 const licence = new LicenceManager({
-  store: new LicenceStore(join(getAppDataDir(dataPathEnv), 'licence.json')),
+  store: licenceStore,
   appDataDir: getAppDataDir(dataPathEnv),
   serverUrl: LICENCE_SERVER_URL,
   publicKey: LICENCE_PUBLIC_KEY,
@@ -226,19 +231,14 @@ const licence = new LicenceManager({
   enforced: app.isPackaged || process.env.TENDERASSIST_LICENCE === 'on',
   identity: pcIdentity,
   signIn: async () => {
-    const credentials = builtInGoogleClient('google-licence-client.json') ?? builtInGoogleClient();
-    if (!credentials) throw new Error('This copy of TenderAssist was built without Google sign-in. Ask for a build that includes it.');
-    try {
-      const { idToken } = await signInForIdToken(credentials, async (url) => {
-        googleSignInLink = url;
-        await shell.openExternal(url);
-      });
-      return idToken;
-    } finally {
-      googleSignInLink = null;
-    }
+    // The same sign-in allows Drive uploads; kept once the key server accepts it (activate-licence).
+    const signIn = await googleSignIn();
+    pendingLicenceSignIn = signIn;
+    return signIn.idToken;
   },
 });
+// The licence sign-in waiting for the key server's answer; its Drive access is saved only for an accepted key.
+let pendingLicenceSignIn: GoogleSignIn | null = null;
 // claimRun() is synchronous, so it reads these; every licence change updates them.
 let licenceUsable = false;
 let licenceRefusal = 'TenderAssist is still checking its key. Try again in a moment.';
@@ -783,6 +783,47 @@ ipcMain.handle('get-word-suggestions', (): WordSuggestions => {
 // GeM's list is public: read it from GeM when it is missing or two weeks old.
 const GEM_CATEGORY_LIST_MAX_AGE_MS = 14 * 86_400_000;
 
+/** Who this PC is to the key server, for the shared categories; null before activation. */
+async function sharedCategoriesCaller(): Promise<{ serverUrl: string; key: string; pcId: string } | null> {
+  const stored = licenceStore.read();
+  if (!stored?.signed || !LICENCE_SERVER_URL) return null;
+  return { serverUrl: LICENCE_SERVER_URL, key: stored.key, pcId: (await pcIdentity()).pcId };
+}
+
+/**
+ * Saves a category list just read from the website and shares it with every
+ * other TenderAssist through the key server (in the background; offline is fine).
+ */
+function rememberCategoryList(listId: string, names: string[], readAt = new Date().toISOString(), codes?: Record<string, string>): PortalCategoryList {
+  const saved = portalCategories.save(listId, names, readAt, codes);
+  void sharedCategoriesCaller().then((caller) => caller && reportCategoryList(caller, listId, saved.categories, readAt, codes))
+    .catch((error) => console.error('[TenderAssist] Could not share the category list:', error));
+  return saved;
+}
+
+let pullingSharedCategories: Promise<void> | null = null;
+let sharedCategoriesPulledAt = 0;
+
+/**
+ * Takes in the lists other offices read since this PC last read each website,
+ * so a renamed or dropped category is known here the same day: Today warns
+ * before Start, and Settings shows the new categories.
+ */
+function pullSharedCategories(minAgeMs = 0): Promise<void> {
+  if (!pullingSharedCategories && Date.now() - sharedCategoriesPulledAt < minAgeMs) return Promise.resolve();
+  pullingSharedCategories ??= (async () => {
+    const caller = await sharedCategoriesCaller();
+    const shared = caller ? await fetchSharedCategories(caller) : null;
+    if (shared) sharedCategoriesPulledAt = Date.now();
+    for (const [listId, list] of Object.entries(shared ?? {})) {
+      const apply = sharedListToApply(portalCategories.get(listId), list);
+      if (apply) portalCategories.save(listId, apply.names, apply.readAt, Object.keys(apply.codes).length ? apply.codes : undefined);
+    }
+  })().catch((error) => console.error('[TenderAssist] Could not read the shared categories:', error))
+    .finally(() => { pullingSharedCategories = null; });
+  return pullingSharedCategories;
+}
+
 /**
  * GeM's Category dropdown, services and products, exactly as GeM shows it
  * with each entry's code. Read from GeM when missing or two weeks old.
@@ -797,8 +838,8 @@ async function gemCategoryLists(portal: PortalDefinition): Promise<{ services: P
       const list = await retryTransient(() => new GemClient({ timeoutMs: 60_000 }).categoryList(), { delaysMs: [2_000, 5_000] });
       const codesOf = (entries: Array<{ name: string; code: string }>) => Object.fromEntries(entries.map((entry) => [entry.name, entry.code]));
       const readAt = new Date().toISOString();
-      services = portalCategories.save(portal.id, list.services.map((entry) => entry.name), readAt, codesOf(list.services));
-      products = portalCategories.save(productsKey, list.products.map((entry) => entry.name), readAt, codesOf(list.products));
+      services = rememberCategoryList(portal.id, list.services.map((entry) => entry.name), readAt, codesOf(list.services));
+      products = rememberCategoryList(productsKey, list.products.map((entry) => entry.name), readAt, codesOf(list.products));
     } catch (error) {
       // The saved list (if any) still works; the picker says when it was read.
       console.error('[TenderAssist] GeM category list not read:', error);
@@ -837,6 +878,8 @@ async function categoryListForHealth(portal: PortalDefinition): Promise<PortalCa
 }
 
 ipcMain.handle('get-category-health', async (_event, portalId: string): Promise<CategoryHealth> => {
+  // Before Start: take in category changes other offices saw today (never waits more than 5 seconds).
+  await Promise.race([pullSharedCategories(10 * 60 * 1000), new Promise((resolveWait) => setTimeout(resolveWait, 5_000))]);
   const portal = getPortalDefinition(portalId);
   return categoryHealth(await categoryListForHealth(portal), categoriesForPortal(runConfigurations.getDefaults(), portal));
 });
@@ -869,56 +912,64 @@ ipcMain.handle('save-publishing-settings', (_event, portalId: string, settings) 
 ipcMain.handle('get-google-drive', () => googleDriveStatus());
 
 ipcMain.handle('save-google-drive', async (_event, input: unknown): Promise<GoogleDriveStatus> => {
-  const value = (input ?? {}) as { folderLink?: unknown; uploadMode?: unknown };
+  const value = (input ?? {}) as { folderName?: unknown; uploadMode?: unknown };
   const current = googleDriveSettings.get();
   if (value.uploadMode === 'SAVED' || value.uploadMode === 'APPROVED') {
     googleDriveSettings.save({ ...current, uploadMode: value.uploadMode });
-    if (typeof value.folderLink !== 'string') return googleDriveStatus();
+    if (typeof value.folderName !== 'string') return googleDriveStatus();
   }
-  const folderLink = typeof value.folderLink === 'string' ? value.folderLink.trim() : '';
-  const folderId = folderLink ? parseDriveFolderId(folderLink) : '';
-  if (folderLink && !folderId) throw new Error('That does not look like a Google Drive folder link. Open the folder in Drive and copy the address from the browser.');
-  googleDriveSettings.save({ ...googleDriveSettings.get(), folderId: folderId ?? '', folderName: folderId === current.folderId ? current.folderName : '' });
-  // Check a new folder straight away when already signed in.
-  const drive = await googleDriveClient();
-  if (drive && folderId && folderId !== current.folderId) {
-    const folder = await drive.client.folder(folderId);
-    googleDriveSettings.save({ ...googleDriveSettings.get(), folderName: folder.name });
-  }
+  const folderName = driveFolderNameParts(typeof value.folderName === 'string' ? value.folderName : '').join('/');
+  if (folderName === current.folderName) return googleDriveStatus();
+  // A new name means a new folder: found (or made) in My Drive when signed in, otherwise at the first upload.
+  googleDriveSettings.save({ ...googleDriveSettings.get(), folderName, folderId: '' });
+  const client = await googleDriveClient();
+  if (client && folderName) await driveFolderFor(client);
   return googleDriveStatus();
 });
 
+/** Signs in to Google again from Settings (when the licence sign-in was not kept, ended, or was removed). */
 ipcMain.handle('connect-google-drive', async (): Promise<GoogleDriveStatus> => {
-  const credentials = builtInGoogleClient();
-  if (!credentials) throw new Error('This copy of TenderAssist was built without Google sign-in. Ask for a build that includes it.');
-  const settings = googleDriveSettings.get();
-  if (!settings.folderId) throw new Error('Paste the Drive folder link and save it first.');
-  try {
-    const { refreshToken } = await signInWithBrowser(credentials, async (url) => {
-      googleSignInLink = url;
-      await shell.openExternal(url);
-    });
-    const client = new GoogleDriveClient(credentials, refreshToken);
-    const [account, folder] = await Promise.all([client.account(), client.folder(settings.folderId)]);
-    googleDriveSettings.save({
-      ...googleDriveSettings.get(),
-      refreshTokenEncrypted: await encryptText(refreshToken),
-      accountEmail: account.email,
-      folderName: folder.name,
-      connectedAt: new Date().toISOString(),
-    });
-    return googleDriveStatus();
-  } finally {
-    googleSignInLink = null;
-  }
+  await keepGoogleSignIn(await googleSignIn());
+  return googleDriveStatus();
 });
 
 ipcMain.handle('check-google-drive', async (): Promise<GoogleDriveStatus> => {
-  const drive = await googleDriveClient();
-  if (!drive) throw new Error('Google Drive is not signed in yet.');
-  const [account, folder] = await Promise.all([drive.client.account(), drive.client.folder(drive.folderId)]);
-  googleDriveSettings.save({ ...googleDriveSettings.get(), accountEmail: account.email, folderName: folder.name });
+  const client = await googleDriveClient();
+  if (!client) throw new Error('Google Drive is not signed in yet.');
+  const account = await client.account();
+  googleDriveSettings.save({ ...googleDriveSettings.get(), accountEmail: account.email });
+  if (googleDriveSettings.get().folderName) await driveFolderFor(client);
   return googleDriveStatus();
+});
+
+ipcMain.handle('get-report-sheets', (): ReportSheetMode => reportSheetSettings.get());
+
+/** Changes how day sheets are split; every saved day is rewritten the new way (and Drive follows), in the background. */
+ipcMain.handle('save-report-sheets', (_event, mode: unknown): ReportSheetMode => {
+  const previous = reportSheetSettings.get();
+  const saved = reportSheetSettings.save(mode === 'ONE_PER_DAY' ? 'ONE_PER_DAY' : 'PER_WEBSITE');
+  if (saved !== previous) void rewriteAllDaySheets();
+  return saved;
+});
+
+async function rewriteAllDaySheets(): Promise<void> {
+  const days = new Map<string, string>();
+  for (const job of jobs.listAll()) {
+    const plan = jobOutputs.getPlan(job.id);
+    if (plan && job.id !== activeJobId && existsSync(plan.jobDirectory)) days.set(resolve(plan.jobDirectory).toLocaleLowerCase(), job.id);
+  }
+  for (const jobId of days.values()) {
+    try { await publishStoredJob(jobId); }
+    catch (error) { console.error(`[TenderAssist] Could not rewrite the report sheets of run ${jobId}:`, error); }
+  }
+  const jobIds = [...days.values()];
+  if (runsUploadToDrive() && jobIds.length > 0) void uploadToGoogleDrive([], jobIds.map((jobId) => ({ jobId })), 'report sheets upload');
+}
+
+ipcMain.handle('open-google-drive-folder', async (): Promise<void> => {
+  const { folderId } = googleDriveSettings.get();
+  if (!folderId) throw new Error('The Drive folder is made at the first upload. Run a search, or choose “Upload everything saved so far”.');
+  await shell.openExternal(driveFolderLink(folderId));
 });
 
 ipcMain.handle('upload-everything-to-google-drive', async (): Promise<GoogleDriveStatus> => {
@@ -961,10 +1012,8 @@ function operatorDecisionReview(tender: TenderRow): TenderReviewRow | undefined 
   return undefined;
 }
 
-function publishStoredJob(jobId: string) {
-  const config = runConfigurations.getForJob(jobId);
-  if (!config) throw new Error('This job has no saved run configuration.');
-  const plan = outputPlanFor(jobId, config.portalId);
+/** The tenders of one run that belong on its day's sheet. */
+function sheetItemsFor(jobId: string, plan: JobOutputPlan, portal: PortalDefinition): PublishableTender[] {
   const allItems = tenders.listForJob(jobId).map((tender) => ({
     tender,
     automaticDecision: classifications.getFinalForTender(tender.id),
@@ -978,9 +1027,53 @@ function publishStoredJob(jobId: string) {
   const items = explicitlyProcessed.length > 0
     ? explicitlyProcessed
     : allItems.filter((item) => (item.manualReview?.decision ?? item.automaticDecision) === 'KEEP');
-  const numbered = items.map((item) => ({ ...item, serialNumber: jobOutputs.serialNumberFor(plan, item.tender.id) }));
-  const portal = getPortalDefinition(config.portalId);
-  return publishJobWorkbook(plan.outputRoot, plan.outputDate, jobId, numbered, plan.structure, plan.runNumber, { url: portal.url, name: portal.name });
+  return items.map((item) => ({ ...item, serialNumber: jobOutputs.serialNumberFor(plan, item.tender.id), portal: { url: portal.url, name: portal.name } }));
+}
+
+// Day folders whose sheets are being written, so two writes never cross.
+const daySheetWrites = new Map<string, Promise<void>>();
+
+/**
+ * Writes the report sheets of a run's day folder. Every run saving into that
+ * folder is on them: one sheet per website (Settings → Folders → Report
+ * sheets), or one sheet for the whole day. Sheets under names no longer used
+ * (an older "(run 2)" sheet, the other split) are removed.
+ */
+function publishStoredJob(jobId: string): Promise<void> {
+  const config = runConfigurations.getForJob(jobId);
+  if (!config) return Promise.reject(new Error('This job has no saved run configuration.'));
+  const plan = outputPlanFor(jobId, config.portalId);
+  const key = resolve(plan.jobDirectory).toLocaleLowerCase();
+  const write = (daySheetWrites.get(key) ?? Promise.resolve()).catch(() => {}).then(() => publishDaySheets(plan));
+  daySheetWrites.set(key, write);
+  return write;
+}
+
+async function publishDaySheets(plan: JobOutputPlan): Promise<void> {
+  const mode = reportSheetSettings.get();
+  const baseName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook;
+  const sheets = new Map<string, { items: PublishableTender[]; portal: PortalDefinition; jobId: string }>();
+  for (const jobId of jobOutputs.jobsInDirectory(plan.jobDirectory)) {
+    const config = runConfigurations.getForJob(jobId);
+    const jobPlan = jobOutputs.getPlan(jobId);
+    if (!config || !jobPlan) continue;
+    const portal = getPortalDefinition(config.portalId);
+    const fileName = daySheetFileName(baseName, mode, portal.name);
+    const sheet = sheets.get(fileName) ?? { items: [], portal, jobId };
+    sheet.items.push(...sheetItemsFor(jobId, jobPlan, portal));
+    sheets.set(fileName, sheet);
+  }
+  for (const [fileName, sheet] of sheets) {
+    const items = [...sheet.items].sort((a, b) => (a.serialNumber ?? 0) - (b.serialNumber ?? 0));
+    await publishJobWorkbook(plan.outputRoot, plan.outputDate, sheet.jobId, items, plan.structure, 1, { url: sheet.portal.url, name: sheet.portal.name }, fileName);
+  }
+  const written = new Set([...sheets.keys()].map((name) => name.toLocaleLowerCase()));
+  for (const name of existsSync(plan.jobDirectory) ? readdirSync(plan.jobDirectory) : []) {
+    if (isDaySheet(baseName, name) && !written.has(name.toLocaleLowerCase())) {
+      try { rmSync(join(plan.jobDirectory, name), { force: true }); }
+      catch (error) { console.error(`[TenderAssist] Could not remove the old report sheet ${name}:`, error); }
+    }
+  }
 }
 
 // Jobs published before output plans existed get one from today's settings
@@ -998,7 +1091,16 @@ ipcMain.handle('check-for-updates', () => checkForUpdates(() => mainWindow));
 ipcMain.handle('get-licence', async (): Promise<LicenceView> => noteLicence(await licence.view()));
 ipcMain.handle('activate-licence', async (_event, key: unknown): Promise<LicenceView> => {
   if (typeof key !== 'string') throw new Error('Paste your TenderAssist key.');
-  return licence.activate(key);
+  pendingLicenceSignIn = null;
+  try {
+    const view = await licence.activate(key);
+    // The key's Google account is also the Drive account: no second sign-in in Settings.
+    // The key is active either way; a failure here leaves Settings asking to sign in to Google.
+    if (pendingLicenceSignIn) await keepGoogleSignIn(pendingLicenceSignIn).catch((error) => console.error('[TenderAssist] Could not keep the Google sign-in for Drive:', error));
+    return view;
+  } finally {
+    pendingLicenceSignIn = null;
+  }
 });
 ipcMain.handle('check-licence', (): Promise<LicenceView> => licence.check());
 ipcMain.handle('restart-to-install-update', (): void => restartToInstall());
@@ -1406,7 +1508,7 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
   let result: AuthJobUpdate;
   for (let signIns = 0; ; signIns += 1) {
     result = await runPostProcessing(
-      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: ctx.abortController.signal, downloader: ctx.downloader, readDocuments: (rows, report) => readTenderDocuments(rows, report) },
+      { jobs, sessions, jobMachine, tenders, classifications, workflow, outputs: jobOutputs, signal: ctx.abortController.signal, downloader: ctx.downloader, readDocuments: (rows, report) => readTenderDocuments(rows, report), publishDaySheets: publishStoredJob },
       ctx.page,
       jobId,
       authSessionId,
@@ -1531,22 +1633,84 @@ async function decryptText(value: string | null): Promise<string | null> {
   catch { return null; }
 }
 
-/** A Drive client for the saved sign-in, or null when Drive is not set up and signed in. */
 /**
  * TenderAssist's own Google sign-in credential, packed into the build from
- * google-oauth-client.json (kept out of git). Operators never see it.
+ * google-oauth-client.json (kept out of git). Operators never see it. The
+ * licence and Drive share it: one sign-in gives both.
  */
-function builtInGoogleClient(file = 'google-oauth-client.json'): DriveCredentials | null {
-  try { return parseGoogleClientFile(readFileSync(join(app.getAppPath(), file), 'utf8')); }
+function builtInGoogleClient(): DriveCredentials | null {
+  try { return parseGoogleClientFile(readFileSync(join(app.getAppPath(), 'google-oauth-client.json'), 'utf8')); }
   catch { return null; }
 }
 
-async function googleDriveClient(): Promise<{ client: GoogleDriveClient; folderId: string } | null> {
+/** Whether the saved Drive sign-in was made with this build's Google client (a sign-in made with a folder link, before the folder name, has none recorded). */
+function driveSignInUsable(): boolean {
   const settings = googleDriveSettings.get();
   const credentials = builtInGoogleClient();
-  const refreshToken = await decryptText(settings.refreshTokenEncrypted);
-  if (!credentials || !refreshToken || !settings.folderId) return null;
-  return { client: new GoogleDriveClient(credentials, refreshToken), folderId: settings.folderId };
+  return Boolean(credentials && settings.refreshTokenEncrypted && (!settings.clientId || settings.clientId === credentials.clientId));
+}
+
+/** Signs in with Google in the browser: who the person is, and Drive access. */
+async function googleSignIn(): Promise<GoogleSignIn> {
+  const credentials = builtInGoogleClient();
+  if (!credentials) throw new Error('This copy of TenderAssist was built without Google sign-in. Ask for a build that includes it.');
+  try {
+    return await signInWithGoogle(credentials, async (url) => {
+      googleSignInLink = url;
+      await shell.openExternal(url);
+    });
+  } finally {
+    googleSignInLink = null;
+  }
+}
+
+/** Keeps a Google sign-in for Drive uploads, and makes the Drive folder when its name is already set. */
+async function keepGoogleSignIn(signIn: GoogleSignIn): Promise<void> {
+  const previous = googleDriveSettings.get();
+  const sameAccount = previous.accountEmail.toLowerCase() === signIn.email.toLowerCase();
+  googleDriveSettings.save({
+    ...previous,
+    clientId: builtInGoogleClient()?.clientId ?? '',
+    refreshTokenEncrypted: await encryptText(signIn.refreshToken),
+    accountEmail: signIn.email,
+    connectedAt: new Date().toISOString(),
+    // Another account cannot see the old account's folder: make it again there.
+    folderId: sameAccount ? previous.folderId : '',
+  });
+  const client = await googleDriveClient();
+  if (client && googleDriveSettings.get().folderName) {
+    // A missing folder is made at the next upload; the sign-in itself has worked.
+    await driveFolderFor(client).catch((error) => console.error('[TenderAssist] Could not make the Drive folder after sign-in:', error));
+  }
+}
+
+/** A Drive client for the saved sign-in, or null when not signed in. */
+async function googleDriveClient(): Promise<GoogleDriveClient | null> {
+  if (!driveSignInUsable()) return null;
+  const refreshToken = await decryptText(googleDriveSettings.get().refreshTokenEncrypted);
+  return refreshToken ? new GoogleDriveClient(builtInGoogleClient()!, refreshToken) : null;
+}
+
+/**
+ * The Drive folder uploads go into, by the name typed in Settings. Found in
+ * My Drive among the folders TenderAssist made, or made there; made again if
+ * it was deleted or binned. Inside it: month folders, then day folders.
+ */
+async function driveFolderFor(client: GoogleDriveClient): Promise<string> {
+  const settings = googleDriveSettings.get();
+  if (settings.folderId) {
+    try {
+      await client.folder(settings.folderId);
+      return settings.folderId;
+    } catch (error) {
+      if (!(error instanceof GoogleDriveError && error.status === 404)) throw error;
+    }
+  }
+  const parts = driveFolderNameParts(settings.folderName);
+  if (parts.length === 0) throw new Error('Type a Drive folder name in Settings → Upload to Google Drive.');
+  const folderId = await client.ensurePath('root', parts);
+  googleDriveSettings.save({ ...googleDriveSettings.get(), folderId });
+  return folderId;
 }
 
 // The Google sign-in address while a sign-in waits, for opening it in another browser.
@@ -1560,7 +1724,7 @@ async function googleDriveStatus(): Promise<GoogleDriveStatus> {
     folderId: settings.folderId,
     folderName: settings.folderName,
     accountEmail: settings.accountEmail,
-    signedIn: Boolean(settings.refreshTokenEncrypted),
+    signedIn: driveSignInUsable(),
     encryptionAvailable: await safeStorage.isAsyncEncryptionAvailable(),
     uploadMode: settings.uploadMode,
     uploading: driveUploading,
@@ -1582,17 +1746,23 @@ interface DriveUploadSummary { tenders: number; files: number; problems: string[
  */
 function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array<{ jobId: string }> = [], label = 'Google Drive upload'): Promise<DriveUploadSummary | null> {
   const run = driveUploads.then(async (): Promise<DriveUploadSummary | null> => {
-    const drive = await googleDriveClient();
-    if (!drive) return null;
+    const client = await googleDriveClient();
+    const settings = googleDriveSettings.get();
+    if (!client || (!settings.folderName && !settings.folderId)) return null;
     driveUploading = true;
     const summary: DriveUploadSummary = { tenders: 0, files: 0, problems: [] };
+    const folderId = await driveFolderFor(client).catch((error: unknown) => {
+      summary.problems.push(`The Drive folder “${settings.folderName}”: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    const drive = { client, folderId: folderId ?? '' };
     const days = new Map<string, { plan: NonNullable<ReturnType<typeof jobOutputs.getPlan>> }>();
     for (const { jobId } of extraDayDirectories) {
       const plan = jobOutputs.getPlan(jobId);
       if (plan && existsSync(plan.jobDirectory)) days.set(plan.jobDirectory, { plan });
     }
     try {
-      for (const tender of tenderRows) {
+      for (const tender of folderId ? tenderRows : []) {
         // A tender waiting for the operator stays on this computer; it goes
         // to Drive when approved (afterApproval), never when rejected.
         if (!isApprovedTender(tender)) continue;
@@ -1617,15 +1787,19 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
         }
       }
       // Each day's report sheet(s), next to its tender folders.
-      for (const { plan } of days.values()) {
+      for (const { plan } of folderId ? days.values() : []) {
         try {
           const segments = driveFolderPath(plan.outputRoot, plan.jobDirectory);
           const dayId = await drive.client.ensurePath(drive.folderId, segments);
-          const sheetName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook.replace(/\.xlsx$/i, '').toLocaleLowerCase();
-          for (const name of readdirSync(plan.jobDirectory)) {
-            if (/\.xlsx$/i.test(name) && name.toLocaleLowerCase().startsWith(sheetName)) {
-              if (await drive.client.putFile(dayId, join(plan.jobDirectory, name), name) === 'uploaded') summary.files += 1;
-            }
+          const baseName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook;
+          const sheets = readdirSync(plan.jobDirectory).filter((name) => isDaySheet(baseName, name));
+          for (const name of sheets) {
+            if (await drive.client.putFile(dayId, join(plan.jobDirectory, name), name) === 'uploaded') summary.files += 1;
+          }
+          // Sheets under names no longer used on this computer ("(run 2)", the other split) go to Drive's bin.
+          const kept = new Set(sheets.map((name) => name.toLocaleLowerCase()));
+          for (const file of await drive.client.files(dayId)) {
+            if (isDaySheet(baseName, file.name) && !kept.has(file.name.toLocaleLowerCase())) await drive.client.binFile(file.id);
           }
         } catch (error) {
           summary.problems.push(`Report sheet for ${plan.outputDate}: ${error instanceof Error ? error.message : String(error)}`);
@@ -1686,7 +1860,11 @@ function afterApproval(tenderRows: TenderRow[]): void {
  */
 async function refreshDaySheets(tenderRows: TenderRow[]): Promise<void> {
   for (const jobId of new Set(tenderRows.map((tender) => tender.job_id))) {
-    if (jobId === activeJobId) continue; // The running search writes its own sheet when it finishes.
+    // A search still saving writes its own sheet when it finishes. One that has
+    // finished and waits signed in ("What next?") already wrote it: rewrite it,
+    // or a tender approved in the live review never reaches the sheet.
+    const state = jobs.getById(jobId)?.state;
+    if (jobId === activeJobId && state !== 'COMPLETE' && state !== 'REPORTING') continue;
     try { await publishStoredJob(jobId); }
     catch (error) { console.error(`Could not update the report sheet of run ${jobId}:`, error); }
   }
@@ -1713,7 +1891,7 @@ function countFound(jobId: string): CollectedCounts {
 /** Whether runs copy what they save to Google Drive. */
 function runsUploadToDrive(): boolean {
   const settings = googleDriveSettings.get();
-  return Boolean(settings.refreshTokenEncrypted && settings.folderId) && builtInGoogleClient() !== null;
+  return driveSignInUsable() && Boolean(settings.folderName || settings.folderId);
 }
 
 function runFinishedMessage(counts: CollectedCounts, dateCount = 1, inSession = false): string {
@@ -1875,7 +2053,7 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
   const deps = { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction, portalHomeUrl: portal.url };
   const page = ctx.page!;
   const searchResult = await runSearchPhase(
-    { ...deps, searches, onCategoryList: (categories) => portalCategories.save(portal.id, categories) },
+    { ...deps, searches, onCategoryList: (categories) => rememberCategoryList(portal.id, categories) },
     page,
     jobId,
     authSessionId,
@@ -2649,6 +2827,8 @@ async function collectApprovedDocuments(ctx: RunContext, jobId: string, authSess
     }
     // Read inside the files (OCR for scans) and find the requirements again.
     await readTenderDocuments(targets, (statusMessage) => emitJobUpdate(update({ statusMessage }))).catch(() => {});
+    // Their day sheets list them now, with what their documents say (before Drive gets the sheets).
+    await refreshDaySheets(targets);
     // Approved tenders go to Drive once their files are saved.
     reportDriveProblems(copyApprovedTendersToDrive(targets));
     // Their files are saved now, so Drive gets them too.
@@ -3257,7 +3437,9 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
     configureUpdates(() => mainWindow);
     // The key: read the saved answer at once, ask the server soon after, then
     // every few hours; re-read hourly so a key that ends while open locks.
-    void licence.view().then(noteLicence).then(() => licence.check());
+    void licence.view().then(noteLicence).then(() => licence.check()).then(() => pullSharedCategories());
+    // Category changes other offices saw: hourly, so they arrive the same day.
+    setInterval(() => { void pullSharedCategories(); }, 60 * 60 * 1000);
     setInterval(() => { void licence.check(); }, CHECK_EVERY_MS);
     setInterval(() => { void licence.view().then(noteLicence); }, 60 * 60 * 1000);
     if (app.isPackaged) {
@@ -3268,6 +3450,11 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
           // the release feed is unavailable.
         });
       }, 5000);
+      // Offices leave TenderAssist open all day: look for a new version every 4 hours, so it arrives the same day.
+      setInterval(() => {
+        const state = getUpdateStatus().state;
+        if (state !== 'READY' && state !== 'DOWNLOADING') void checkForUpdates(() => mainWindow).catch(() => {});
+      }, 4 * 60 * 60 * 1000);
     }
   });
 }

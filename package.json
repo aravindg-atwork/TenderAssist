@@ -1,6 +1,6 @@
 {
   "name": "tenderassist",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "Desktop automation for finding and shortlisting relevant government tenders",
   "author": "TenderAssist",
   "private": true,
@@ -55,8 +55,7 @@
       "renderer/dist/**/*",
       "src/persistence/migrations/**/*",
       "package.json",
-      "google-oauth-client.json",
-      "google-licence-client.json"
+      "google-oauth-client.json"
     ],
     "asar": true,
     "publish": [
@@ -76,7 +75,13 @@
         }
       ],
       "artifactName": "TenderAssist-Setup-${version}.${ext}",
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "signtoolOptions": {
+        "sign": "build/sign-windows.cjs",
+        "signingHashAlgorithms": [
+          "sha256"
+        ]
+      }
     },
     "nsis": {
       "oneClick": false,

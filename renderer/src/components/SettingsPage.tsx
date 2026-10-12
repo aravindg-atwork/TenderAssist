@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import { GoogleDriveSetting } from './GoogleDriveSetting';
+import { ReportSheetsSetting } from './ReportSheetsSetting';
 import { LicenceSetting } from './Licence';
 import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { CategoryHealth, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
@@ -386,13 +387,14 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
 
         <section id="settings-folders" hidden={active !== 'folders'} className="block" ref={foldersSectionRef} tabIndex={-1}>
           <h2>Folders</h2>
-          <p className="block__lede">Each date gets a folder, and each kept tender a folder inside it with its documents (and the zip, where the website offers one) and eligibility sheet. Approved tenders are copied to the Drive folder.</p>
+          <p className="block__lede">Each month gets a folder, each date a folder inside it, and each kept tender a folder inside that with its documents (and the zip, where the website offers one) and eligibility sheet. Approved tenders are uploaded to your Google Drive folder.</p>
           <label className="field field--wide" htmlFor="local-output-root"><span>Save tenders in</span></label>
           <div className="picker">
             <input id="local-output-root" type="text" value={publishing?.localOutputRoot ?? ''}
               onChange={(event) => publishing && setPublishing({ ...publishing, localOutputRoot: event.target.value })} />
             <button className="btn btn--quiet" type="button" onClick={() => choosePublishingFolder('local')}>Choose…</button>
           </div>
+          <ReportSheetsSetting />
           <GoogleDriveSetting />
           <label className="field field--wide" htmlFor="drive-output-root"><span>Or copy approved tenders to a Google Drive for desktop folder <small>optional</small></span></label>
           <div className="picker">

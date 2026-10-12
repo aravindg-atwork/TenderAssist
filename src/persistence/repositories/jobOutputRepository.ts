@@ -57,6 +57,13 @@ export class JobOutputRepository {
     return this.getPlan(jobId)!;
   }
 
+  /** Every job saving into this day folder (all websites, all runs), oldest first. */
+  jobsInDirectory(jobDirectory: string): string[] {
+    const rows = this.db.prepare('SELECT job_id FROM job_output_plans WHERE directory_key = ? ORDER BY run_number')
+      .all(directoryKey(jobDirectory)) as Array<{ job_id: string }>;
+    return rows.map((row) => row.job_id);
+  }
+
   /** The tender's S.No if it was ever given an output folder. */
   findSerialNumber(tenderId: string): number | undefined {
     const row = this.db.prepare('SELECT serial_number FROM job_output_tenders WHERE tender_id = ?').get(tenderId) as

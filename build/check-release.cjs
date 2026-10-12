@@ -17,3 +17,14 @@ if (app !== installer) {
   process.exit(1);
 }
 console.log(`Licence key server: ${app}`);
+
+// Google sign-in (the key and Drive) is packed from google-oauth-client.json,
+// kept out of git. A build without it activates no key: never ship one from CI.
+const { existsSync } = require('node:fs');
+if (!existsSync(join(root, 'google-oauth-client.json'))) {
+  if (process.env.CI) {
+    console.error('google-oauth-client.json is missing: set the GOOGLE_OAUTH_CLIENT_JSON secret (docs/code-signing.md).');
+    process.exit(1);
+  }
+  console.warn('Warning: google-oauth-client.json is missing, so this build has no Google sign-in (keys cannot be activated).');
+}

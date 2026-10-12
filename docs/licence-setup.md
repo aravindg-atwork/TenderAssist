@@ -93,23 +93,37 @@ would cut off installed apps.
 
 ### 3. Google sign-in for customers (important)
 
-The app's Google sign-in for Drive is in **Testing** mode, which lets only the
-listed test users sign in. Customers sign in with their own Google accounts, so
-the licence sign-in needs a client that is **In production**.
+One Google sign-in does two things: it links the key to the customer's Google
+account, and it lets TenderAssist upload tenders to that account's Drive (in a
+folder TenderAssist makes; Settings → Folders → Upload to Google Drive takes
+only a folder name). The app and the licence use **one** Google client,
+`google-oauth-client.json`.
 
-Recommended: a separate Google Cloud project, **TenderAssist Licence**:
+Its scopes are `openid`, `email` and `https://www.googleapis.com/auth/drive.file`
+("only the files this app makes"). All three are non-sensitive, so Google needs
+no security assessment, only a short brand check.
 
-1. Make the project. Under **OAuth consent screen**, choose External with the
-   app name and support email. Use **only** the scopes `openid` and `email`,
-   which need no Google verification. Then **Publish app** (In production).
-2. **Credentials → Create OAuth client ID → Desktop app**. Download the JSON as
-   `google-licence-client.json` in the app folder, next to
-   `google-oauth-client.json`. It is packed into the build and kept out of git.
-3. Add its client ID in the sheet's script: Project Settings → Script
-   properties → `GOOGLE_CLIENT_IDS`, comma separated if there are several.
+1. In the Google Cloud project of `google-oauth-client.json`, open
+   **Google Auth Platform → Data access** and add exactly those three scopes.
+   Remove `.../auth/drive` (full Drive) if it is there.
+2. **Branding**: app name TenderAssist, support email, the app's home page and
+   privacy policy links, and the authorised domain. Then **Audience → Publish
+   app** (In production). With only non-sensitive scopes the sign-in works for
+   everyone straight away, and the 7-day sign-out of Testing mode stops.
+3. Put that client's ID in the sheet's script: Project Settings → Script
+   properties → `GOOGLE_CLIENT_IDS` (comma separated if there are several).
 
-Without `google-licence-client.json`, the app falls back to the Drive client.
-That works only for that project's test users.
+`google-licence-client.json` is no longer used.
+
+### 4. Shared website categories
+
+The same web app keeps the website category lists every office reads, on the
+**Categories** tab (with a **Category changes** log: New, Gone, Back, and which
+customer's search saw it). When any office's search reads a website's list,
+every other TenderAssist takes it in within the hour (and before Start on
+Today), so a renamed or dropped category is known everywhere the same day. Only
+activated PCs on an active key can read or report lists. Nothing to set up:
+**Licences → Set up / repair this sheet…** adds the two tabs.
 
 ## Daily use (the Licences menu)
 

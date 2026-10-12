@@ -41,7 +41,7 @@ function KeyEntry({ initial, onDone, label = 'Continue with Google' }: { initial
       <button type="button" className="btn btn--primary btn--lg" disabled={busy || !key.trim()} onClick={() => void activate()}>
         {busy ? 'Finish signing in in your browser…' : label}
       </button>
-      {busy && <p className="hint">A Google sign-in page opened in your browser. Choose the account this key is for.</p>}
+      {busy && <p className="hint">A Google sign-in page opened in your browser. Choose the account this key is for, and leave the Google Drive box ticked so tenders can be saved to your Drive.</p>}
       {error && <p className="licence__error" role="alert">{error}</p>}
     </div>
   );
@@ -71,7 +71,7 @@ function LicenceScreen({ view, onView }: { view: LicenceView; onView: (view: Lic
         <span className="licence__brand"><BrandMark /> TenderAssist</span>
         <h1>{HEADINGS[view.standing] ?? 'TenderAssist needs a key'}</h1>
         {firstTime ? (
-          <p className="licence__lede">Paste the key you were given, then sign in with Google. The key is linked to that Google account.</p>
+          <p className="licence__lede">Paste the key you were given, then sign in with Google. The key is linked to that Google account, and approved tenders are saved to its Google Drive.</p>
         ) : (
           <p className="licence__lede">{view.message}</p>
         )}

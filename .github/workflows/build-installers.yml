@@ -9,6 +9,8 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      HAS_ESIGNER: ${{ secrets.ESIGNER_USERNAME != '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -16,7 +18,29 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Google sign-in credential (kept out of git)
+        shell: bash
+        env:
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+        run: |
+          if [ -n "$GOOGLE_OAUTH_CLIENT_JSON" ]; then printf '%s' "$GOOGLE_OAUTH_CLIENT_JSON" > google-oauth-client.json; fi
+      # SSL.com's CodeSignTool, a fixed version checked by its SHA-256 (docs/code-signing.md).
+      - name: Code signing tool
+        if: env.HAS_ESIGNER == 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2-windows.zip -OutFile cst.zip
+          if ((Get-FileHash cst.zip -Algorithm SHA256).Hash -ne '4AFC32E8B7F79BBE1DE7E4E7049AAAD4E0F754357613B9BBEC0E3052F06FD36B') { throw 'CodeSignTool download does not match its checksum.' }
+          Expand-Archive cst.zip -DestinationPath "$env:RUNNER_TEMP\CodeSignTool"
+          "CODESIGNTOOL_DIR=$env:RUNNER_TEMP\CodeSignTool" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - run: npm run dist:win -- --publish never
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          # A tagged release must be signed, unless the repository variable ALLOW_UNSIGNED is true.
+          REQUIRE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/v') && vars.ALLOW_UNSIGNED != 'true' }}
       - uses: actions/upload-artifact@v7
         with:
           name: TenderAssist-Windows
@@ -34,6 +58,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Google sign-in credential (kept out of git)
+        env:
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+        run: |
+          if [ -n "$GOOGLE_OAUTH_CLIENT_JSON" ]; then printf '%s' "$GOOGLE_OAUTH_CLIENT_JSON" > google-oauth-client.json; fi
       - run: npm run dist:mac -- --publish never
       - uses: actions/upload-artifact@v7
         with:

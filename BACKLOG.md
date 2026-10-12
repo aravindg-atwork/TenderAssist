@@ -1,6 +1,15 @@
 # TenderAssist backlog
 
-Last updated: 8 Oct 2026. Pick up from **Next up**.
+Last updated: 12 Oct 2026. Pick up from **Next up**.
+
+## Done 12 Oct 2026 (not yet in an installer; unit-tested, not seen running)
+
+- **One Google sign-in for the key and Drive** (owner's call, 12 Oct). Activating the key asks `openid email drive.file`; the Drive part is kept once the key server accepts the key (`keepGoogleSignIn`, `activate-licence` in `main.ts`). Settings → Upload to Google Drive only needs a folder name. One client for both: `google-oauth-client.json` (`google-licence-client.json` dropped).
+- **Drive folder by name, made by TenderAssist** (owner chose this over finding the user's own folder, 12 Oct): `drive.file` is non-sensitive, so no CASA security assessment. The folder is made in My Drive (`ensurePath('root', …)`), found again by name, made again if deleted or binned; `Office/Tenders` makes nested folders. Month / day folders inside as before. A PC set up with a folder link keeps its folder and full-Drive sign-in until the name changes or it signs in again. "Open in Drive" button.
+- **Report sheets: one per website per day by default** (`Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx`), every run of that website that day on it; Settings → Folders → Report sheets → **One sheet for the day** (all websites, Website column). Changing it rewrites every saved day. Old "(run N)" sheets are removed locally, from the Drive for desktop copy, and binned on Drive. Code: `publishStoredJob` / `publishDaySheets` in `main.ts`, `daySheetFileName`, `isDaySheet`.
+- **Fixed: tender approved in the live review, documents collected in the same sign-in, sheet stayed empty** (operator report, 12 Oct). The search had written its sheet (none shortlisted) and the rewrite skipped the run still waiting at "What next?"; "Collect documents now" never rewrote it. Now both rewrite the day sheets.
+- **Shared website categories** through the key server: a search that reads a website's list reports it (`report-categories`); every app takes in newer lists at start, hourly, and when Today checks categories before Start (`categories`, at most every 10 min there). Sheet tabs **Categories** and **Category changes** (New / Gone / Back, with the customer). A list under half the known one, or older than the latest, is ignored. Only activated PCs on an active key. Code: `licence-server/Code.gs` (`mergeCategoryReport`, `categoriesRequest`), `src/licence/sharedCategories.ts`. **Needs** `node licence-server/deploy.cjs` to go live.
+- **New version on Today**: a feature release (0.5 → 0.6) shows "A new version … is available / ready, Restart and update" on Today; small fixes still install quietly on close. Updates are looked for every 4 hours as well as at start.
 
 ## Done after 0.5.2 (9 Oct 2026; not yet in an installer)
 
@@ -213,6 +222,10 @@ Decided with the owner (10 Oct): a key belongs to **one Google account** and a n
 - [ ] Still open from 0.4.5: **Collect their documents**, the session report, and "Needs a look" shrinking after a search.
 
 ## Next up
+
+- **Google Cloud (owner):** in the project of `google-oauth-client.json`: scopes `openid`, `email`, `drive.file` only; branding + privacy policy; Publish app. Put `google-oauth-client.json` in the project root of the build PC (it is not in this checkout). Its client ID into the key server's `GOOGLE_CLIENT_IDS`. See docs/google-drive-setup.md.
+- **Key server:** `node licence-server/deploy.cjs` (same URL), then Licences → Set up / repair for the Categories tabs.
+- Release as **0.6.0** (a feature release, so Today announces it), then check on a PC: activate (Drive box ticked) → type a folder name → run Tamil Nadu and GeM the same day → two sheets → switch to One sheet for the day.
 
 - Install `release/TenderAssist-Setup-0.5.0.exe` on a PC without Java (checks the Terms page, the OpenWebStart + Java setup, the new design) and run one real Tamil Nadu search (the run panel has only been checked in code). Then delete the "10-2026…" folders at the top of the Drive folder, then in Settings → Upload to Google Drive choose "Upload everything saved so far" and check "Claude TN Tenders- 2026-27" in Drive.
   - In Settings → What to look for: add the recommended words and remove "AMC".
