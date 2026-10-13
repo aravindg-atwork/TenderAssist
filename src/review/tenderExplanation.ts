@@ -63,7 +63,9 @@ function rejectClause(gate: ScreenedGate): string {
       return actual.length ? `category ${quoted(actual)} is not in your list` : 'category was not captured';
     }
     case 'G3':
-      return 'no intent phrase matched';
+      return gate.reasonCode === 'SEARCH_WORD_NOT_VISIBLE'
+        ? `GeM listed it for ${quoted(list(gate.evidence.searchWords))}, but the word is not in its title or bid document`
+        : 'no intent phrase matched';
     case 'G4': {
       const excluded = list(evidence.matchedExcludedKeywords);
       return excluded.length ? `matched exclusion ${quoted(excluded)}` : 'primary scope is excluded';
@@ -81,6 +83,9 @@ function uncertainSentence(gate: ScreenedGate | undefined): string {
   }
   if (gate.reasonCode === 'DETAIL_REVIEW_FAILED' || gate.reasonCode === 'PREFAVORITE_DETAIL_REVIEW_FAILED' || gate.reasonCode === 'DETAIL_TEXT_MISSING') {
     return 'Not decided yet: its details page did not open, even on a second try. The next search opens it again from My Tenders.';
+  }
+  if (gate.reasonCode === 'SEARCH_WORD_AND_EXCLUDED') {
+    return `Needs your judgement: it has your search word ${quoted(list(gate.evidence.searchWords))} and your excluded word ${quoted(list(gate.evidence.matchedExcludedKeywords))}.`;
   }
   if (gate.reasonCode === 'INTENT_ONLY_IN_DETAILS') {
     const words = list(gate.evidence.matchedKeywords);
@@ -109,6 +114,10 @@ export function explainScreening(recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN'
   }
   if (recommendation === 'UNCERTAIN') {
     return { sentence: uncertainSentence(GATE_ORDER.map(byGate).find((gate) => gate?.result === 'UNCERTAIN')), matchedExclusions, matchedIntent };
+  }
+  if (byGate('G2')?.reasonCode === 'SEARCH_WORD_MATCH') {
+    const where = byGate('G3')?.reasonCode === 'SEARCH_WORD_IN_DOCUMENT' ? ' in its bid document' : '';
+    return { sentence: `Recommended: has your search word ${quoted(list(byGate('G2')?.evidence.searchWords))}${where}.`, matchedExclusions, matchedIntent };
   }
   const category = list(byGate('G2')?.evidence.matched);
   const parts = [

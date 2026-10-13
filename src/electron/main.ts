@@ -49,7 +49,8 @@ import { runClassificationPhase } from '../orchestration/classificationPhaseRunn
 import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing, saveTenderFiles, type DocumentDownloader } from '../orchestration/postProcessingRunner.js';
 import { GemClient } from '../gem/gemClient.js';
 import { findBidsStartedOn } from '../gem/gemDaySearch.js';
-import { portalStyleDate } from '../gem/gemBid.js';
+import { bidDocumentUrl, portalStyleDate, type GemBid } from '../gem/gemBid.js';
+import { findBidsWithWords } from '../gem/gemWordSearch.js';
 import { bidFromTender, GEM_RETRY_DELAYS_MS, readGemBidDetails, runGemDate } from '../gem/gemRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
 import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
@@ -72,6 +73,7 @@ import type {
   DailyReportView,
   ReportTenderItem,
   GemCategoryCounts,
+  GemSearchWordPreview,
 } from './ipcTypes.js';
 import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration, type RunDateMeaning } from '../config/runConfiguration.js';
 import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
@@ -952,6 +954,30 @@ ipcMain.handle('get-gem-category-counts', async (_event, portalId: unknown, name
   const recentByName: Record<string, number> = {};
   for (const name of asked) recentByName[name] = recent.counts[gemCategoryKey(name)] ?? 0;
   return { open, recent: recentByName, recentDays: recent.days };
+});
+
+/**
+ * What a GeM search word would bring, before it is saved: GeM's open bids
+ * with it, after the whole-word check runs use (src/gem/gemWordSearch.ts).
+ */
+const GEM_WORD_PREVIEW_PAGES = 10;
+ipcMain.handle('preview-gem-search-word', async (_event, word: unknown): Promise<GemSearchWordPreview> => {
+  if (typeof word !== 'string' || !/[\p{L}\p{N}]{2}/u.test(word)) throw new Error('Type a word or phrase of two letters or more.');
+  const phrase = word.trim().replace(/\s+/g, ' ');
+  const portal = getPortalDefinition('gem');
+  gemCountClient ??= new GemClient({ timeoutMs: 30_000, pause: () => new Promise((resolve) => setTimeout(resolve, 400)) });
+  const client = gemCountClient;
+  const result = await (gemCountQueue = gemCountQueue.catch(() => undefined).then(() => findBidsWithWords([phrase], ['service', 'product'],
+    ({ keyword, bidType, page }) => retryTransient(() => client.listBids({ page, bidType, keyword }), { delaysMs: [2_000, 5_000] }),
+    undefined, GEM_WORD_PREVIEW_PAGES))) as Awaited<ReturnType<typeof findBidsWithWords>>;
+  const known = (bid: GemBid) => opportunities.findByIdentity(portal.id, OpportunityRepository.identityKey(bid.id, bid.bidNumber));
+  const bids = result.hits
+    .sort((a, b) => Number(b.visible) - Number(a.visible) || (b.bid.startsAt ?? '').localeCompare(a.bid.startsAt ?? ''))
+    .map(({ bid, visible }) => ({
+      bidNumber: bid.bidNumber, title: bid.title, category: bid.category, endsAt: bid.endsAt, visible,
+      alreadySeen: Boolean(known(bid)), url: bidDocumentUrl(bid),
+    }));
+  return { word: phrase, bids, dropped: result.dropped, tooCommon: result.tooCommon.reduce((sum, entry) => sum + entry.total, 0) || null };
 });
 
 /** The website's list the chosen categories are checked against, with its history. */
@@ -2567,6 +2593,15 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
   activeBatch = batch;
   const collected: CollectedCounts = { shortlisted: 0, needsReview: 0 };
   let last: AuthJobUpdate | undefined;
+  // The search words look across every open bid, so once per batch (its first date) is enough.
+  const searchWords = runConfigurations.getDefaults().gemSearchWords ?? [];
+  // A search-word bid already decided, or already waiting in the Inbox, is not read again;
+  // one rejected automatically before (wrong day or category) is, as the word is the reason to keep it.
+  const skipWordHit = (bid: GemBid): boolean => {
+    const known = opportunities.findByIdentity(ctx.portal.id, OpportunityRepository.identityKey(bid.id, bid.bidNumber));
+    if (!known) return false;
+    return !(known.lifecycle === 'NEW' || known.lifecycle === 'SCREENED') || known.recommendation === 'KEEP' || known.recommendation === 'UNCERTAIN';
+  };
   for (let index = 0; index < plan.toRun.length; index += 1) {
     if (signal.aborted) return;
     const date = plan.toRun[index];
@@ -2579,6 +2614,8 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
       jobs, jobMachine, searches, tenders, classifications, client: ctx.gem!, includeProducts, categoryCodes, signal,
       onDayCounts: (day, total, categories) => dailyCounts.record(ctx.portal.id, day, total, 'GEM_LIST', categories),
       askOperator: (tender, reason, documentUrl) => askOperatorDuringRun(ctx, jobId, tender, reason, documentUrl),
+      searchWords: index === 0 ? searchWords : undefined,
+      skipWordHit,
     }, jobId, config, emitJobUpdate);
     syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, jobId, ctx.portal.id, { screening: decided.outcome === 'SUCCESS' }));
     let result = decided;

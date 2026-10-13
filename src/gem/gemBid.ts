@@ -19,6 +19,8 @@ export interface GemListDoc {
   final_end_date_sort?: string[];
   ba_official_details_minName?: string[];
   ba_official_details_deptName?: string[];
+  /** The buyer's GeM user ID, such as "eet.seo"; GeM's search box searches it too. */
+  'b.b_created_by'?: string[];
   is_high_value?: boolean[];
   is_rc_bid?: number[];
   ba_is_global_tendering?: number[];
@@ -41,6 +43,8 @@ export interface GemBid {
   categoryCode: string | null;
   ministry: string | null;
   department: string | null;
+  /** The buyer's GeM user ID; only to tell apart search-box matches on it (src/gem/gemWordSearch.ts). */
+  createdBy?: string | null;
   /** Indian time, as `YYYY-MM-DDTHH:MM:SS` (see `istWallClock`). */
   startsAt: string | null;
   endsAt: string | null;
@@ -105,6 +109,7 @@ export function parseGemBid(doc: GemListDoc): GemBid | null {
     categoryCode: text(doc.b_cat_id),
     ministry: text(doc.ba_official_details_minName),
     department: text(doc.ba_official_details_deptName),
+    createdBy: text(doc['b.b_created_by']),
     startsAt: istWallClock(first(doc.final_start_date_sort)),
     endsAt: istWallClock(first(doc.final_end_date_sort)),
     quantity: typeof first(doc.b_total_quantity) === 'number' ? first(doc.b_total_quantity)! : null,

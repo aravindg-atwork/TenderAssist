@@ -115,12 +115,14 @@ export class GemClient {
   /**
    * One page of bids, newest start first unless another order is asked.
    * `endsBetween` is GeM's "Bid end date" filter: whole Indian days, both
-   * included, as `YYYY-MM-DD`.
+   * included, as `YYYY-MM-DD`. `keyword` is GeM's own search box: loose
+   * (it matches inside words and in text the list does not show), so
+   * src/gem/gemWordSearch.ts checks every bid it returns.
    */
-  async listBids(query: { page: number; bidType: GemBidType; sort?: GemSort; endsBetween?: { from: string; to: string } }): Promise<GemListPage> {
+  async listBids(query: { page: number; bidType: GemBidType; sort?: GemSort; endsBetween?: { from: string; to: string }; keyword?: string }): Promise<GemListPage> {
     const payload = {
       page: query.page,
-      param: { searchBid: '' },
+      param: { searchBid: query.keyword ?? '' },
       filter: {
         bidStatusType: 'ongoing_bids',
         byType: query.bidType,
@@ -139,7 +141,9 @@ export class GemClient {
         body: new URLSearchParams({ payload: JSON.stringify(payload), csrf_bd_gem_nk: this.token! }).toString(),
       });
       const parsed = await response.json().catch(() => null) as
-        { code?: number; response?: { response?: { numFound?: number; docs?: GemListDoc[] } } } | null;
+        { code?: number; message?: string; response?: { response?: { numFound?: number; docs?: GemListDoc[] } } } | null;
+      // GeM answers a search with no bids as HTTP 404 "No data found".
+      if (parsed?.code === 404 && /no data/i.test(parsed.message ?? '')) return { total: 0, bids: [] };
       const result = parsed?.code === 200 ? parsed.response?.response : undefined;
       if (response.ok && result && Array.isArray(result.docs)) {
         return {

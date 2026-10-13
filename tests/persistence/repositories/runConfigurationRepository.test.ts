@@ -68,6 +68,7 @@ describe('RunConfigurationRepository', () => {
       excludedKeywords: ['AMC', 'amc'],
       categoriesByPortal: { gem: ['Application Development', ' application  development ', 'Custom Bid For Services'], 'tamil-nadu': ['Computer- S/W'] },
       gemIncludeProducts: true,
+      gemSearchWords: [' SEO ', 'seo', 'website   development', '-', 'x'],
     });
     expect(repo.getDefaults()).toEqual({
       productCategories: ['Computer- S/W', 'Information Technology'],
@@ -75,6 +76,8 @@ describe('RunConfigurationRepository', () => {
       excludedKeywords: ['AMC'],
       categoriesByPortal: { gem: ['Application Development', 'Custom Bid For Services'], 'tamil-nadu': ['Computer- S/W'] },
       gemIncludeProducts: true,
+      // Trimmed, one of each, and nothing without two letters or digits.
+      gemSearchWords: ['SEO', 'website development'],
     });
     expect(repo.hasSavedDefaults()).toBe(true);
   });

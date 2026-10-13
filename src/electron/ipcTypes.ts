@@ -41,6 +41,24 @@ import type { LicenceView } from '../licence/licenceManager.js';
 export type { LicenceView };
 
 /** How busy each GeM category is, by the names asked for. */
+/** What one GeM search word would bring (Settings > GeM > Search words). */
+export interface GemSearchWordPreview {
+  word: string;
+  /** Open bids with the word, those with it in their title, category or items first. */
+  bids: Array<{
+    bidNumber: string; title: string; category: string; endsAt: string | null;
+    /** False: GeM matched text its list does not show; a run reads the bid document, else asks. */
+    visible: boolean;
+    /** Already found by an earlier search (in the Inbox or decided). */
+    alreadySeen: boolean;
+    url: string;
+  }>;
+  /** Bids GeM returned that only have the word inside another word or in the buyer's name. */
+  dropped: number;
+  /** When GeM has too many bids with the word to check them all: how many. */
+  tooCommon: number | null;
+}
+
 export interface GemCategoryCounts {
   /** Bids open on GeM right now, as GeM's advanced search counts them; null when GeM could not be asked. */
   open: Record<string, number | null>;
@@ -251,6 +269,7 @@ export interface TenderAssistApi {
   getPortalCategories(portalId: string): Promise<PortalCategoryList>;
   /** GeM: bids open now in each named category (null when unknown), and their bids in recent runs. */
   getGemCategoryCounts(portalId: string, names: string[]): Promise<GemCategoryCounts>;
+  previewGemSearchWord(word: string): Promise<GemSearchWordPreview>;
   /** Chosen categories no longer on the website's list, and categories new on it. */
   getCategoryHealth(portalId: string): Promise<CategoryHealth>;
   /** What to search instead of a category the website dropped, led by where wanted tenders were listed. */

@@ -83,6 +83,14 @@ Checked on 12 Oct 2026:
 
 **Bid end date on the list page** (`byEndDate` in `/all-bids-data`, same date format) filters correctly too, but its own sort has the same problem: many bids close at the same round hour, and GeM orders those ties differently each time (700 rows read, 600 distinct, sorted by end date). Sorted by **start date** instead, which is to the second, the same filter pages cleanly: 1195 of 1195 bids closing on 15 Oct, twice over. That is how TenderAssist searches a closing day.
 
+**The keyword box** (`param.searchBid` on `/all-bids-data`), checked on 13 Oct 2026 with about 40 searches:
+
+- It matches **inside words** (`seo` finds "HP SEOLA" and "VSEOT"), in the **buyer's department** (`engine` finds "Engineering"), in the **buyer's user ID** (`b.b_created_by`, such as "eet.seo"), and in text the list does not return at all.
+- Case does not matter. Two words give results that depend on their order (`web site` 23 bids, `site web` 270). Quotes are ignored and return every bid; commas return none; `e-learning` and `elearning` return none although such bids exist.
+- No match is HTTP 404 "No data found". Sorted by start date, its pages are stable (639 of 639 bids for `development`, twice).
+
+So **search words** (Settings, GeM, Search words) ask the box for one plain word at a time (the rarest word of a phrase), and check every bid it returns: kept when the phrase is in the title, category or items as whole words (`e-learning` also matches "elearning"; plurals count); dropped when the word is only inside another word or in the buyer's name or user ID; read when the word is nowhere GeM shows, and kept only if the bid document has it, else rejected with that reason (`src/gem/gemWordSearch.ts`). A search-word bid is read whatever its day or category; one with an excluded word as well is asked about, never rejected. Bids already decided or waiting in the Inbox are not read again.
+
 Lists that fill the dropdowns (POST, with only the token):
 
 - `/ministry-list-adv`: 76 ministries and 38 buyer states. The list has near-duplicates such as `ANDHRA  PRADESH` with two spaces.

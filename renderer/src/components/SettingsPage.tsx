@@ -18,6 +18,7 @@ import type { UpdateStatus } from '../../../src/electron/updateService';
 import { DEFAULT_AUTOMATION_PACING, type AutomationPacingSettings, type AutomationPacingMode } from '../../../src/persistence/repositories/automationSettingsRepository';
 import { EditableChips } from './EditableChips';
 import { CategoryPicker } from './CategoryPicker';
+import { GemSearchWords } from './GemSearchWords';
 import { CategoryReplacement, withReplacements } from './CategoryReplacement';
 import { WordSuggestionList } from './WordSuggestionList';
 import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
@@ -38,6 +39,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   // Each website's own chosen categories, by website id.
   const [categoriesByPortal, setCategoriesByPortal] = useState<Record<string, string[]>>({});
   const [gemIncludeProducts, setGemIncludeProducts] = useState(false);
+  /** GeM search words: open bids with one are read whatever their day or category. */
+  const [gemSearchWords, setGemSearchWords] = useState<string[]>([]);
+  const [wordsOpen, setWordsOpen] = useState(false);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [excludedKeywords, setExcludedKeywords] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<WordSuggestions | null>(null);
@@ -63,6 +67,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     setProductCategories(settings.defaults.productCategories);
     setCategoriesByPortal(settings.defaults.categoriesByPortal);
     setGemIncludeProducts(settings.defaults.gemIncludeProducts);
+    setGemSearchWords(settings.defaults.gemSearchWords ?? []);
     setKeywords(settings.defaults.keywords);
     setExcludedKeywords(settings.defaults.excludedKeywords);
     // Suggestions leave out the saved words, so ask again whenever they change.
@@ -168,7 +173,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   }, []);
 
   // What auto-save compares: everything on these pages except the password being typed.
-  const snapshot = JSON.stringify({ productCategories, categoriesByPortal, gemIncludeProducts, keywords, excludedKeywords, loginId, rememberPassword, publishing, pacing, portal: selectedPortalId });
+  const snapshot = JSON.stringify({ productCategories, categoriesByPortal, gemIncludeProducts, gemSearchWords, keywords, excludedKeywords, loginId, rememberPassword, publishing, pacing, portal: selectedPortalId });
   const lastSaved = useRef<string | null>(null);
   const loaded = Boolean(settings && credentialSettings && publishing && pacing);
 
@@ -189,7 +194,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     setError(null);
     const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories },
       // Product bids now follow the chosen categories (a product category searches them), so the old switch is cleared.
-      gemIncludeProducts: false };
+      gemIncludeProducts: false, gemSearchWords };
     const withCredentials = !gem && (mode === 'explicit' || password === '');
     try {
       const [next, nextCredentials, nextPublishing, nextPacing] = await Promise.all([
@@ -322,6 +327,16 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
                 values={chosenCategories} onChange={setChosenCategories} startingList={DEFAULT_GEM_CATEGORIES} {...categoryHelp}
                 countsFor={gemCategoryCounts}
                 unknownListHint="GeM’s category list could not be read just now; these are the starting categories. Check the internet connection and open Settings again." />
+              <div className="words-row">
+                <div className="words-row__text">
+                  <strong>Search words</strong>
+                  <span>{gemSearchWords.length === 0
+                    ? 'None. Add the exact words for your work (such as “SEO”) to also find open bids outside your categories and days.'
+                    : `${gemSearchWords.map((word) => `“${word}”`).join(', ')}: every open GeM bid with one of these is read on each search.`}</span>
+                </div>
+                <button type="button" className="btn btn--line btn--sm" onClick={() => setWordsOpen(true)}>Search words…</button>
+              </div>
+              {wordsOpen && <GemSearchWords values={gemSearchWords} onChange={setGemSearchWords} onClose={() => setWordsOpen(false)} />}
               <p className="hint">The list is GeM’s own Category list from its advanced search, services and products, exactly as GeM shows it. “Open now” is GeM’s own count of bids open in that category today; the other number is how many started in it on the days you searched GeM. Each website keeps its own categories; the intent and excluded words below are shared by every website.</p>
             </>
           ) : (

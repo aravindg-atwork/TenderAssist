@@ -1183,3 +1183,15 @@ textarea {
 .setup--compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 18px; }
 .setup--compact .setup__bar { flex: 1 1 120px; margin: 0; }
 .setup--compact .setup__detail { margin: 0; }
+
+/* GeM search words (Settings > What to look for, GeM): the row and its side panel. */
+.words-row { display: flex; align-items: center; gap: 16px; margin-top: 4px; padding: 14px 16px; border-radius: 12px; background: var(--sheet-2); }
+.words-row__text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; font-size: 0.875rem; color: var(--ink-2); }
+.words-row__text strong { color: var(--ink); font-size: 0.9375rem; }
+.chip__check { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.words__verdict { margin: 0; font-size: 0.9375rem; }
+.words__list { gap: 0; }
+.words__bid { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--line); line-height: 1.35; }
+.words__bid a { color: var(--ink); font-weight: 600; }
+.words__bid small { color: var(--ink-3); font-size: 0.8125rem; }
+.words__add { display: flex; justify-content: flex-end; }

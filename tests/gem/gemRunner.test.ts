@@ -118,6 +118,65 @@ describe('a GeM run for one date', () => {
     expect(asked[0].url).toBe('https://bidplus.gem.gov.in/showbidDocument/7');
   });
 
+  describe('search words', () => {
+    /** The day's list as usual; a keyword search returns GeM's loose matches (inside words too). */
+    function withWords(dayBids: GemBid[], wordBids: GemBid[], pdfText: Record<string, string>, extra: Partial<GemRunDeps> = {}): GemRunDeps {
+      const run = deps(dayBids, pdfText, extra);
+      const dayList = run.client.listBids;
+      run.client = {
+        ...run.client,
+        listBids: async (query) => {
+          if (!query.keyword) return dayList(query);
+          if (query.bidType !== 'service') return { total: 0, bids: [] };
+          const matching = wordBids.filter((item) => item.title.toLowerCase().includes(query.keyword!));
+          return { total: matching.length, bids: matching.slice((query.page - 1) * 10, query.page * 10) };
+        },
+      };
+      return run;
+    }
+    const WORDS: RunConfiguration = { ...CONFIG, excludedKeywords: ['laptop', 'AMC'] };
+
+    it('reads open bids with a search word whatever their day or category, and drops GeM’s inside-a-word matches', async () => {
+      const run = withWords([bid(1, 'Manpower Outsourcing Services - Admin')], [
+        bid(20, 'Digital Marketing Services - SEO and social media', '2026-09-30T10:00:00'),
+        bid(21, 'Printer cartridge HP SEOLA 1802', '2026-10-01T10:00:00'),
+      ], { 20: BID_TEXT }, { searchWords: ['SEO'] });
+      const result = await runGemDate(run, jobId, WORDS, () => {});
+      expect(finalFor('GEM/2026/B/20')).toBe('KEEP');
+      expect(tenders.findByJobAndRef(jobId, 'GEM/2026/B/21')).toBeUndefined();
+      expect(finalFor('GEM/2026/B/1')).toBe('REJECT');
+      expect(result.statusMessage).toContain('1 more open bid has your search words');
+    });
+
+    it('asks the operator when a search-word bid also has an excluded word, instead of rejecting it', async () => {
+      const asked: string[] = [];
+      const run = withWords([], [bid(30, 'Website AMC - SEO and hosting for 3 years')], { 30: BID_TEXT }, {
+        searchWords: ['SEO'], askOperator: async (_tender, reason) => { asked.push(reason); return null; },
+      });
+      await runGemDate(run, jobId, WORDS, () => {});
+      expect(finalFor('GEM/2026/B/30')).toBe('UNCERTAIN');
+      expect(asked[0]).toBe('It has your search word “SEO” and your excluded word “AMC”.');
+    });
+
+    it('keeps a bid whose word GeM matched out of sight only when the bid document has it, and says why it rejects the other', async () => {
+      const hidden = { ...bid(40, 'Cab hiring service - seo'), title: 'Cab hiring service', itemName: 'Cab hiring service', category: 'Cab hiring service' };
+      const shown = { ...hidden, id: '41', bidNumber: 'GEM/2026/B/41' };
+      const run = withWords([], [hidden, shown], { 40: BID_TEXT, 41: `${BID_TEXT} Scope includes SEO of the portal.` }, { searchWords: ['seo'] });
+      // GeM's box matched both through text its list does not show.
+      const list = run.client.listBids;
+      run.client = { ...run.client, listBids: async (query) => query.keyword ? (query.bidType === 'service' ? { total: 2, bids: [hidden, shown] } : { total: 0, bids: [] }) : list(query) };
+      await runGemDate(run, jobId, WORDS, () => {});
+      expect(finalFor('GEM/2026/B/40')).toBe('REJECT');
+      expect(finalFor('GEM/2026/B/41')).toBe('KEEP');
+    });
+
+    it('leaves alone a bid the operator already decided or that is already waiting', async () => {
+      const run = withWords([], [bid(50, 'SEO services')], {}, { searchWords: ['SEO'], skipWordHit: () => true });
+      await runGemDate(run, jobId, WORDS, () => {});
+      expect(tenders.findByJobAndRef(jobId, 'GEM/2026/B/50')).toBeUndefined();
+    });
+  });
+
   it('needs the whole phrase in the bid document, not its words scattered through it', async () => {
     const text = `${BID_TEXT.split('/Disclaimer')[0]} Contact: Mobile no 9876543210. Bidder application form as per ATC.`;
     await runGemDate(deps([bid(9, 'Custom Bid for Services - Repair of distribution transformer')], { 9: text }), jobId, CONFIG, () => {});

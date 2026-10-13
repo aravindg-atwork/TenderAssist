@@ -20,6 +20,7 @@ import { retryTransient } from '../orchestration/transientRetry.js';
 import { bidDocumentUrl, bidKindLabel, categoryOf, istIso, portalStyleDate, sameCategory, type GemBid } from './gemBid.js';
 import type { GemBidType, GemClient } from './gemClient.js';
 import { findBidsClosingOn, findBidsStartedOn } from './gemDaySearch.js';
+import { findBidsWithWords, hasSearchWord, type SearchWordHit } from './gemWordSearch.js';
 import {
   attachmentsFromBid, bidSpecificText, factsFromBidText, readableBidText, readPdf as readPdfFile, rupees,
   type GemDocumentFacts, type PdfContent,
@@ -61,7 +62,17 @@ export interface GemRunDeps {
   secondTryDelayMs?: number;
   /** Asks the operator to keep or skip an unsure bid; null when nobody answers. */
   askOperator?: (tender: TenderRow, reason: string, documentUrl: string) => Promise<RunQuestionAnswer | null>;
+  /**
+   * The operator's GeM search words (Settings > GeM > Search words): every
+   * open bid with one is read, whatever its day or category
+   * (src/gem/gemWordSearch.ts).
+   */
+  searchWords?: readonly string[];
+  /** A search-word bid to leave alone: already decided by the operator, or already waiting in the Inbox. */
+  skipWordHit?: (bid: GemBid) => boolean;
 }
+
+const quotedWords = (words: readonly string[]) => words.map((word) => `“${word}”`).join(', ');
 
 /**
  * Whether a bid is in a category chosen from GeM's dropdown. GeM's own code
@@ -322,12 +333,37 @@ export async function runGemDate(
     try { deps.onDayCounts(day, found.size, categories); } catch { /* the report count is a bonus; never stop the run */ }
   }
 
+  // The search words: open bids with one of them, whatever their day or
+  // category. Each is checked for the word itself (GeM's box is loose).
+  const wordHits = new Map<string, SearchWordHit>();
+  const wordOnly: GemBid[] = [];
+  let wordNote = '';
+  if (deps.searchWords && deps.searchWords.length > 0) {
+    statusMessage = `Looking for GeM bids with your search words: ${quotedWords(deps.searchWords)}.`;
+    emit();
+    try {
+      const result = await findBidsWithWords(deps.searchWords, ['service', 'product'],
+        ({ keyword, bidType, page }) => retry(() => deps.client.listBids({ page, bidType, keyword }), 'GeM search words'),
+        (progress) => { statusMessage = `Looking for GeM bids with “${progress.word}”: ${progress.found} found.`; emit(); });
+      for (const hit of result.hits) {
+        if (found.has(hit.bid.id)) wordHits.set(hit.bid.id, hit);
+        else if (!deps.skipWordHit?.(hit.bid)) { wordHits.set(hit.bid.id, hit); wordOnly.push(hit.bid); }
+      }
+      if (result.tooCommon.length > 0) {
+        wordNote += ` ${result.tooCommon.map((entry) => `“${entry.word}” is on ${entry.total} GeM bids`).join('; ')}, so only the newest were checked: use a longer phrase.`;
+      }
+    } catch (error) {
+      if (isCancellationRequested(deps.signal)) return cancelled();
+      wordNote += ` Your search words could not be searched just now (${error instanceof Error ? error.message : String(error)}); the next run tries again.`;
+    }
+  }
+
   // Screen every bid on its list record; read only the ones in your categories.
   phase = 'CLASSIFICATION';
   const gate = (tenderId: string, gateName: 'G1' | 'G2' | 'G3' | 'G4', result: 'PASS' | 'REJECT' | 'UNCERTAIN', reasonCode: string, evidence: unknown) =>
     classifications.saveGate({ tenderId, gate: gateName, result, reasonCode, evidence, classifierVersion: CLASSIFIER_VERSION });
-  const toRead: Array<{ bid: GemBid; tender: TenderRow }> = [];
-  for (const bid of found.values()) {
+  const toRead: Array<{ bid: GemBid; tender: TenderRow; hit?: SearchWordHit }> = [];
+  for (const bid of [...found.values(), ...wordOnly]) {
     const tender = tenders.upsert({
       jobId,
       tenderRef: bid.bidNumber,
@@ -342,6 +378,19 @@ export async function runGemDate(
       productCategory: bid.category,
       valueInRupees: '',
     });
+    const hit = wordHits.get(bid.id);
+    if (hit) {
+      // A search word is the work itself: its day and category do not matter.
+      // An excluded word as well is the operator's call, never a silent reject.
+      gate(tender.id, 'G1', 'PASS', found.has(bid.id) ? 'SEARCH_DATE_FILTER_MATCH' : 'SEARCH_WORD_MATCH',
+        { searchDate: day, dateMeaning: closing ? 'CLOSING' : 'PUBLISHED', startedAt: bid.startsAt, endsAt: bid.endsAt, searchWords: hit.words });
+      gate(tender.id, 'G2', 'PASS', 'SEARCH_WORD_MATCH', { searchWords: hit.words, actual: [bid.category], actualCode: bid.categoryCode, configured: config.productCategories, matched: [] });
+      const excluded = evaluateExcludedScope(`${bid.title} ${bid.itemName}`, config.excludedKeywords);
+      gate(tender.id, 'G4', excluded.result === 'REJECT' ? 'UNCERTAIN' : excluded.result, excluded.result === 'REJECT' ? 'SEARCH_WORD_AND_EXCLUDED' : excluded.reasonCode,
+        { stage: 'TITLE', searchWords: hit.words, matchedExcludedKeywords: excluded.matchedTerms });
+      toRead.push({ bid, tender, hit });
+      continue;
+    }
     gate(tender.id, 'G1', 'PASS', 'SEARCH_DATE_FILTER_MATCH', { searchDate: day, dateMeaning: closing ? 'CLOSING' : 'PUBLISHED', startedAt: bid.startsAt, endsAt: bid.endsAt });
     const matched = config.productCategories.filter((chosen) => inChosenCategory(bid, chosen, deps.categoryCodes));
     const inCategory = matched.length > 0;
@@ -370,9 +419,9 @@ export async function runGemDate(
     }
     for (let index = 0; index < batch.length; index += 1) {
       if (isCancellationRequested(deps.signal)) return cancelled();
-      const { bid, tender } = batch[index];
+      const { bid, tender, hit } = batch[index];
       statusMessage = pass === 1
-        ? `Reading bid ${index + 1} of ${batch.length} in your categories (${found.size} ${onDay}).`
+        ? `Reading bid ${index + 1} of ${batch.length} in your categories${wordHits.size > 0 ? ' or with your search words' : ''} (${found.size} ${onDay}).`
         : `Trying bid document ${index + 1} of ${batch.length} again.`;
       emit();
       const { documentUrl, content, facts, readError } = await readGemBidDetails(
@@ -389,6 +438,29 @@ export async function runGemDate(
         continue;
       }
       const { title: titleIntent, intent } = gemIntent(bid, bidSpecificText(content.text), config.keywords);
+      if (hit) {
+        // Kept when the word is in the title or the bid document. The document has every detail of
+        // the bid, so a word in neither is GeM matching text that is not about the work: rejected, with that reason.
+        const inDocument = hit.words.filter((word) => hasSearchWord(content.text, word));
+        if (hit.visible || inDocument.length > 0) {
+          gate(tender.id, 'G3', 'PASS', hit.visible ? 'SEARCH_WORD' : 'SEARCH_WORD_IN_DOCUMENT', { searchWords: hit.words, matchedKeywords: intent.matchedTerms });
+        } else {
+          gate(tender.id, 'G3', 'REJECT', 'SEARCH_WORD_NOT_VISIBLE', { searchWords: hit.words });
+        }
+        const scope = `${bid.title} ${bid.itemName} ${facts?.itemCategory ?? ''}`;
+        const excluded = evaluateExcludedScope(scope, config.excludedKeywords);
+        gate(tender.id, 'G4', excluded.result === 'REJECT' ? 'UNCERTAIN' : excluded.result, excluded.result === 'REJECT' ? 'SEARCH_WORD_AND_EXCLUDED' : excluded.reasonCode,
+          { searchWords: hit.words, matchedExcludedKeywords: excluded.matchedTerms, evaluatedText: scope });
+        const decided = classifications.getFinalForTender(tender.id);
+        statusMessage = `Read bid ${index + 1} of ${batch.length}: ${bid.title}. ${decided === 'KEEP' ? `Kept: has ${quotedWords(hit.words)}` : decided === 'REJECT' ? `Rejected: ${quotedWords(hit.words)} is not in it` : 'Unsure'}.`;
+        emit();
+        if (deps.askOperator && decided === 'UNCERTAIN' && excluded.result === 'REJECT') {
+          const reason = `It has your search word ${quotedWords(hit.words)} and your excluded word ${quotedWords(excluded.matchedTerms)}.`;
+          await deps.askOperator(tenders.getById(tender.id) ?? tender, reason, documentUrl);
+          if (isCancellationRequested(deps.signal)) return cancelled();
+        }
+        continue;
+      }
       if (isOwnCategory(bid, config.productCategories, deps.categoryCodes)) {
         // A chosen GeM category other than custom bids is the work itself.
         gate(tender.id, 'G3', 'PASS', 'CHOSEN_CATEGORY', { matchedKeywords: intent.matchedTerms, category: bid.category });
@@ -423,7 +495,9 @@ export async function runGemDate(
   jobMachine.transition(jobId, 'SHORTLISTED', `GeM bids decided: ${found.size} found, ${toRead.length} read`);
   statusMessage = failed.length > 0
     ? `${found.size} GeM bids found; ${failed.join(' and ')} could not be searched, so some may be missing. Run this date again later.`
-    : `${found.size} GeM bids ${onDay}; ${toRead.length} were in your categories and were read.`;
+    : `${found.size} GeM bids ${onDay}; ${toRead.length - wordOnly.length} were in your categories and were read.`;
+  if (wordOnly.length > 0) statusMessage += ` ${wordOnly.length} more open ${wordOnly.length === 1 ? 'bid has' : 'bids have'} your search words and ${wordOnly.length === 1 ? 'was' : 'were'} read.`;
+  statusMessage += wordNote;
   if (short.length > 0) statusMessage += ` GeM’s list changed while it was read, so a few may be missing: ${short.join(', ')}. Run this date again to pick them up.`;
   const final = snapshot('SUCCESS');
   onUpdate(final);

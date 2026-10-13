@@ -31,7 +31,15 @@ export interface RunDefaults {
   categoriesByPortal: Record<string, string[]>;
   /** GeM searches service bids; this adds product bids too. */
   gemIncludeProducts: boolean;
+  /**
+   * GeM search words: every open bid with one in its title, category or
+   * items is read, whatever its day or category (src/gem/gemWordSearch.ts).
+   */
+  gemSearchWords?: string[];
 }
+
+/** The most GeM search words: each one costs a few requests to GeM on every run. */
+export const MAX_GEM_SEARCH_WORDS = 25;
 
 // GeM's starting categories, exactly as GeM's own Category dropdown shows
 // them (GeM adds an example after " - "), for the office's kinds of work:
@@ -97,6 +105,7 @@ export const DEFAULT_RUN_DEFAULTS: RunDefaults = {
   ],
   categoriesByPortal: {},
   gemIncludeProducts: false,
+  gemSearchWords: [],
 };
 
 function normalizeList(values: string[], label: string): string[] {
@@ -133,7 +142,10 @@ export function normalizeRunDefaults(input: RunDefaults): RunDefaults {
     if (categories.length === 0) throw new Error('Choose at least one category for each website.');
     categoriesByPortal[portalId] = categories;
   }
-  return { ...normalizeLists(input), categoriesByPortal, gemIncludeProducts: input.gemIncludeProducts === true };
+  const gemSearchWords = normalizeList(Array.isArray(input.gemSearchWords) ? input.gemSearchWords : [], 'Search words')
+    .filter((word) => /[\p{L}\p{N}]{2}/u.test(word));
+  if (gemSearchWords.length > MAX_GEM_SEARCH_WORDS) throw new Error(`Keep to ${MAX_GEM_SEARCH_WORDS} search words or fewer.`);
+  return { ...normalizeLists(input), categoriesByPortal, gemIncludeProducts: input.gemIncludeProducts === true, gemSearchWords };
 }
 
 /** A website's chosen categories, or its starting ones when none are chosen yet. */
