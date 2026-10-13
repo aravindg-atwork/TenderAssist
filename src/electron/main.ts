@@ -51,6 +51,7 @@ import { GemClient } from '../gem/gemClient.js';
 import { findBidsStartedOn } from '../gem/gemDaySearch.js';
 import { bidDocumentUrl, portalStyleDate, type GemBid } from '../gem/gemBid.js';
 import { findBidsWithWords } from '../gem/gemWordSearch.js';
+import { reviewForLifecycle } from '../review/reviewAlignment.js';
 import { bidFromTender, GEM_RETRY_DELAYS_MS, readGemBidDetails, runGemDate } from '../gem/gemRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
 import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
@@ -319,6 +320,7 @@ function callOperatorForSignIn(update: AuthJobUpdate): void {
 
 function emitJobUpdate(raw: AuthJobUpdate): void {
   const update: AuthJobUpdate = {
+    ...(backgroundRun ? { background: true } : {}),
     dateMeaning: activeRunContext?.config.dateMeaning,
     ...withRunState(raw, { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion }),
   };
@@ -621,9 +623,11 @@ ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unk
   }
   if (!OPERATOR_DECISIONS.includes(decision as OperatorDecision)) throw new Error('Unknown decision.');
   opportunities.decide(opportunityIds, decision as OperatorDecision, { note: typeof note === 'string' ? note : null });
+  // The sheets, downloads and counts follow this decision, not an earlier answer in a run.
+  alignReviews(opportunityIds);
   if (decision === 'APPROVE') afterApproval(approvedTenderRowsFor(opportunityIds));
-  else if (decision === 'REJECT') {
-    // A rejection also updates the day's sheet (and its Drive copy).
+  else {
+    // Any other decision (reject, back to review, later) rewrites the day's sheet (and its Drive copy) from the latest decisions too.
     const rows = opportunityIds.flatMap((id) => tenders.listForOpportunity(id));
     void refreshDaySheets(rows).then(() => { if (runsUploadToDrive()) uploadSavedTendersToGoogleDrive(rows); });
   }
@@ -1112,6 +1116,38 @@ ipcMain.handle('select-publishing-folder', async (_event, initialPath?: string):
 
 const APPROVED_BY_OPERATOR = 'Approved by you';
 const REJECTED_BY_OPERATOR = 'Rejected by you';
+
+/**
+ * Brings the review saved with a run's answer in line with the operator's
+ * latest decision on these tenders (src/review/reviewAlignment.ts): approved
+ * or rejected later, or taken back ("Back to review", "Later"). At start-up
+ * only decisions are copied (`clearUndecided` false), so an answer whose
+ * status could not be saved is never lost.
+ */
+function alignReviews(opportunityIds: readonly string[], clearUndecided = true): void {
+  for (const id of opportunityIds) {
+    const opportunity = opportunities.getById(id);
+    if (!opportunity) continue;
+    const wanted = reviewForLifecycle(opportunity.lifecycle);
+    if (wanted === 'LEAVE') continue;
+    for (const tender of tenders.listForOpportunity(id)) {
+      const current = workflow.getReview(tender.id);
+      if (wanted === null) {
+        if (current && clearUndecided) workflow.clearReview(tender.id);
+      } else if (current?.decision !== wanted) {
+        workflow.saveReview(tender.id, wanted, wanted === 'KEEP' ? APPROVED_BY_OPERATOR : REJECTED_BY_OPERATOR);
+      }
+    }
+  }
+}
+
+/** Decisions made before reviews followed them: line every saved review up with its tender's status, once at start-up. */
+function alignAllReviews(): void {
+  const rows = db.prepare(
+    `SELECT DISTINCT t.opportunity_id AS id FROM tender_reviews r JOIN tenders t ON t.id = r.tender_id WHERE t.opportunity_id IS NOT NULL`,
+  ).all() as Array<{ id: string }>;
+  alignReviews(rows.map((row) => row.id), false);
+}
 
 /** The operator's own call on a tender (Approve or Reject on Today or Tenders), as a review row for the sheet. */
 function operatorDecisionReview(tender: TenderRow): TenderReviewRow | undefined {
@@ -1627,7 +1663,9 @@ interface RunContext {
 function claimRun(): { abortController: AbortController; paceAction: PaceAction } {
   if (!licenceUsable) throw new Error(licenceRefusal);
   if (activeJobId) {
-    throw new Error('A job is already running. Wait for it to finish before starting another.');
+    throw new Error(backgroundRun
+      ? 'TenderAssist is saving the files of the GeM tenders you approved. Try again in a minute.'
+      : 'A job is already running. Wait for it to finish before starting another.');
   }
   activeJobId = 'pending';
   const abortController = new AbortController();
@@ -2077,8 +2115,32 @@ function approvedTenderRowsFor(opportunityIds: string[]): TenderRow[] {
   return opportunityIds.flatMap((id) => tenders.listForOpportunity(id));
 }
 
+/**
+ * Approved GeM tenders get their files at once (GeM needs no sign-in), in a
+ * run of their own in the background; if another run is going, as soon as it
+ * ends (finishRun). Their day sheets are rewritten when the files are saved.
+ */
+let gemDocumentsWanted = false;
+/** The run going now is such a background run: the screen does not follow it. */
+let backgroundRun = false;
+function scheduleGemDocuments(): void {
+  gemDocumentsWanted = true;
+  if (activeJobId || !licenceUsable) return;
+  gemDocumentsWanted = false;
+  const portal = getPortalDefinition('gem');
+  if (gemApprovedWaitingForDocuments(portal.id).length === 0) return;
+  backgroundRun = true;
+  startGemDocumentRun(portal).catch((error) => {
+    backgroundRun = false;
+    console.error('[TenderAssist] Could not save the files of approved GeM tenders:', error);
+  });
+}
+
+const isGemTender = (tender: TenderRow) => isGemPortal(getPortalDefinition(runConfigurations.getForJob(tender.job_id)?.portalId ?? DEFAULT_PORTAL_ID));
+
 /** Documents and Drive copy for tenders the operator just approved. */
 function afterApproval(tenderRows: TenderRow[]): void {
+  if (tenderRows.some(isGemTender)) scheduleGemDocuments();
   for (const jobId of new Set(tenderRows.map((tender) => tender.job_id))) {
     syncOpportunities('documents', () => recordCollectedDocuments(opportunitySync, jobId));
   }
@@ -2533,6 +2595,9 @@ function finishRun(ctx: RunContext, run: Promise<unknown>, onFailure: (err: unkn
       if (ctx.page) await attemptLogout(ctx.page);
       portalHost?.close();
       releaseRun(ctx.abortController);
+      backgroundRun = false;
+      // GeM tenders approved while this run went: their files now.
+      if (gemDocumentsWanted) setTimeout(scheduleGemDocuments, 2_000);
     });
 }
 
@@ -2703,6 +2768,8 @@ async function collectGemApprovedDocuments(ctx: RunContext, jobId: string, targe
     }
     // Read inside the files (OCR for scans) and find the requirements again.
     await readTenderDocuments(targets, (statusMessage) => emitJobUpdate(update({ statusMessage }))).catch(() => {});
+    // Their day sheets list them now, with their files and eligibility sheets (before Drive gets the sheets).
+    await refreshDaySheets(targets);
     reportDriveProblems(copyApprovedTendersToDrive(targets.map((tender) => tenders.getById(tender.id) ?? tender)));
     // Their files are saved now, so Drive gets them too.
     uploadSavedTendersToGoogleDrive(targets.map((tender) => tenders.getById(tender.id) ?? tender));
@@ -3694,6 +3761,7 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
   });
 
   app.whenReady().then(() => {
+    try { alignAllReviews(); } catch (error) { console.error('[TenderAssist] Could not line up saved reviews:', error); }
     createWindow();
     configureApplicationMenu();
     mainWindow?.webContents.once('did-finish-load', reportRestoreOutcome);

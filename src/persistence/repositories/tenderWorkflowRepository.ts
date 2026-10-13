@@ -60,6 +60,11 @@ export class TenderWorkflowRepository {
     return this.db.prepare('SELECT * FROM tender_reviews WHERE tender_id = ?').get(tenderId) as TenderReviewRow | undefined;
   }
 
+  /** The operator took a decision back ("Back to review", "Later"): the tender is undecided again. */
+  clearReview(tenderId: string): void {
+    this.db.prepare('DELETE FROM tender_reviews WHERE tender_id = ?').run(tenderId);
+  }
+
   findDocument(tenderId: string, sourceUrl: string): TenderDocumentRow | undefined {
     return this.db.prepare('SELECT * FROM tender_documents WHERE tender_id = ? AND source_url = ?')
       .get(tenderId, sourceUrl) as TenderDocumentRow | undefined;

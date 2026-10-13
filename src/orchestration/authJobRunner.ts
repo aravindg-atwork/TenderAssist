@@ -55,6 +55,8 @@ export type AuthAssistStep =
   | 'AUTHENTICATED';
 
 export interface AuthJobUpdate {
+  /** A run the operator did not start (approved GeM tenders' files, src/electron/main.ts): the screen stays where it is. */
+  background?: boolean;
   jobId: string;
   authSessionId: string;
   jobState: JobState;

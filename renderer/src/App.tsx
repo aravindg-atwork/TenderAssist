@@ -81,6 +81,11 @@ export function App() {
 
   // App-level so "a search is running" survives moving between pages.
   useEffect(() => window.tenderAssist.onJobUpdate((update) => {
+    // Approved GeM tenders' files, saved in the background: the screen stays where it is.
+    if (update.background) {
+      if (update.outcome) window.tenderAssist.getInbox().then((inbox) => setWaiting(inbox.attentionCount)).catch(console.error);
+      return;
+    }
     const over = update.outcome === 'TIMEOUT' || update.outcome === 'ABORTED' || (update.outcome === 'SUCCESS' && update.phase === 'PUBLISHING');
     if (!sessionJobs.current.includes(update.jobId)) sessionJobs.current = [...sessionJobs.current, update.jobId];
     if (over) {
