@@ -27,6 +27,10 @@
 
 Var LicenceKeyField
 Var LicenceKey
+; 1 when a skip button was chosen: no key, on purpose.
+Var LicenceSkip
+Var LicenceSkipElsewhere
+Var LicenceSkipLater
 ; The DSC signer page: what is missing (prereqs.ps1 -DetectOnly exit code) and the operator's choice.
 Var SignerMissing
 Var SignerCheckbox
@@ -103,19 +107,53 @@ Function LicenceKeyPage
   ${NSD_OnClick} $0 LicenceKeyHelp
   ${NSD_CreateText} 0 18u 100% 14u "$LicenceKey"
   Pop $LicenceKeyField
+  ; Next works only with a key in the box; without one, the skip buttons below are the way on.
+  ${NSD_OnChange} $LicenceKeyField LicenceKeyChanged
   ${NSD_CreateLabel} 0 38u 100% 18u "With the key here, TenderAssist only asks you to sign in with Google when it opens, and you are ready to work."
   Pop $0
   ${NSD_CreateLabel} 0 62u 100% 10u "No key to paste?"
   Pop $0
-  ; Either skip goes straight on with no key: TenderAssist signs in with Google first, and asks for the key only if that account has none.
+  ; Either skip is a choice: it is ticked and turns Next on. With no key, TenderAssist signs in with Google first, and asks for the key only if that account has none.
   ${NSD_CreateButton} 0 74u 100% 17u "I already use TenderAssist on another computer (skip: I will sign in with Google)"
-  Pop $0
-  ${NSD_OnClick} $0 LicenceKeySkip
+  Pop $LicenceSkipElsewhere
+  ${NSD_OnClick} $LicenceSkipElsewhere LicenceKeySkip
   ${NSD_CreateButton} 0 95u 100% 17u "I do not have the key with me now (skip: TenderAssist asks for it after Google sign-in)"
-  Pop $0
-  ${NSD_OnClick} $0 LicenceKeySkip
+  Pop $LicenceSkipLater
+  ${NSD_OnClick} $LicenceSkipLater LicenceKeySkip
   ${NSD_SetFocus} $LicenceKeyField
+  StrCpy $LicenceSkip 0
+  Call LicenceKeyNextState
   nsDialogs::Show
+FunctionEnd
+
+; Next on only with a key in the box, or a skip button chosen.
+Function LicenceKeyNextState
+  ${NSD_GetText} $LicenceKeyField $1
+  GetDlgItem $2 $HWNDPARENT 1
+  ${If} $1 != ""
+  ${OrIf} $LicenceSkip == 1
+    EnableWindow $2 1
+  ${Else}
+    EnableWindow $2 0
+  ${EndIf}
+FunctionEnd
+
+; Both skip buttons without a tick.
+Function LicenceKeyClearSkip
+  StrCpy $LicenceSkip 0
+  ${NSD_SetText} $LicenceSkipElsewhere "I already use TenderAssist on another computer (skip: I will sign in with Google)"
+  ${NSD_SetText} $LicenceSkipLater "I do not have the key with me now (skip: TenderAssist asks for it after Google sign-in)"
+FunctionEnd
+
+; A key typed or pasted replaces a skip chosen before.
+Function LicenceKeyChanged
+  Pop $0
+  ${NSD_GetText} $LicenceKeyField $1
+  ${If} $1 != ""
+  ${AndIf} $LicenceSkip == 1
+    Call LicenceKeyClearSkip
+  ${EndIf}
+  Call LicenceKeyNextState
 FunctionEnd
 
 Function LicenceKeyHelp
@@ -123,16 +161,30 @@ Function LicenceKeyHelp
   MessageBox MB_OK|MB_ICONINFORMATION "Your activation key looks like TA-XXXXX-XXXXX-XXXXX-XXXXX. It came by message or email from whoever set up TenderAssist for you.$\r$\n$\r$\nWhen TenderAssist opens, you sign in with Google. The key is linked to that Google account, and approved tenders are saved to its Google Drive.$\r$\n$\r$\nAlready use TenderAssist on another computer? You do not need the key: sign in with the same Google account.$\r$\n$\r$\nNo key with you now? Skip this page. After you sign in with Google, TenderAssist asks for the key."
 FunctionEnd
 
-; A skip button: no key, and on to the next page as if Next was pressed (the page's leave function still runs).
+; A skip button: no key, on purpose. It is ticked and turns Next on; the operator presses Next.
 Function LicenceKeySkip
-  Pop $0
+  Pop $3
+  ; The box is emptied first (its change handler runs), then this button is ticked.
   ${NSD_SetText} $LicenceKeyField ""
-  SendMessage $HWNDPARENT 0x408 1 0
+  Call LicenceKeyClearSkip
+  StrCpy $LicenceSkip 1
+  ${If} $3 == $LicenceSkipElsewhere
+    ${NSD_SetText} $3 "Chosen: I already use TenderAssist on another computer (skip: I will sign in with Google)"
+  ${Else}
+    ${NSD_SetText} $3 "Chosen: I do not have the key with me now (skip: TenderAssist asks for it after Google sign-in)"
+  ${EndIf}
+  Call LicenceKeyNextState
 FunctionEnd
 
 Function LicenceKeyPageLeave
   ${NSD_GetText} $LicenceKeyField $LicenceKey
-  ; Empty: a further PC of a customer; the app activates it with Google alone.
+  ; Empty without a skip button (Enter in an empty box): say what to do and stay.
+  ${If} $LicenceKey == ""
+  ${AndIf} $LicenceSkip != 1
+    MessageBox MB_OK|MB_ICONINFORMATION "Paste your activation key, or choose one of the two buttons below it if you have no key to paste."
+    Abort
+  ${EndIf}
+  ; Empty after a skip: a further PC of a customer, or a key typed later; the app signs in with Google first.
   ${If} $LicenceKey == ""
     Return
   ${EndIf}
