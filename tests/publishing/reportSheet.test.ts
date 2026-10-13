@@ -38,7 +38,7 @@ describe('the day report sheet', () => {
     });
   });
 
-  it('fills a GeM bid, linking to its bid document', () => {
+  it('fills a GeM bid, linking to its page on GeM and its bid PDF', () => {
     const row = reportRow({
       serialNumber: 1,
       tender: {
@@ -51,9 +51,18 @@ describe('the day report sheet', () => {
       projectNature: 'Website / Mobile App', tenderValue: '48,95,820', emd: '98,000', location: 'Delhi - PIN 110001',
       bidStartDate: '06-10-2026 11:00 AM', bidEndDate: '27-10-2026 03:00 PM', preBidMeetingDate: '15-10-2026 11:00 AM',
       eligibilityNotes: 'minimum average annual turnover 24 Lakh (s)',
-      viewTenderLink: { text: 'Open on GeM', target: 'https://bidplus.gem.gov.in/showbidDocument/9900001' },
-      tenderDocumentLink: null,
+      viewTenderLink: { text: 'View on GeM', target: 'https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9900001' },
+      tenderDocumentLink: { text: 'Download bid PDF', target: 'https://bidplus.gem.gov.in/showbidDocument/9900001' },
     });
+  });
+
+  it('links a GeM bid’s saved documents when there are some', () => {
+    const row = reportRow({
+      serialNumber: 1, documentsFolder: '13-10-2026_1_WDRA/Documents',
+      tender: { ...base, tender_ref: 'GEM/2026/B/8085066', tender_portal_id: '9900001' },
+    });
+    expect(row.viewTenderLink?.target).toBe('https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9900001');
+    expect(row.tenderDocumentLink).toEqual({ text: 'Open documents', target: '13-10-2026_1_WDRA/Documents' });
   });
 
   it('names the kind of work in the office’s own words', () => {

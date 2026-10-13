@@ -1,6 +1,7 @@
 // The day's report sheet, in the office's own columns (as in its
 // "Tenders Interested" workbook): one row per kept tender.
 
+import { bidDocumentUrl, bidPageUrl } from '../gem/gemBid.js';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import { corrigendaSummary, tenderPageFacts } from '../review/watchedTenders.js';
 
@@ -155,10 +156,17 @@ export function reportRow(input: ReportRowInput): ReportRow {
     // Whether the company qualifies is the operator's call; the notes give what the tender asks for.
     eligibility: 'To check',
     eligibilityNotes: field(fields, /^pre-?\s*qualification/) || input.eligibility || '',
+    // GeM has a public page per bid. The NIC websites' tender pages only open
+    // inside a signed-in session, so those link to the website with the Tender ID.
     viewTenderLink: gem && bidId
-      ? { text: 'Open on GeM', target: `https://bidplus.gem.gov.in/showbidDocument/${bidId}` }
+      ? { text: 'View on GeM', target: bidPageUrl(bidId) }
       : input.portalUrl ? { text: `Open ${input.portalName ?? 'the website'} (Tender ID ${bidId || tender.tender_ref})`, target: input.portalUrl } : null,
-    tenderDocumentLink: input.documentsFolder ? { text: 'Open documents', target: input.documentsFolder } : null,
+    // The saved documents; for a GeM bid not saved yet, GeM's bid PDF (it downloads).
+    tenderDocumentLink: input.documentsFolder
+      ? { text: 'Open documents', target: input.documentsFolder }
+      : gem && bidId && /^GEM\/\d{4}\/B\//i.test(tender.tender_ref)
+        ? { text: 'Download bid PDF', target: bidDocumentUrl({ id: bidId, kind: 'BID' }) }
+        : null,
     corrigenda: corrigendaSummary(tenderPageFacts(tender.detail_text).corrigenda),
   };
 }

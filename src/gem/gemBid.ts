@@ -127,6 +127,15 @@ export function bidDocumentUrl(bid: Pick<GemBid, 'id' | 'kind'>): string {
   return `${BID_ORIGIN}/${path}/${bid.id}`;
 }
 
+/**
+ * The bid's public web page on GeM: number, status, dates, turnover asked
+ * for, buyer and office. It works for open bids and RAs alike, with no
+ * sign-in (checked 13 Oct 2026); the bid PDF, by contrast, always downloads.
+ */
+export function bidPageUrl(bidId: string): string {
+  return `${BID_ORIGIN}/bidding/bid/getBidResultView/${bidId}`;
+}
+
 export function bidKindLabel(bid: Pick<GemBid, 'kind' | 'rateContract' | 'globalTender'>): string {
   const base = bid.kind === 'BID' ? 'Bid' : bid.kind === 'RA' ? 'Reverse auction' : 'Direct reverse auction';
   const extras = [bid.rateContract && 'rate contract', bid.globalTender && 'global tender'].filter(Boolean);

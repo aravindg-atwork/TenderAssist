@@ -129,6 +129,7 @@ There is **no estimated value, EMD amount or location** in the list record. Thos
   - `…/bidding/excel/bid-<b_id>/<n>.xlsx`
   - `https://fulfilment.gem.gov.in/contract/slafds?fileDownloadPath=…pdf`
   - Links to the general GTC (`admin.gem.gov.in/apis/v1/gtc/…`) and `bidsla` pages are generic and can be skipped.
+- **The bid's web page:** `GET https://bidplus.gem.gov.in/bidding/bid/getBidResultView/<b_id>` is a public HTML page with the bid number, status, quantity, start, end and opening times, turnover and experience asked for, and the buyer's ministry, department, organisation and office. It works for open bids and RAs as well as evaluated ones (checked 13 Oct 2026), so the report sheets' "View Tender Link" points here. The bid PDF is sent with `Content-Disposition: attachment`, so a browser always downloads it rather than showing it.
 - **Corrigendum and representation:** `POST /public-bid-other-details/<b_id>` says whether either exists. `POST /bidding/bid/viewCorrigendum/<b_id>` returns the corrigendum.
 
 `robots.txt` disallows `/resources/` for crawlers. We would fetch only the attachments of tenders the operator keeps, at a human pace, the same as a person clicking the links.
