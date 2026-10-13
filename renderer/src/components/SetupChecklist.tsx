@@ -15,9 +15,9 @@ const TITLES: Record<StepId, string> = {
   website: 'Choose your tender website',
   login: 'Save your website login',
   signer: 'Install the DSC signer',
-  categories: 'Check the categories to search',
-  intent: 'Check the intent words (the work you want)',
-  excluded: 'Check the excluded words (the work you don’t)',
+  categories: 'Choose the categories to search',
+  intent: 'Add your intent words (the work you want)',
+  excluded: 'Add your excluded words (the work you don’t)',
   folder: 'Folder on this computer',
   drive: 'Name your Google Drive folder',
 };
@@ -28,9 +28,9 @@ const INFO: Record<StepId, ReactNode> = {
   website: <>The tender website you search most. Tamil Nadu and other GePNIC websites need your login, a CAPTCHA and your DSC; GeM needs no sign-in. You can still search any website from Today later: this sets up the first one.</>,
   login: <>Your login ID and password for the website. TenderAssist fills them in on the sign-in page; you still type the CAPTCHA and your DSC PIN yourself. The password is locked to your Windows account and never shown again.</>,
   signer: <>GePNIC websites sign you in with your Digital Signature Certificate through a small “DSC signer” program from the website. It runs on OpenWebStart and Java 8 or newer, which TenderAssist can install for you.</>,
-  categories: <>The website’s own tender categories, such as “Information Technology”. TenderAssist only reads tenders listed in the categories you choose, so pick the ones your kind of work appears in. The website’s full list appears after your first search.</>,
-  intent: <>Words that describe the work you bid for, such as “website development”. A tender is kept when its title has one of these words, or its details have one of these phrases. The starting list is for software, website and e-learning work: replace it with your own work’s words.</>,
-  excluded: <>Words that mean “not for us”, such as “civil works”. A tender whose title or category has one of them is rejected straight away, even if it also has an intent word.</>,
+  categories: <>The website’s own tender categories, such as “Information Technology”. TenderAssist only reads tenders listed in the categories you choose, so pick the ones your kind of work appears in. A few examples are filled in to start: replace them. The website’s full list appears after your first search.</>,
+  intent: <>Phrases that describe the work you bid for, as tender titles word it, such as “website development”. Start with 2 to 4 from tenders you bid for before. A tender is kept when its title has one, or its details have one of these phrases. As you approve tenders, Settings suggests more words from them.</>,
+  excluded: <>Words that mean “not for us”, such as “civil works”. A tender whose title or category has one of them is rejected straight away, even if it also has an intent word. As you reject tenders, Settings suggests more.</>,
   folder: <>Where TenderAssist saves tender documents, eligibility sheets and each day’s report sheet on this computer: a folder for each month, and inside it a folder for each day. It is set for you; change it only if you want another place.</>,
   drive: <>Type a folder name, and TenderAssist makes that folder in the Google Drive of the account that activated the key. Approved tenders and the report sheets are uploaded there after each search, in the same month and day folders.</>,
 };
@@ -135,9 +135,12 @@ export function SetupChecklist({ onOpenSettings, onPortalChange, onNext, compact
       case 'excluded':
         return (
           <span className="setup__pair">
-            <button type="button" className="btn btn--line btn--sm" onClick={() => onOpenSettings(step.id as 'categories' | 'intent' | 'excluded')}>Review in Settings</button>
-            <button type="button" className="btn btn--quiet btn--sm" disabled={busy} onClick={() => void change({ confirm: step.id as 'categories' | 'intent' | 'excluded' })}>
-              <CheckIcon /> I’ve checked them
+            <button type="button" className="btn btn--line btn--sm" onClick={() => onOpenSettings(step.id as 'categories' | 'intent' | 'excluded')}>
+              {step.id === 'categories' ? 'Choose in Settings' : 'Add in Settings'}
+            </button>
+            {/* The step ticks itself once the list is changed; this is only for keeping the examples as they are. */}
+            <button type="button" className="btn btn--text btn--sm" disabled={busy} onClick={() => void change({ confirm: step.id as 'categories' | 'intent' | 'excluded' })}>
+              Keep the examples
             </button>
           </span>
         );

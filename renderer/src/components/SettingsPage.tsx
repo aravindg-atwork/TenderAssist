@@ -11,7 +11,7 @@ const CATEGORY_INFO = <>The website’s own tender categories, such as “Inform
 const INTENT_INFO = <>Words for the work you bid for. A tender is kept when its <strong>title</strong> has one of the single words (like “website”), or its title or details have one of the phrases (like “website development”). Use your own work’s words: the starting list is for software, website and e-learning work.</>;
 const EXCLUDED_INFO = <>Words that mean “not for us”, such as “civil works” or “furniture”. A tender whose title or category has one of them is rejected straight away, even if it also has an intent word.</>;
 import { LicenceSetting } from './Licence';
-import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, RECOMMENDED_INTENT_WORDS, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
+import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
 import type { CategoryHealth, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
 import type { UpdateStatus } from '../../../src/electron/updateService';
@@ -77,7 +77,6 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const selectedPortal = getPortalDefinition(selectedPortalId);
   const wordKey = (word: string) => word.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
   const broadWords = keywords.filter((word) => TOO_BROAD_INTENT_WORDS.includes(wordKey(word)));
-  const missingRecommended = RECOMMENDED_INTENT_WORDS.filter((word) => !keywords.some((current) => wordKey(current) === wordKey(word)));
   const gem = isGemPortal(selectedPortal);
   const gemCategoryCounts = useCallback((names: string[]) => window.tenderAssist.getGemCategoryCounts(selectedPortalId, names), [selectedPortalId]);
   // The website's own picks, or its starting ones until the operator changes them.
@@ -349,21 +348,13 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           )}
           <div id="look-intent" />
           <EditableChips id="intent-keyword-entry" label="Intent words" info={INTENT_INFO}
-            helper="A single word (like “website”) counts only in a tender’s title. A phrase (like “website development”) also counts in its details."
+            helper="Start with 2 to 4 phrases from tenders you bid for, worded as their titles are (like “website development”). A single word counts only in a tender’s title; a phrase also counts in its details. Suggestions below come from the tenders you approve."
             values={keywords} onChange={setKeywords} placeholder="Add an intent word or phrase" />
           {broadWords.length > 0 && (
             <p className="notice notice--attention" role="note">
               {broadWords.map((word) => `“${word}”`).join(', ')} on {broadWords.length === 1 ? 'its' : 'their'} own {broadWords.length === 1 ? 'is' : 'are'} too broad:
               it keeps tenders that are not your work (for example, “AMC” keeps maintenance contracts for furnaces and RO plants).
               Remove {broadWords.length === 1 ? 'it' : 'them'}, or use a phrase such as “software AMC” or “website maintenance”.
-            </p>
-          )}
-          {missingRecommended.length > 0 && (
-            <p className="hint">
-              <button type="button" className="btn btn--quiet btn--small" onClick={() => setKeywords([...keywords, ...missingRecommended])}>
-                Add {missingRecommended.length} recommended words
-              </button>{' '}
-              Phrases worded the way IT, website, app and e-learning tenders are, taken from the tenders this office pursued. Remove any you do not want, then save.
             </p>
           )}
           <WordSuggestionList title="Suggested intent words, from tenders you approved" suggestions={suggestions?.intent ?? []}

@@ -76,7 +76,10 @@ import type {
   GemCategoryCounts,
   GemSearchWordPreview,
 } from './ipcTypes.js';
-import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration, type RunDateMeaning } from '../config/runConfiguration.js';
+import {
+  categoriesForPortal, DEFAULT_GEM_CATEGORIES, normalizeRunConfiguration, STARTING_EXCLUDED_WORDS, STARTING_INTENT_WORDS, STARTING_PORTAL_CATEGORIES,
+  type RunConfiguration, type RunDateMeaning,
+} from '../config/runConfiguration.js';
 import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
 import { typeAllAtOnce, typeLikeAPerson, type PortalCredentials } from '../browser/portalLoginController.js';
 import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type OcrEngine } from '../documents/documentText.js';
@@ -1429,11 +1432,18 @@ async function signerStatusCached(): Promise<SignerStatus> {
   return signerChecked.status;
 }
 
+/** The same words, in any order and case: a list still the starting examples. */
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+  const key = (list: readonly string[]) => [...new Set(list.map((word) => word.trim().toLocaleLowerCase().replace(/\s+/g, ' ')))].sort().join('\n');
+  return key(a) === key(b);
+}
+
 /**
- * The first-time setup checklist. Most steps are read from the app itself
- * (activation, login, DSC signer, folders, Drive); the word lists are ticked
- * by the operator after checking them. A PC already in use (it has runs)
- * starts complete, so existing offices never see it.
+ * The first-time setup checklist. Every step is read from the app itself:
+ * activation, login, DSC signer, folders, Drive, and the word lists, which
+ * tick once they are the office's own (no longer the starting examples). A
+ * list the operator keeps as it is can still be ticked by hand. A PC already
+ * in use (it has runs) starts complete, so existing offices never see it.
  */
 async function setupChecklist(): Promise<SetupChecklist> {
   let state = setupState.get();
@@ -1445,6 +1455,9 @@ async function setupChecklist(): Promise<SetupChecklist> {
   const login = portal && needsSignIn ? portalCredentials.get(portal.id) : null;
   const signer = needsSignIn && process.platform === 'win32' ? await signerStatusCached() : null;
   const categories = portal ? categoriesForPortal(defaults, portal) : defaults.productCategories;
+  const categoriesAreExamples = sameList(categories, portal && isGemPortal(portal) ? DEFAULT_GEM_CATEGORIES : STARTING_PORTAL_CATEGORIES);
+  const intentAreExamples = sameList(defaults.keywords, STARTING_INTENT_WORDS);
+  const excludedAreExamples = sameList(defaults.excludedKeywords, STARTING_EXCLUDED_WORDS);
   const outputRoot = publishingSettings.get(portal?.id ?? DEFAULT_PORTAL_ID).localOutputRoot;
   const drive = googleDriveSettings.get();
   const steps: SetupStep[] = [
@@ -1458,9 +1471,18 @@ async function setupChecklist(): Promise<SetupChecklist> {
       ? { id: 'signer', automatic: true, done: true, notNeeded: true, detail: `${portal?.name ?? 'This website'} has no DSC sign-in` }
       : { id: 'signer', automatic: true, done: process.platform !== 'win32' || Boolean(signer?.java && signer.openWebStart),
         detail: !signer ? 'Windows only' : signer.java && signer.openWebStart ? 'OpenWebStart and Java installed' : `Missing: ${[!signer.java && 'Java', !signer.openWebStart && 'OpenWebStart'].filter(Boolean).join(' and ')}` },
-    { id: 'categories', automatic: false, done: Boolean(state.confirmed.categories) && categories.length > 0, detail: `${categories.length} ${categories.length === 1 ? 'category' : 'categories'} chosen` },
-    { id: 'intent', automatic: false, done: Boolean(state.confirmed.intent) && defaults.keywords.length > 0, detail: `${defaults.keywords.length} intent words` },
-    { id: 'excluded', automatic: false, done: Boolean(state.confirmed.excluded), detail: `${defaults.excludedKeywords.length} excluded words` },
+    { id: 'categories', automatic: true, done: categories.length > 0 && (Boolean(state.confirmed.categories) || !categoriesAreExamples),
+      detail: categoriesAreExamples
+        ? `${categories.length} starting examples: choose the categories your kind of work is listed in`
+        : `${categories.length} ${categories.length === 1 ? 'category' : 'categories'} chosen` },
+    { id: 'intent', automatic: true, done: defaults.keywords.length > 0 && (Boolean(state.confirmed.intent) || !intentAreExamples),
+      detail: intentAreExamples
+        ? `${defaults.keywords.length} starting examples: replace them with 2 to 4 phrases from tenders you bid for`
+        : `${defaults.keywords.length} of your own words` },
+    { id: 'excluded', automatic: true, done: Boolean(state.confirmed.excluded) || !excludedAreExamples,
+      detail: excludedAreExamples
+        ? `${defaults.excludedKeywords.length} starting examples: add the work you never bid for`
+        : `${defaults.excludedKeywords.length} excluded ${defaults.excludedKeywords.length === 1 ? 'word' : 'words'}` },
     { id: 'folder', automatic: true, done: Boolean(outputRoot), detail: outputRoot || 'Not set' },
     { id: 'drive', automatic: true, done: Boolean(drive.folderName) && driveSignInUsable(),
       detail: drive.folderName && driveSignInUsable() ? `My Drive / ${drive.folderName}` : !driveSignInUsable() ? 'Not signed in to Google' : 'No folder name yet' },

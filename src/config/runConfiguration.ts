@@ -1,5 +1,3 @@
-import { CONFIGURED_SEARCHES } from '../search/searchConfig.js';
-
 /**
  * What a run's date means: the day tenders were published (a GeM bid's
  * start), or, on GeM only, the day bids close (CLOSING, runs before
@@ -45,48 +43,28 @@ export interface RunDefaults {
 /** The most GeM search words: each one costs a few requests to GeM on every run. */
 export const MAX_GEM_SEARCH_WORDS = 25;
 
+// Every office bids for different work, so a new install starts with a few
+// examples of each list, for the operator to replace with their own (the
+// setup checklist ticks a list once it is theirs). Offices set up before
+// 13 Oct 2026 keep their lists (migration 019 saved their GeM categories).
+
 // GeM's starting categories, exactly as GeM's own Category dropdown shows
-// them (GeM adds an example after " - "), for the office's kinds of work:
-// application development, e-learning, software applications and AMC,
-// websites and mobile apps. Custom bids are where buyers describe their own
-// work, so the intent words decide those. GeM's "Annual Maintenance Service"
-// entries are all hardware AMC, so they are left for the operator to add.
+// them (GeM adds an example after " - "). Custom bids are where buyers
+// describe their own work, so the intent words decide those.
 export const DEFAULT_GEM_CATEGORIES: readonly string[] = [
   'Custom Bid For Services',
   'Application Development',
-  'Application Development And Maintenance Resource Hiring Services',
-  'Hiring Of Professionals For Application Development And Maintenance - Data Science And Analytics Role; Data Analyst; 3 Years And Less Than 6 Years',
-  'E-learning Content Development - Non-igot; Restructure & Rewrite Content, Storyboarding With Production Support; Hindi, English, Tamil, Kannada, Telugu, Bengali, Assamese; Mobile And Laptop/desktop Both; Textiles & Clothing; Type Of Content; Na; Refe..',
-  'Interactive Content Creation Services',
-  'Software Support Services 2.0 - Microsoft; Operating System Software; Maintenance Services; Not Applicable; General Service Provider',
-  'Hiring Of Agency For It Projects- Milestone Basis',
   'Design, Development, Implementation, And Maintenance Of Websites, Web Portal, Web-enabled Application And Mobile Apps - Open Source Solution (oss)',
-  'Web/mobile Based Ar/vr Or Ar/vr Related Application Development',
 ];
 
-/**
- * Intent words in the way the office's own tenders are worded, taken from its
- * list of tenders it pursued in 2026-27 (341 titles): these recognise 304 of
- * them, against 134 for the earlier list. Single words count in a title only.
- */
-export const RECOMMENDED_INTENT_WORDS: readonly string[] = [
-  'application development', 'app development', 'software development', 'software application', 'web application',
-  'web based', 'web portal', 'portal development', 'website development', 'website design', 'website redesign',
-  'website maintenance', 'web hosting', 'mobile app', 'mobile application', 'android app', 'e-learning',
-  'learning content', 'content development', 'interactive content', 'learning management system', 'learning system', 'e-content',
-  'IT projects', 'IT project', 'management system', 'management software', 'management portal', 'information system',
-  'HRMS', 'ERP', 'academic erp', 'chatbot', 'artificial intelligence', 'AI/ML', 'AI based', 'AI enabled', 'AI driven',
-  'whatsapp', 'cloud based software', 'SaaS', 'digital platform', 'digital transformation', 'digital application',
-  'application modules', 'document management system', 'automation software', 'examination software',
-  'examination system', 'computer based test', 'computer based examination', 'online recruitment', 'recruitment portal',
-  'online application', 'online registration', 'registration system', 'system implementation partner',
-  'complaint management', 'grievance management', 'visitor management', 'GIS implementation', 'e-commerce platform',
-  'full stack', 'software implementation', 'enterprise application', 'application service provider', 'online portal',
-  'system integrator', 'AR/VR', 'virtual reality', 'software support', 'software maintenance', 'application maintenance',
-  'software AMC', 'AMC of software', 'AMC of website', 'penetration testing', 'security audit of website',
-  'database administration', 'edtech', 'digitization', 'digitisation', 'website', 'websites', 'portal', 'software',
-  'app', 'apps', 'LMS', 'CMS', 'dashboard',
-];
+/** Tamil Nadu's (and other GePNIC websites') starting categories. */
+export const STARTING_PORTAL_CATEGORIES: readonly string[] = ['Computer- S/W', 'Information Technology', 'Info. Tech. Services'];
+
+/** Starting intent words: examples of phrases from a tender title. */
+export const STARTING_INTENT_WORDS: readonly string[] = ['software development', 'website development', 'mobile application'];
+
+/** Starting excluded words: examples of work that is not for the office. */
+export const STARTING_EXCLUDED_WORDS: readonly string[] = ['laptop', 'printer'];
 
 /**
  * Words too broad to mean the office's work on their own: "AMC" alone keeps
@@ -97,16 +75,9 @@ export const TOO_BROAD_INTENT_WORDS: readonly string[] = [
 ];
 
 export const DEFAULT_RUN_DEFAULTS: RunDefaults = {
-  productCategories: CONFIGURED_SEARCHES.map((search) => search.productCategory),
-  keywords: [...RECOMMENDED_INTENT_WORDS],
-  // AMC work is wanted (software AMC), so it is not excluded.
-  excludedKeywords: [
-    'computer hardware',
-    'laptop',
-    'desktop computer',
-    'printer',
-    'repair and maintenance',
-  ],
+  productCategories: [...STARTING_PORTAL_CATEGORIES],
+  keywords: [...STARTING_INTENT_WORDS],
+  excludedKeywords: [...STARTING_EXCLUDED_WORDS],
   categoriesByPortal: {},
   gemIncludeProducts: false,
   gemSearchWords: [],
