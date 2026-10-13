@@ -7,6 +7,9 @@ import { plainError } from '../words';
 
 type StepId = SetupStep['id'];
 
+/** The step still open, and how far setup is, for the top bar and the sidebar. */
+export interface SetupNext { title: string; done: number; total: number }
+
 const TITLES: Record<StepId, string> = {
   activate: 'Activate TenderAssist',
   website: 'Choose your tender website',
@@ -37,18 +40,22 @@ interface Props {
   /** The website chosen in step 2 also becomes the one selected on Today. */
   onPortalChange: (portalId: string) => void;
   /** Tells the top bar what is next, or null once setup is complete. */
-  onNext?: (next: { title: string } | null) => void;
+  onNext?: (next: SetupNext | null) => void;
   /** Something is waiting on Today (Decide): show one line instead of the whole list, opened on request. */
   compact?: boolean;
+  /** Put away with "Later": hidden here, opened again from the sidebar or the top bar. */
+  tucked?: boolean;
+  onTuck?: () => void;
 }
 
 /**
  * The first-time setup checklist on Today: activation ticks itself, the
  * website is chosen here, and each other step either ticks itself when done
  * in Settings or is ticked by the operator after checking a word list.
- * Every step has an (i) with what it is for. Gone once everything is done.
+ * Every step has an (i) with what it is for. "Later" puts it in the sidebar
+ * until opened again. Gone once everything is done.
  */
-export function SetupChecklist({ onOpenSettings, onPortalChange, onNext, compact = false }: Props) {
+export function SetupChecklist({ onOpenSettings, onPortalChange, onNext, compact = false, tucked = false, onTuck }: Props) {
   const [opened, setOpened] = useState(false);
   const [list, setList] = useState<Checklist | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +71,17 @@ export function SetupChecklist({ onOpenSettings, onPortalChange, onNext, compact
   }, []);
 
   const firstOpen = list?.steps.find((step) => !step.done);
-  useEffect(() => { if (list) onNext?.(list.complete || !firstOpen ? null : { title: TITLES[firstOpen.id] }); }, [list, firstOpen, onNext]);
+  const doneCount = list?.steps.filter((step) => step.done).length ?? 0;
+  useEffect(() => {
+    if (list) onNext?.(list.complete || !firstOpen ? null : { title: TITLES[firstOpen.id], done: doneCount, total: list.steps.length });
+  }, [list, firstOpen, doneCount, onNext]);
 
   if (!list || list.complete) return error ? <p className="notice notice--stop" role="alert">{error}</p> : null;
+  // Still loaded above, so the sidebar's count stays right while it is put away.
+  if (tucked) return null;
+  const later = onTuck && (
+    <button type="button" className="btn btn--quiet btn--sm" onClick={onTuck} title="Put the checklist in the sidebar. Open it from there any time.">Later</button>
+  );
 
   const change = async (patch: { portalId?: string; confirm?: 'categories' | 'intent' | 'excluded' }) => {
     setBusy(true);
@@ -79,7 +94,7 @@ export function SetupChecklist({ onOpenSettings, onPortalChange, onNext, compact
     finally { setBusy(false); }
   };
 
-  const done = list.steps.filter((step) => step.done).length;
+  const done = doneCount;
   if (compact && !opened) {
     return (
       <section className="setup setup--compact" aria-label="Setup">
@@ -87,6 +102,7 @@ export function SetupChecklist({ onOpenSettings, onPortalChange, onNext, compact
         <div className="setup__bar" aria-hidden="true"><span style={{ width: `${(done / list.steps.length) * 100}%` }} /></div>
         <span className="setup__detail">Next: {firstOpen ? TITLES[firstOpen.id].charAt(0).toLowerCase() + TITLES[firstOpen.id].slice(1) : 'nothing'}</span>
         <button type="button" className="btn btn--line btn--sm" onClick={() => setOpened(true)}>Continue setup</button>
+        {later}
       </section>
     );
   }
@@ -137,6 +153,7 @@ export function SetupChecklist({ onOpenSettings, onPortalChange, onNext, compact
       <header className="setup__head">
         <h2 id="setup-title">Get set up</h2>
         <span className="setup__count">{done} of {list.steps.length} done</span>
+        {later}
       </header>
       <p className="setup__lede">A few one-time steps so your first search runs smoothly. Select <span className="infotip__btn infotip__btn--inline" aria-hidden="true">i</span> beside a step to see what it is for.</p>
       <div className="setup__bar" aria-hidden="true"><span style={{ width: `${(done / list.steps.length) * 100}%` }} /></div>

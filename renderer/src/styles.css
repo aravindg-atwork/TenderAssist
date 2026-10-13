@@ -155,6 +155,10 @@ kbd {
 .bar__tab:focus-visible { outline-color: #9fc0ff; outline-offset: -2px; }
 .bar__label { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar__more { margin-top: auto; }
+/* Setup put away with "Later": a way back to the checklist, just above More. */
+.bar__setup { margin-top: auto; color: #ffe2a3; }
+.bar__setup + .bar__more { margin-top: 0; }
+.count--setup { right: 4px; background: var(--amber); color: var(--navy); }
 .count--bar { position: absolute; top: 4px; right: 10px; min-width: 20px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--red); color: #fff; font: 700 0.6875rem/18px var(--font); text-align: center; }
 .bar__dot { position: absolute; top: 9px; right: 18px; width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
 .bar__running { display: grid; place-items: center; gap: 4px; width: 100%; margin-top: 8px; padding: 10px 2px; border-radius: 12px; background: rgba(15, 138, 95, 0.2); color: #b9f0d8; font-size: 0.6875rem; font-weight: 600; text-align: center; }
@@ -484,7 +488,9 @@ textarea {
 .guide__step { display: flex; flex-direction: column; gap: 14px; padding: 26px 30px; }
 .guide__step + .guide__step { border-top: 1px solid var(--line); }
 .guide__q { font-size: 1.1875rem; font-weight: 700; }
+.guide__sub { margin-top: 6px; font-size: 0.9375rem; font-weight: 700; color: var(--ink-2); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.tiles--wide { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 .tile {
   display: flex;
   flex-direction: column;
@@ -1136,7 +1142,7 @@ textarea {
 /* First-time setup checklist on Today. */
 .setup { margin: 0 0 20px; padding: 22px 24px; border-radius: var(--r-sheet); background: var(--sheet); box-shadow: var(--shadow-2); max-width: 860px; }
 .setup__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.setup__head h2 { font-size: 1.25rem; }
+.setup__head h2 { font-size: 1.25rem; margin-right: auto; }
 .setup__count { font-family: var(--font-post); font-size: 1.05rem; font-weight: 600; color: var(--ink-3); letter-spacing: 0.02em; }
 .setup__lede { margin: 6px 0 12px; color: var(--ink-3); font-size: 0.9375rem; }
 .setup__bar { height: 6px; border-radius: 99px; background: var(--slate-soft); overflow: hidden; margin-bottom: 14px; }

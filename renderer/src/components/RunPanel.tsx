@@ -73,7 +73,7 @@ function instructionFor(update: AuthJobUpdate | null, signerSlow: boolean, porta
   }
   if (update.phase === 'SEARCH') {
     return noSignIn
-      ? { title: `Searching ${portalName}`, body: update.statusMessage ?? 'Finding the bids that started on this date.', needsYou: false }
+      ? { title: `Searching ${portalName}`, body: update.statusMessage ?? 'Finding the bids that came out on this date.', needsYou: false }
       : { title: 'Searching the portal', body: update.statusMessage ?? 'Reading titles and ticking possible tenders into My Tenders.', needsYou: false };
   }
   if (update.phase === 'CLASSIFICATION') {
@@ -288,7 +288,7 @@ export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, 
         <span className="run__portal">{portalName}</span>
         {batch && batch.dates.length > 1 ? (
           <span className="run__count">Date {Math.min(batch.done.length + (update?.awaitingMoreDates ? 0 : 1), batch.dates.length)} of {batch.dates.length}</span>
-        ) : searchDate ? <span className="run__count">{update?.dateMeaning === 'CLOSING' ? 'Closing' : noSignIn ? 'Started' : 'Published'} {dayLabel(searchDate).day} {dayLabel(searchDate).month}</span> : null}
+        ) : searchDate ? <span className="run__count">{update?.dateMeaning === 'CLOSING' ? 'Closing' : noSignIn ? 'Came out' : 'Published'} {dayLabel(searchDate).day} {dayLabel(searchDate).month}</span> : null}
       </header>
 
       <section className={instruction.needsYou ? 'now now--you' : 'now'} aria-live="polite">

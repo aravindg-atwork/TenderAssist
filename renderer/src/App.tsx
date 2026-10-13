@@ -11,7 +11,8 @@ import { RunDetail } from './components/RunDetail';
 import { SettingsPage } from './components/SettingsPage';
 import { RunWorkspace } from './components/RunWorkspace';
 import { RunPanel } from './components/RunPanel';
-import { BrandMark, HistoryIcon, MoreIcon, ReportIcon, SettingsIcon, StackIcon, TodayIcon } from './components/icons';
+import { BrandMark, ChecklistIcon, HistoryIcon, MoreIcon, ReportIcon, SettingsIcon, StackIcon, TodayIcon } from './components/icons';
+import type { SetupNext } from './components/SetupChecklist';
 import { SessionReport } from './components/SessionReport';
 
 type View = 'today' | 'tenders' | 'runs' | 'reports' | 'settings';
@@ -41,7 +42,15 @@ export function App() {
   const [settings, setSettings] = useState<RunSettingsState | null>(null);
   const [waiting, setWaiting] = useState(0);
   // The first-time setup step still open (from the checklist on Today); null once set up.
-  const [setupNext, setSetupNext] = useState<{ title: string } | null>(null);
+  const [setupNext, setSetupNext] = useState<SetupNext | null>(null);
+  // "Later" tucks the checklist into the sidebar until it is opened again.
+  const [setupTucked, setSetupTuckedState] = useState(() => {
+    try { return localStorage.getItem('tenderassist.setupTucked') === '1'; } catch { return false; }
+  });
+  const setSetupTucked = useCallback((next: boolean) => {
+    try { localStorage.setItem('tenderassist.setupTucked', next ? '1' : '0'); } catch { /* remembered for this session */ }
+    setSetupTuckedState(next);
+  }, []);
   const [settingsFocus, setSettingsFocus] = useState<{ section: SettingsSection; requestId: number } | null>(null);
   const [portalId, setPortalIdState] = useState(() => {
     try { return localStorage.getItem('tenderassist.portal') || DEFAULT_PORTAL_ID; } catch { return DEFAULT_PORTAL_ID; }
@@ -104,6 +113,8 @@ export function App() {
     }
   }, [settings, portalId]);
 
+  const openSetup = () => { setSetupTucked(false); goFromReport('today'); };
+
   const running = activeJobId !== null;
   const portal = getPortalDefinition(portalId);
   const showWorkspace = running && view === 'today' && !openRunId;
@@ -123,6 +134,13 @@ export function App() {
             </button>
           ))}
         </nav>
+        {setupNext && setupTucked && (
+          <button type="button" className="bar__tab bar__setup" onClick={openSetup} title={`Setup: ${setupNext.done} of ${setupNext.total} done. Next: ${setupNext.title.toLowerCase()}`}>
+            <ChecklistIcon />
+            <span className="bar__label">Setup</span>
+            <span className="count count--bar count--setup" aria-label={`${setupNext.done} of ${setupNext.total} done`}>{setupNext.done}/{setupNext.total}</span>
+          </button>
+        )}
         <button type="button" className="bar__tab bar__more" title="Back up, restore, export, about"
           onClick={(event) => { const box = event.currentTarget.getBoundingClientRect(); void window.tenderAssist.showAppMenu(box.right + 4, box.top); }}>
           <MoreIcon />
@@ -140,7 +158,7 @@ export function App() {
         <header className="topbar">
           <span className="topbar__next">
             {showWorkspace ? <>Searching <strong>{portal.name}</strong></>
-              : setupNext ? <>Setting up: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>{setupNext.title.charAt(0).toLowerCase() + setupNext.title.slice(1)}</button></>
+              : setupNext ? <>Setting up: <button type="button" className="topbar__link" onClick={openSetup}>{setupNext.title.charAt(0).toLowerCase() + setupNext.title.slice(1)}</button></>
               : settings && !settings.configured ? <>Next: <button type="button" className="topbar__link" onClick={() => openSettings('relevance')}>tell TenderAssist what to look for</button></>
                 : waiting > 0 ? <>Next: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>decide {waiting} {waiting === 1 ? 'tender' : 'tenders'}</button></>
                   : <>Next: <button type="button" className="topbar__link" onClick={() => goFromReport('today')}>find today’s tenders</button></>}
@@ -188,6 +206,8 @@ export function App() {
             onDismissFinished={() => setFinishedRun(null)}
             onSettingsSaved={setSettings}
             onSetupNext={setSetupNext}
+            setupTucked={setupTucked}
+            onSetupTucked={setSetupTucked}
           />
         ) : view === 'tenders' ? (
           <TendersPage onInboxCount={setWaiting} />

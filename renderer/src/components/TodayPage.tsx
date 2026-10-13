@@ -10,7 +10,7 @@ import { TenderFile, type FileAction } from './TenderFile';
 import { TenderTray, type TrayGroup } from './TenderTray';
 import { Tracking } from './Tracking';
 import { UpdateBanner } from './UpdateBanner';
-import { SetupChecklist } from './SetupChecklist';
+import { SetupChecklist, type SetupNext } from './SetupChecklist';
 import { compactRupees, deadline, portalMark } from './TenderCard';
 import { AlertIcon, ArrowRightIcon, BackIcon, CheckIcon, ClockIcon, CrossIcon, ListIcon, NoteIcon } from './icons';
 import { plainError } from '../words';
@@ -30,7 +30,10 @@ export interface TodayPageProps {
   /** Settings changed here (a category replacement); the app keeps the new copy. */
   onSettingsSaved: (settings: RunSettingsState) => void;
   /** The first open setup step, for the top bar; null once setup is complete. */
-  onSetupNext?: (next: { title: string } | null) => void;
+  onSetupNext?: (next: SetupNext | null) => void;
+  /** The checklist is tucked into the sidebar ("Later"). */
+  setupTucked?: boolean;
+  onSetupTucked?: (tucked: boolean) => void;
 }
 
 const isoOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -101,7 +104,7 @@ const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce
 
 /** Today: one next step at a time. Decide what is waiting, or find new tenders. */
 export function TodayPage({
-  settings, selectedPortalId, onPortalChange, onOpenSettings, onRunStarted, onOpenRun, onInboxCount, finishedRun, onDismissFinished, onSettingsSaved, onSetupNext,
+  settings, selectedPortalId, onPortalChange, onOpenSettings, onRunStarted, onOpenRun, onInboxCount, finishedRun, onDismissFinished, onSettingsSaved, onSetupNext, setupTucked = false, onSetupTucked,
 }: TodayPageProps) {
   const [mode, setMode] = useState<'decide' | 'find' | null>(null);
   const [from, setFrom] = useState(todayIso());
@@ -429,7 +432,8 @@ export function TodayPage({
         </div>
       </header>
       <UpdateBanner running={false} />
-      <SetupChecklist onOpenSettings={onOpenSettings} onPortalChange={onPortalChange} onNext={onSetupNext} compact={mode !== 'find'} />
+      <SetupChecklist onOpenSettings={onOpenSettings} onPortalChange={onPortalChange} onNext={onSetupNext} compact={mode !== 'find'}
+        tucked={setupTucked} onTuck={onSetupTucked ? () => onSetupTucked(true) : undefined} />
 
       {mode === 'find' ? (
         <div className="find">
@@ -454,14 +458,25 @@ export function TodayPage({
             </section>
 
             <section className="guide__step">
-              <h2 className="guide__q">{closing ? 'Bids closing on which days?' : gem ? 'Bids started on which days?' : 'Published on which days?'}</h2>
-              {gem && (
-                <div className="switch switch--sm" role="radiogroup" aria-label="Which date">
-                  <button type="button" role="radio" aria-checked={!closing} className="switch__opt" disabled={starting} onClick={() => chooseMeaning('PUBLISHED')}>Started on</button>
-                  <button type="button" role="radio" aria-checked={closing} className="switch__opt" disabled={starting} onClick={() => chooseMeaning('CLOSING')}>Closing on</button>
-                </div>
+              {gem ? (
+                <>
+                  {/* A GeM bid has two dates: the day it came out and its deadline. Each choice says what it finds and when to use it. */}
+                  <h2 className="guide__q">Which bids?</h2>
+                  <div className="tiles tiles--wide" role="radiogroup" aria-label="Which bids">
+                    <button type="button" role="radio" aria-checked={!closing} className={closing ? 'tile' : 'tile is-on'} disabled={starting} onClick={() => chooseMeaning('PUBLISHED')}>
+                      <span className="tile__name">New bids</span>
+                      <span className="tile__hint">Bids that came out on GeM on these days. Use daily.</span>
+                    </button>
+                    <button type="button" role="radio" aria-checked={closing} className={closing ? 'tile is-on' : 'tile'} disabled={starting} onClick={() => chooseMeaning('CLOSING')}>
+                      <span className="tile__name">Bids closing soon</span>
+                      <span className="tile__hint">Every open bid whose deadline is on these days, however old. Use to catch up after a break.</span>
+                    </button>
+                  </div>
+                  <h3 className="guide__sub">{closing ? 'Deadline on which days?' : 'Came out on which days?'}</h3>
+                </>
+              ) : (
+                <h2 className="guide__q">Published on which days?</h2>
               )}
-              {closing && <p className="hint">GeM’s own “Bid end date” search: every open bid that closes on these days, whenever it started.</p>}
               <div className="presets" role="group" aria-label="Quick dates">
                 {(closing ? closingPresets() : datePresets(missed)).map((preset) => (
                   <button key={preset.label} type="button" className={!customDates && preset.from === from && preset.to === to ? 'preset is-on' : 'preset'} disabled={starting}
@@ -494,7 +509,9 @@ export function TodayPage({
             <footer className="guide__go">
               <div className="guide__summary">
                 <span className="guide__big">{rangeLabel}</span>
-                <span className="guide__small">{closing ? 'Bids closing, ' : ''}{dateCount > 1 ? `${dateCount} days on ` : 'On '}{isGemPortal(portal) ? 'GeM' : portal.name}{gem ? ', no sign-in needed' : '. You type the CAPTCHA and DSC PIN'}</span>
+                <span className="guide__small">{gem
+                  ? `${closing ? 'Bids closing' : 'New bids'}${dateCount > 1 ? `, ${dateCount} days,` : ''} on GeM, no sign-in needed`
+                  : `${dateCount > 1 ? `${dateCount} days on ` : 'On '}${portal.name}. You type the CAPTCHA and DSC PIN`}</span>
               </div>
               <button className="btn btn--red btn--xl" type="submit" disabled={starting || !settings || Boolean(blocker)}>
                 {starting ? (gem ? 'Starting' : 'Opening the website') : 'Start'}

@@ -3,7 +3,7 @@
 import {
   ArrowClockwiseIcon, ArrowLeftIcon, ChartBarIcon, ArrowRightIcon as PhArrowRight, CalendarBlankIcon, CheckIcon as PhCheck, ClockCounterClockwiseIcon,
   ClockIcon as PhClock, DotsThreeIcon, DownloadSimpleIcon, FileTextIcon, FileZipIcon, FolderIcon as PhFolder, GearSixIcon, GlobeIcon as PhGlobe,
-  KeyIcon as PhKey, ListBulletsIcon, MagnifyingGlassIcon, NotePencilIcon, PackageIcon, PlusIcon as PhPlus, SparkleIcon, StackIcon as PhStack,
+  KeyIcon as PhKey, ListBulletsIcon, ListChecksIcon, MagnifyingGlassIcon, NotePencilIcon, PackageIcon, PlusIcon as PhPlus, SparkleIcon, StackIcon as PhStack,
   StopIcon as PhStop, TrashIcon as PhTrash, TrayIcon, WarningIcon, XIcon, type Icon as PhIcon,
 } from '@phosphor-icons/react';
 
@@ -37,6 +37,7 @@ export const CalendarIcon = make(CalendarBlankIcon);
 export const MoreIcon = make(DotsThreeIcon, 20, 'bold');
 export const SparkIcon = make(SparkleIcon);
 export const ListIcon = make(ListBulletsIcon);
+export const ChecklistIcon = make(ListChecksIcon, 20);
 export const NoteIcon = make(NotePencilIcon);
 export const ParcelIcon = make(PackageIcon);
 
