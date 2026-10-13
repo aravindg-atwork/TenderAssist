@@ -17,6 +17,7 @@ export interface UpdateStatus {
 
 let status: UpdateStatus = { state: 'IDLE', currentVersion: app.getVersion() };
 let configured = false;
+let disabledMessage: string | null = null;
 
 function setStatus(window: BrowserWindow | undefined, next: UpdateStatus): void {
   status = next;
@@ -27,8 +28,14 @@ export function getUpdateStatus(): UpdateStatus {
   return status;
 }
 
+/** No update checks at all (the dev build has no release feed). */
+export function disableUpdates(message: string): void {
+  disabledMessage = message;
+  status = { state: 'CURRENT', currentVersion: app.getVersion(), message };
+}
+
 export function configureUpdates(getWindow: () => BrowserWindow | undefined): void {
-  if (configured) return;
+  if (configured || disabledMessage) return;
   configured = true;
   // Packaged Windows apps are GUI processes and may inherit a short-lived
   // stdout/stderr pipe from an installer, launcher, or diagnostic command.
@@ -56,6 +63,7 @@ export async function checkForUpdates(getWindow: () => BrowserWindow | undefined
     status = { state: 'CURRENT', currentVersion: app.getVersion(), message: 'Update checks run in installed builds.' };
     return status;
   }
+  if (disabledMessage) return status;
   configureUpdates(getWindow);
   try {
     await autoUpdater.checkForUpdates();

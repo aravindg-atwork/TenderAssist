@@ -4,6 +4,7 @@ import type { TenderAssistApi, AuthJobUpdate, AppNavigationCommand, LicenceView 
 import type { UpdateStatus } from './updateService.js';
 
 const api: TenderAssistApi = {
+  buildChannel: process.argv.includes('--tenderassist-channel=dev') ? 'dev' : 'prod',
   listJobs: () => ipcRenderer.invoke('list-jobs'),
   getRunSettings: () => ipcRenderer.invoke('get-run-settings'),
   saveRunSettings: (defaults) => ipcRenderer.invoke('save-run-settings', defaults),

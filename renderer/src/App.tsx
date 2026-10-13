@@ -112,6 +112,7 @@ export function App() {
     <div className={showWorkspace ? 'app app--running' : 'app'}>
       <aside className="bar">
         <span className="bar__brand"><BrandMark /> <span className="bar__name">TenderAssist</span></span>
+        {window.tenderAssist.buildChannel === 'dev' && <span className="bar__dev" title="TenderAssist Dev: a test copy with its own data. It does not update itself.">DEV</span>}
         <nav className="bar__nav" aria-label="Main">
           {NAV.map((item) => (
             <button key={item.id} type="button" className="bar__tab" aria-current={view === item.id ? 'page' : undefined} onClick={() => goFromReport(item.id)} title={item.label}>

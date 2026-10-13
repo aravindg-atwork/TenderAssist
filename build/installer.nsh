@@ -87,7 +87,7 @@ FunctionEnd
 
 Function LicenceKeyPage
   ; Already activated on this PC (a reinstall or a manual upgrade): no need to ask.
-  IfFileExists "$APPDATA\TenderAssist\licence.json" 0 +2
+  IfFileExists "$APPDATA\${PRODUCT_NAME}\licence.json" 0 +2
     Abort
   !insertmacro MUI_HEADER_TEXT "Activation key" "Paste the TenderAssist key you were given (or leave it empty on a further computer)."
   nsDialogs::Create 1018
@@ -135,8 +135,8 @@ FunctionEnd
   ; Hand the key from the key page to the app (it reads licence-key.txt once).
   !ifndef BUILD_UNINSTALLER
   ${If} $LicenceKey != ""
-    CreateDirectory "$APPDATA\TenderAssist"
-    FileOpen $2 "$APPDATA\TenderAssist\licence-key.txt" w
+    CreateDirectory "$APPDATA\${PRODUCT_NAME}"
+    FileOpen $2 "$APPDATA\${PRODUCT_NAME}\licence-key.txt" w
     FileWrite $2 "$LicenceKey"
     FileClose $2
   ${EndIf}

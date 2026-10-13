@@ -18,4 +18,9 @@ describe('paths', () => {
     const dbPath = getDatabasePath({ APPDATA: 'C:\\AppData' } as NodeJS.ProcessEnv);
     expect(dbPath).toBe(join('C:\\AppData', 'TenderAssist', 'tenderassist.db'));
   });
+
+  it('keeps the dev build in its own folder', () => {
+    const dbPath = getDatabasePath({ APPDATA: 'C:\\AppData' } as NodeJS.ProcessEnv, 'TenderAssist Dev');
+    expect(dbPath).toBe(join('C:\\AppData', 'TenderAssist Dev', 'tenderassist.db'));
+  });
 });

@@ -241,6 +241,8 @@ export interface JobDetail {
 export type { AuthJobUpdate };
 
 export interface TenderAssistApi {
+  /** 'dev' in the dev build ("TenderAssist Dev"), which shows a DEV mark. */
+  buildChannel: 'prod' | 'dev';
   listJobs(): Promise<JobListItem[]>;
   getRunSettings(): Promise<RunSettingsState>;
   saveRunSettings(defaults: RunDefaults): Promise<RunSettingsState>;

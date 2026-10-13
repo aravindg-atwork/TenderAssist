@@ -16,6 +16,7 @@
     "electron": "npm run build && npm run renderer:build && electron .",
     "package": "npm run build && npm run renderer:build && electron-builder --dir",
     "dist:win": "node build/check-release.cjs && npm run build && npm run renderer:build && electron-builder --win nsis --x64",
+    "dist:win:dev": "node build/check-release.cjs && npm run build && npm run renderer:build && electron-builder --config build/electron-builder.dev.cjs --win nsis --x64 --publish never",
     "dist:mac": "node build/check-release.cjs && npm run build && npm run renderer:build && electron-builder --mac dmg zip --x64 --arm64"
   },
   "dependencies": {

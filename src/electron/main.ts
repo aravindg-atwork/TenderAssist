@@ -39,6 +39,7 @@ import { canTransition } from '../state/opportunityLifecycle.js';
 import { JobStateMachine } from '../state/jobStateMachine.js';
 import { AuthStateMachine } from '../state/authStateMachine.js';
 import { getDatabasePath, getAppDataDir } from '../config/paths.js';
+import { buildIdentity } from '../config/buildChannel.js';
 import { waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
@@ -90,7 +91,7 @@ import { detailTextFor, downloadCorrigendumDocuments, downloadDetailDocuments, n
 import { corrigendaSummary, isWatched, tenderPageFacts } from '../review/watchedTenders.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { retryTransient } from '../orchestration/transientRetry.js';
-import { checkForUpdates, configureUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
+import { checkForUpdates, configureUpdates, disableUpdates, getUpdateStatus, restartToInstall } from './updateService.js';
 import { runPreflight } from '../system/preflight.js';
 import { detectJnlpLauncher, MISSING_SIGNER_MESSAGE, OPENWEBSTART_DOWNLOAD_URL } from '../system/jnlpLauncher.js';
 import { spawn } from 'node:child_process';
@@ -130,14 +131,20 @@ const dataPathEnv: NodeJS.ProcessEnv = !app.isPackaged && process.env.TENDERASSI
   ? { ...process.env, APPDATA: process.env.TENDERASSIST_USER_DATA }
   : process.env;
 
+// The real app or the dev build ("TenderAssist Dev"), which keeps its own
+// folders and never updates itself (src/config/buildChannel.ts).
+const build = buildIdentity(JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')) as { tenderassistChannel?: unknown });
+const isDevBuild = build.channel === 'dev';
+if (isDevBuild) disableUpdates('The dev build does not update itself. Install a newer dev build to try new work.');
+
 // Claim the process lock before opening SQLite. A fast double-click can start
 // two Electron main processes concurrently; the losing process must exit
 // before it touches the shared WAL/SHM files.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 // Windows ties the taskbar button to the installed shortcut (and its TA icon)
-// by this ID; it must match build.appId in package.json.
-if (process.platform === 'win32') app.setAppUserModelId('in.tenderassist.desktop');
+// by this ID; it must match the installer's appId (build.appId in package.json, or the dev build's).
+if (process.platform === 'win32') app.setAppUserModelId(build.appUserModelId);
 
 if (!hasSingleInstanceLock) {
   app.quit();
@@ -148,11 +155,11 @@ const migrationsDir = join(app.getAppPath(), 'src', 'persistence', 'migrations')
 let restoredPreviousDatabase: string | null = null;
 let restoreStartupError: string | null = null;
 try {
-  restoredPreviousDatabase = applyPendingRestore(getDatabasePath(dataPathEnv));
+  restoredPreviousDatabase = applyPendingRestore(getDatabasePath(dataPathEnv, build.folderName));
 } catch (error) {
   restoreStartupError = error instanceof Error ? error.message : String(error);
 }
-const db = createDatabase(getDatabasePath(dataPathEnv));
+const db = createDatabase(getDatabasePath(dataPathEnv, build.folderName));
 runMigrations(db, migrationsDir);
 const jobs = new JobRepository(db);
 const sessions = new AuthSessionRepository(db);
@@ -163,7 +170,7 @@ const runConfigurations = new RunConfigurationRepository(db);
 const classifications = new ClassificationRepository(db);
 const portalCredentials = new PortalCredentialRepository(db);
 const workflow = new TenderWorkflowRepository(db);
-const publishingSettings = new PublishingSettingsRepository(db, join(homedir(), 'Documents', 'TenderAssist'));
+const publishingSettings = new PublishingSettingsRepository(db, join(homedir(), 'Documents', build.folderName));
 const automationSettings = new AutomationSettingsRepository(db);
 const portalCategories = new PortalCategoryRepository(db);
 const displaySettings = new DisplaySettingsRepository(db);
@@ -224,13 +231,13 @@ let activeRunContext: RunContext | undefined;
 // The "Keep or skip?" question on screen, and how to deliver its answer.
 let activeQuestion: RunQuestion | undefined;
 let pendingAnswer: ((answer: RunQuestionAnswer) => void) | undefined;
-const dscDownloadDirectory = join(getAppDataDir(dataPathEnv), 'dsc-downloads');
+const dscDownloadDirectory = join(getAppDataDir(dataPathEnv, build.folderName), 'dsc-downloads');
 // The licence key: enforced in installed builds (and in development with
 // TENDERASSIST_LICENCE=on). See src/licence/ and docs/licence-setup.md.
-const licenceStore = new LicenceStore(join(getAppDataDir(dataPathEnv), 'licence.json'));
+const licenceStore = new LicenceStore(join(getAppDataDir(dataPathEnv, build.folderName), 'licence.json'));
 const licence = new LicenceManager({
   store: licenceStore,
-  appDataDir: getAppDataDir(dataPathEnv),
+  appDataDir: getAppDataDir(dataPathEnv, build.folderName),
   serverUrl: LICENCE_SERVER_URL,
   publicKey: LICENCE_PUBLIC_KEY,
   version: app.getVersion(),
@@ -373,6 +380,7 @@ function createWindow(): void {
     ...(app.isPackaged ? {} : { icon: join(__dirname, '..', '..', 'build', 'icon.png') }),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
+      additionalArguments: [`--tenderassist-channel=${build.channel}`],
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
@@ -471,7 +479,7 @@ async function restoreData(): Promise<void> {
       cancelId: 1,
     });
     if (answer.response !== 0) return;
-    stageRestore(backupPath, getDatabasePath(dataPathEnv));
+    stageRestore(backupPath, getDatabasePath(dataPathEnv, build.folderName));
     portalHost?.close();
     db.close();
     app.relaunch();
@@ -803,9 +811,11 @@ async function sharedCategoriesCaller(): Promise<{ serverUrl: string; key: strin
 /**
  * Saves a category list just read from the website and shares it with every
  * other TenderAssist through the key server (in the background; offline is fine).
+ * The dev build only reads the shared lists: work being tested never reaches the offices.
  */
 function rememberCategoryList(listId: string, names: string[], readAt = new Date().toISOString(), codes?: Record<string, string>): PortalCategoryList {
   const saved = portalCategories.save(listId, names, readAt, codes);
+  if (isDevBuild) return saved;
   void sharedCategoriesCaller().then((caller) => caller && reportCategoryList(caller, listId, saved.categories, readAt, codes))
     .catch((error) => console.error('[TenderAssist] Could not share the category list:', error));
   return saved;
