@@ -29,6 +29,25 @@ export interface LicenceView {
   contact: string;
   /** Why the last check did not get through, if it did not. */
   lastProblem: string | null;
+  /**
+   * Signed in with Google but not activated yet (the account has no key, or
+   * the key was refused): this account. Only the key is asked for next; the
+   * sign-in is used again, not asked for a second time.
+   */
+  signedInAs: string | null;
+}
+
+/** A Google sign-in kept for activating with a key typed next; ID tokens last an hour. */
+const SIGN_IN_KEPT_MS = 45 * 60 * 1000;
+
+/** The email in a Google ID token (only to show which account is signed in; the key server checks the token). */
+export function emailInIdToken(idToken: string): string | null {
+  try {
+    const payload = JSON.parse(Buffer.from(idToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as { email?: unknown };
+    return typeof payload.email === 'string' ? payload.email : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface LicenceManagerDeps {
@@ -52,6 +71,7 @@ export class LicenceManager {
   private lastProblem: string | null = null;
   private identityPromise: Promise<{ pcId: string; pcName: string }> | null = null;
   private pcId = '';
+  private signedIn: { idToken: string; account: string; at: number } | null = null;
   private readonly listeners = new Set<(view: LicenceView) => void>();
 
   constructor(private readonly deps: LicenceManagerDeps) {}
@@ -105,7 +125,19 @@ export class LicenceManager {
       message: assessment.message,
       contact: stored?.contact ?? '',
       lastProblem: this.lastProblem,
+      signedInAs: this.keptSignIn()?.account ?? null,
     };
+  }
+
+  private keptSignIn(): { idToken: string; account: string; at: number } | null {
+    if (this.signedIn && this.now().getTime() - this.signedIn.at > SIGN_IN_KEPT_MS) this.signedIn = null;
+    return this.signedIn;
+  }
+
+  /** "Use a different Google account": the next activation signs in again. */
+  async forgetSignIn(): Promise<LicenceView> {
+    this.signedIn = null;
+    return this.changed();
   }
 
   /**
@@ -117,7 +149,12 @@ export class LicenceManager {
     const key = typed ? normaliseLicenceKey(typed) : '';
     if (key === null) throw new Error('That is not a TenderAssist key. It looks like TA-XXXXX-XXXXX-XXXXX-XXXXX.');
     const { pcId, pcName } = await this.identity();
-    const idToken = await this.deps.signIn();
+    // Signed in a moment ago (the account had no key): that sign-in again, so only the key is asked for.
+    let idToken = this.keptSignIn()?.idToken;
+    if (!idToken) {
+      idToken = await this.deps.signIn();
+      this.signedIn = { idToken, account: emailInIdToken(idToken) ?? 'your Google account', at: this.now().getTime() };
+    }
     const previous = this.deps.store.read();
     try {
       const answer = await callLicenceServer(this.deps.serverUrl, this.deps.publicKey,
@@ -125,7 +162,11 @@ export class LicenceManager {
       this.deps.store.write({ key: answer.licence.key, signed: answer.signed, contact: answer.contact, latestSeen: answer.licence.checkedAt });
       forgetInstallerKey(this.deps.appDataDir);
       this.lastProblem = null;
+      this.signedIn = null;
     } catch (error) {
+      // Only the key server's answers keep the sign-in (to type a key next); anything else signs in again.
+      if (!(error instanceof LicenceServerError) || error.code === 'sign-in-failed') this.signedIn = null;
+      void this.changed();
       if (error instanceof LicenceServerError) {
         const contact = /Contact: (.+)$/.exec(error.message)?.[1];
         if (contact && previous) this.deps.store.write({ ...previous, contact: `Contact: ${contact}` });

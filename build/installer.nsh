@@ -89,20 +89,45 @@ Function LicenceKeyPage
   ; Already activated on this PC (a reinstall or a manual upgrade): no need to ask.
   IfFileExists "$APPDATA\${PRODUCT_NAME}\licence.json" 0 +2
     Abort
-  !insertmacro MUI_HEADER_TEXT "Activation key" "Paste the TenderAssist key you were given (or leave it empty on a further computer)."
+  !insertmacro MUI_HEADER_TEXT "Activation key" "Paste your key, or skip: TenderAssist asks for Google sign-in when it opens."
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
     Abort
   ${EndIf}
-  ${NSD_CreateLabel} 0 0 100% 24u "Your key looks like TA-XXXXX-XXXXX-XXXXX-XXXXX. It came by message or email from whoever set up TenderAssist for you."
+  ${NSD_CreateLabel} 0 2u 88% 12u "Paste your activation key (it looks like TA-XXXXX-XXXXX-XXXXX-XXXXX):"
   Pop $0
-  ${NSD_CreateText} 0 30u 100% 14u "$LicenceKey"
+  ; ? explains what the key is and where it comes from.
+  ${NSD_CreateButton} 90% 0 10% 14u "?"
+  Pop $0
+  ${NSD_OnClick} $0 LicenceKeyHelp
+  ${NSD_CreateText} 0 18u 100% 14u "$LicenceKey"
   Pop $LicenceKeyField
-  ${NSD_CreateLabel} 0 54u 100% 50u "When TenderAssist first opens, it asks you to sign in with Google. The key is linked to that Google account.$\r$\n$\r$\nAlready use TenderAssist on another computer? Leave the key empty: signing in with the same Google account is enough."
+  ${NSD_CreateLabel} 0 38u 100% 18u "With the key here, TenderAssist only asks you to sign in with Google when it opens, and you are ready to work."
   Pop $0
+  ${NSD_CreateLabel} 0 62u 100% 10u "No key to paste?"
+  Pop $0
+  ; Either skip goes straight on with no key: TenderAssist signs in with Google first, and asks for the key only if that account has none.
+  ${NSD_CreateButton} 0 74u 100% 17u "I already use TenderAssist on another computer (skip: I will sign in with Google)"
+  Pop $0
+  ${NSD_OnClick} $0 LicenceKeySkip
+  ${NSD_CreateButton} 0 95u 100% 17u "I do not have the key with me now (skip: TenderAssist asks for it after Google sign-in)"
+  Pop $0
+  ${NSD_OnClick} $0 LicenceKeySkip
   ${NSD_SetFocus} $LicenceKeyField
   nsDialogs::Show
+FunctionEnd
+
+Function LicenceKeyHelp
+  Pop $0
+  MessageBox MB_OK|MB_ICONINFORMATION "Your activation key looks like TA-XXXXX-XXXXX-XXXXX-XXXXX. It came by message or email from whoever set up TenderAssist for you.$\r$\n$\r$\nWhen TenderAssist opens, you sign in with Google. The key is linked to that Google account, and approved tenders are saved to its Google Drive.$\r$\n$\r$\nAlready use TenderAssist on another computer? You do not need the key: sign in with the same Google account.$\r$\n$\r$\nNo key with you now? Skip this page. After you sign in with Google, TenderAssist asks for the key."
+FunctionEnd
+
+; A skip button: no key, and on to the next page as if Next was pressed (the page's leave function still runs).
+Function LicenceKeySkip
+  Pop $0
+  ${NSD_SetText} $LicenceKeyField ""
+  SendMessage $HWNDPARENT 0x408 1 0
 FunctionEnd
 
 Function LicenceKeyPageLeave

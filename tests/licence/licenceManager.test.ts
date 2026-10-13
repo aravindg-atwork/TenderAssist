@@ -26,7 +26,7 @@ function signedReply(overrides: Partial<Licence> = {}, pcId = 'pc-1'): Reply {
   return { ok: true, code: 'ok', message: '', contact: 'Contact: 98400 00000', payload, signature: sign('sha256', Buffer.from(payload), privateKey).toString('base64') };
 }
 
-function setup(replies: Array<Reply | Error>, options: { enforced?: boolean; now?: Date } = {}) {
+function setup(replies: Array<Reply | Error>, options: { enforced?: boolean; now?: Date; idToken?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ta-licence-'));
   dirs.push(dir);
   const sent: Reply[] = [];
@@ -45,7 +45,7 @@ function setup(replies: Array<Reply | Error>, options: { enforced?: boolean; now
     version: '0.6.0',
     enforced: options.enforced ?? true,
     identity: async () => ({ pcId: 'pc-1', pcName: 'OFFICE-PC' }),
-    signIn: async () => { signIns += 1; return 'id-token-1'; },
+    signIn: async () => { signIns += 1; return options.idToken ?? 'id-token-1'; },
     fetch: fakeFetch,
     now: () => options.now ?? NOW,
   });
@@ -77,6 +77,29 @@ describe('the app licence', () => {
     expect(sent[0]).toMatchObject({ action: 'activate', key: '', idToken: 'id-token-1' });
     expect(view).toMatchObject({ usable: true, key: KEY, pcsInUse: 2 });
     expect(JSON.parse(readFileSync(join(dir, 'licence.json'), 'utf8')).key).toBe(KEY);
+  });
+
+  it('signs in first; an account with no key is asked only for the key, without signing in again', async () => {
+    const token = ['h', Buffer.from(JSON.stringify({ email: 'new.office@gmail.com' })).toString('base64url'), 's'].join('.');
+    const { manager, sent, signIns } = setup([
+      { ok: false, code: 'no-key-for-account', message: 'No working TenderAssist key is linked to new.office@gmail.com yet.' },
+      signedReply(),
+    ], { idToken: token });
+    await expect(manager.activate('')).rejects.toThrow(/No working TenderAssist key/);
+    expect((await manager.view())).toMatchObject({ usable: false, signedInAs: 'new.office@gmail.com' });
+    const view = await manager.activate(KEY);
+    expect(signIns()).toBe(1);
+    expect(sent[1]).toMatchObject({ action: 'activate', key: KEY, idToken: token });
+    expect(view).toMatchObject({ usable: true, signedInAs: null });
+  });
+
+  it('signs in again when asked for a different Google account', async () => {
+    const { manager, signIns } = setup([{ ok: false, code: 'no-key-for-account', message: 'No key.' }, signedReply(), signedReply()]);
+    await expect(manager.activate('')).rejects.toThrow();
+    await manager.forgetSignIn();
+    expect((await manager.view()).signedInAs).toBeNull();
+    await manager.activate(KEY);
+    expect(signIns()).toBe(2);
   });
 
   it('refuses text that is not a key before opening any sign-in', async () => {

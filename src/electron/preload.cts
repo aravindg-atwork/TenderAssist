@@ -110,6 +110,7 @@ const api: TenderAssistApi = {
   },
   getLicence: () => ipcRenderer.invoke('get-licence'),
   activateLicence: (key) => ipcRenderer.invoke('activate-licence', key),
+  forgetLicenceSignIn: () => ipcRenderer.invoke('forget-licence-sign-in'),
   checkLicence: () => ipcRenderer.invoke('check-licence'),
   onLicenceChange: (callback) => {
     const listener = (_event: IpcRendererEvent, view: LicenceView) => callback(view);

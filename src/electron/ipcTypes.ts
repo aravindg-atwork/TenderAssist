@@ -392,6 +392,8 @@ export interface TenderAssistApi {
   getLicence(): Promise<LicenceView>;
   /** Activates this PC with a key: opens Google sign-in in the browser, then asks the key server. */
   activateLicence(key: string): Promise<LicenceView>;
+  /** "Use a different Google account" on the activation screen. */
+  forgetLicenceSignIn(): Promise<LicenceView>;
   /** Asks the key server again now (never throws; problems show in the view). */
   checkLicence(): Promise<LicenceView>;
   onLicenceChange(callback: (view: LicenceView) => void): () => void;

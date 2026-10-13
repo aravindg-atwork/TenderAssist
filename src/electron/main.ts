@@ -1243,16 +1243,17 @@ ipcMain.handle('check-for-updates', () => checkForUpdates(() => mainWindow));
 ipcMain.handle('get-licence', async (): Promise<LicenceView> => noteLicence(await licence.view()));
 ipcMain.handle('activate-licence', async (_event, key: unknown): Promise<LicenceView> => {
   if (typeof key !== 'string') throw new Error('Paste your TenderAssist key.');
+  // The sign-in stays until a key is accepted: an account with no key types one next, without signing in again.
+  const view = await licence.activate(key);
+  // The key's Google account is also the Drive account: no second sign-in in Settings.
+  // The key is active either way; a failure here leaves Settings asking to sign in to Google.
+  if (pendingLicenceSignIn) await keepGoogleSignIn(pendingLicenceSignIn).catch((error) => console.error('[TenderAssist] Could not keep the Google sign-in for Drive:', error));
   pendingLicenceSignIn = null;
-  try {
-    const view = await licence.activate(key);
-    // The key's Google account is also the Drive account: no second sign-in in Settings.
-    // The key is active either way; a failure here leaves Settings asking to sign in to Google.
-    if (pendingLicenceSignIn) await keepGoogleSignIn(pendingLicenceSignIn).catch((error) => console.error('[TenderAssist] Could not keep the Google sign-in for Drive:', error));
-    return view;
-  } finally {
-    pendingLicenceSignIn = null;
-  }
+  return view;
+});
+ipcMain.handle('forget-licence-sign-in', async (): Promise<LicenceView> => {
+  pendingLicenceSignIn = null;
+  return licence.forgetSignIn();
 });
 ipcMain.handle('check-licence', (): Promise<LicenceView> => licence.check());
 ipcMain.handle('restart-to-install-update', (): void => restartToInstall());

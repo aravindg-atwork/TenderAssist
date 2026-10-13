@@ -49,6 +49,92 @@ function KeyEntry({ initial, onDone, label = 'Continue with Google' }: { initial
   );
 }
 
+/**
+ * First start: Google sign-in first. A key the installer saved is used with
+ * it at once; with none, an account that already has a key (another PC) is
+ * done. Only when the account has no key is the key asked for, and the
+ * sign-in is not asked for again.
+ */
+function FirstActivation({ view, onView }: { view: LicenceView; onView: (view: LicenceView) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [typing, setTyping] = useState(false);
+  const [key, setKey] = useState(view.suggestedKey ?? '');
+  const signedIn = view.signedInAs;
+
+  const activate = async (withKey: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onView(await window.tenderAssist.activateLicence(withKey));
+    } catch (err) {
+      // Signed in, but no key for this account: the screen turns to asking for the key, which is not an error.
+      const next = await window.tenderAssist.getLicence().catch(() => null);
+      if (next) onView(next);
+      if (!next?.signedInAs || withKey.trim()) setError(plainError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const otherAccount = async () => {
+    setError(null);
+    onView(await window.tenderAssist.forgetLicenceSignIn());
+  };
+
+  const keyField = (
+    <label className="field">
+      <span>Activation key</span>
+      <input value={key} onChange={(event) => setKey(event.target.value)} placeholder="TA-XXXXX-XXXXX-XXXXX-XXXXX" spellCheck={false} autoComplete="off"
+        className="licence__key" disabled={busy} autoFocus
+        onKeyDown={(event) => { if (event.key === 'Enter' && key.trim()) { event.preventDefault(); void activate(key); } }} />
+    </label>
+  );
+
+  if (signedIn) {
+    return (
+      <>
+        <h1>Enter your activation key</h1>
+        <p className="licence__lede">
+          Google sign-in is done: <strong>{signedIn}</strong>. This account has no TenderAssist key yet, so paste the key you were given to finish.
+        </p>
+        <div className="licence__entry">
+          {keyField}
+          <button type="button" className="btn btn--primary btn--lg" disabled={busy || !key.trim()} onClick={() => void activate(key)}>
+            {busy ? 'Activating…' : 'Activate'}
+          </button>
+          <button type="button" className="btn btn--text btn--sm" disabled={busy} onClick={() => void otherAccount()}>Use a different Google account</button>
+          {error && <p className="licence__error" role="alert">{error}</p>}
+        </div>
+      </>
+    );
+  }
+
+  const ready = Boolean(view.suggestedKey) && !typing;
+  return (
+    <>
+      <h1>Activate TenderAssist</h1>
+      <p className="licence__lede">
+        {ready
+          ? <>Your key <strong className="licence__mono">{view.suggestedKey}</strong> is ready. Sign in with Google to finish: the key is linked to that account, and approved tenders are saved to its Google Drive.</>
+          : <>Sign in with Google. If this account already uses TenderAssist on another computer, that is all. If not, you are asked for your activation key next.</>}
+      </p>
+      <div className="licence__entry">
+        {typing && keyField}
+        <button type="button" className="btn btn--primary btn--lg" disabled={busy} onClick={() => void activate(typing ? key : view.suggestedKey ?? '')}>
+          {busy ? 'Finish signing in in your browser…' : 'Sign in with Google'}
+        </button>
+        {busy && <p className="hint">A Google sign-in page opened in your browser. Choose your account, and leave the Google Drive box ticked so tenders can be saved to your Drive.</p>}
+        {!busy && (
+          <button type="button" className="btn btn--text btn--sm" onClick={() => setTyping(!typing)}>
+            {typing ? 'Sign in without typing a key' : ready ? 'Use a different key' : 'I have a key to paste first'}
+          </button>
+        )}
+        {error && <p className="licence__error" role="alert">{error}</p>}
+      </div>
+    </>
+  );
+}
+
 const HEADINGS: Record<string, string> = {
   'not-activated': 'Activate TenderAssist',
   ended: 'Your key has ended',
@@ -71,14 +157,14 @@ function LicenceScreen({ view, onView }: { view: LicenceView; onView: (view: Lic
       <div className="licence__drag" aria-hidden="true" />
       <section className="licence__card">
         <span className="licence__brand"><BrandMark /> TenderAssist</span>
-        <h1>{HEADINGS[view.standing] ?? 'TenderAssist needs a key'}</h1>
-        {firstTime ? (
-          <p className="licence__lede">Paste the key you were given, then sign in with Google. The key is linked to that Google account, and approved tenders are saved to its Google Drive.</p>
-        ) : (
-          <p className="licence__lede">{view.message}</p>
+        {firstTime ? <FirstActivation view={view} onView={onView} /> : (
+          <>
+            <h1>{HEADINGS[view.standing] ?? 'TenderAssist needs a key'}</h1>
+            <p className="licence__lede">{view.message}</p>
+          </>
         )}
         {view.lastProblem && <p className="licence__error" role="alert">{view.lastProblem}</p>}
-        {(firstTime || newKey) ? (
+        {firstTime ? null : newKey ? (
           <KeyEntry initial={view.suggestedKey ?? ''} onDone={onView} />
         ) : (
           <div className="licence__actions">
