@@ -10,7 +10,6 @@ export interface CategoryReplacementProps {
   missing: MissingCategory[];
   /** Categories already chosen, which are not offered again. */
   chosen: string[];
-  includeProducts?: boolean;
   /** Add these categories; stop searching the dropped ones in `remove`. */
   onApply: (add: string[], remove: string[]) => void;
   onSkip: () => void;
@@ -38,7 +37,7 @@ export function missingSince(category: MissingCategory): string {
  * can be picked; suggestions lead with where wanted tenders were listed.
  * Skipping keeps everything as it is; Settings can change it later.
  */
-export function CategoryReplacement({ portalId, portalName, missing, chosen, includeProducts, onApply, onSkip, onClose = onSkip }: CategoryReplacementProps) {
+export function CategoryReplacement({ portalId, portalName, missing, chosen, onApply, onSkip, onClose = onSkip }: CategoryReplacementProps) {
   const [advice, setAdvice] = useState<ReplacementAdvice[] | null>(null);
   const [websiteList, setWebsiteList] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
@@ -52,11 +51,11 @@ export function CategoryReplacement({ portalId, portalName, missing, chosen, inc
     Promise.all(missing.map((item) => window.tenderAssist.suggestCategoryReplacements(portalId, item.name)))
       .then((next) => { if (current) setAdvice(next); })
       .catch((err) => { if (current) { setAdvice([]); setError(plainError(err)); } });
-    window.tenderAssist.getPortalCategories(portalId, { includeProducts })
+    window.tenderAssist.getPortalCategories(portalId)
       .then((list) => { if (current) setWebsiteList(list.categories); })
       .catch(() => {});
     return () => { current = false; };
-  }, [includeProducts, missing, portalId]);
+  }, [missing, portalId]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };

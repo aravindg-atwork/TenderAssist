@@ -4,6 +4,7 @@ import {
   normalizeRunConfiguration,
   normalizeRunDefaults,
   type RunConfiguration,
+  type RunDateMeaning,
   type RunDefaults,
 } from '../../config/runConfiguration.js';
 
@@ -16,6 +17,7 @@ interface SettingsRow {
 interface JobConfigRow {
   portal_id: string;
   search_date: string;
+  date_meaning: string;
   product_categories_json: string;
   keywords_json: string;
   excluded_keywords_json: string;
@@ -59,8 +61,8 @@ export class RunConfigurationRepository {
     this.db
       .prepare(
         `INSERT INTO job_run_configs
-           (job_id, search_date, product_categories_json, keywords_json, excluded_keywords_json, created_at, portal_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+           (job_id, search_date, product_categories_json, keywords_json, excluded_keywords_json, created_at, portal_id, date_meaning)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         jobId,
@@ -69,7 +71,8 @@ export class RunConfigurationRepository {
         JSON.stringify(config.keywords),
         JSON.stringify(config.excludedKeywords),
         new Date().toISOString(),
-        config.portalId ?? 'tamil-nadu'
+        config.portalId ?? 'tamil-nadu',
+        config.dateMeaning ?? 'PUBLISHED'
       );
     return config;
   }
@@ -96,13 +99,14 @@ export class RunConfigurationRepository {
   getForJob(jobId: string): RunConfiguration | undefined {
     const row = this.db
       .prepare(
-        `SELECT portal_id, search_date, product_categories_json, keywords_json, excluded_keywords_json
+        `SELECT portal_id, search_date, date_meaning, product_categories_json, keywords_json, excluded_keywords_json
          FROM job_run_configs WHERE job_id = ?`
       )
       .get(jobId) as JobConfigRow | undefined;
     if (!row) return undefined;
     return normalizeRunConfiguration({
       searchDate: row.search_date,
+      dateMeaning: row.date_meaning as RunDateMeaning,
       portalId: row.portal_id,
       productCategories: JSON.parse(row.product_categories_json) as string[],
       keywords: JSON.parse(row.keywords_json) as string[],
@@ -121,14 +125,14 @@ export class RunConfigurationRepository {
     return rows.map((row) => row.search_date);
   }
 
-  /** Published dates that have a completed run for the portal. */
-  listCompletedRunDates(portalId: string): string[] {
+  /** Dates with a completed run for the portal; closing-date and published-date runs are counted apart. */
+  listCompletedRunDates(portalId: string, meaning: RunDateMeaning = 'PUBLISHED'): string[] {
     const rows = this.db.prepare(
       `SELECT DISTINCT config.search_date
        FROM job_run_configs config
        JOIN jobs ON jobs.id = config.job_id
-       WHERE config.portal_id = ? AND jobs.state = 'COMPLETE'`
-    ).all(portalId) as unknown as Array<{ search_date: string }>;
+       WHERE config.portal_id = ? AND config.date_meaning = ? AND jobs.state = 'COMPLETE'`
+    ).all(portalId, meaning) as unknown as Array<{ search_date: string }>;
     return rows.map((row) => row.search_date);
   }
 

@@ -1,5 +1,6 @@
 // One GeM search date, from the bid list to a decision on every bid: no
-// sign-in, no browser. Bids are found by start date, screened on their
+// sign-in, no browser. Bids are found by start date (or, for a closing-date
+// run, by end date), screened on their
 // category and title, and the ones in your categories are read from their
 // bid PDF. Documents are saved afterwards by the shared post-processing step.
 
@@ -18,7 +19,7 @@ import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from
 import { retryTransient } from '../orchestration/transientRetry.js';
 import { bidDocumentUrl, bidKindLabel, categoryOf, istIso, portalStyleDate, sameCategory, type GemBid } from './gemBid.js';
 import type { GemBidType, GemClient } from './gemClient.js';
-import { findBidsStartedOn } from './gemDaySearch.js';
+import { findBidsClosingOn, findBidsStartedOn } from './gemDaySearch.js';
 import {
   attachmentsFromBid, bidSpecificText, factsFromBidText, readableBidText, readPdf as readPdfFile, rupees,
   type GemDocumentFacts, type PdfContent,
@@ -262,24 +263,38 @@ export async function runGemDate(
   emit();
 
   const day = config.searchDate;
+  const closing = config.dateMeaning === 'CLOSING';
+  const onDay = `${closing ? 'closing' : 'started'} on ${shortDay(day)}`;
   const bidTypes: Array<{ type: GemBidType; label: string }> = [
     { type: 'service', label: 'service bids' },
     ...(deps.includeProducts ? [{ type: 'product' as const, label: 'product bids' }] : []),
   ];
   const found = new Map<string, GemBid>();
   const failed: string[] = [];
+  /** Closing days where GeM counted more bids than could be read (its list moved too much). */
+  const short: string[] = [];
   for (const { type, label } of bidTypes) {
     if (isCancellationRequested(deps.signal)) return cancelled();
     const key = `gem_${type}`;
     const search = searches.findByJobAndKey(jobId, key) ?? searches.create(jobId, key, `GeM ${label}`);
     searches.updateState(search.id, 'RUNNING');
-    statusMessage = `Finding GeM ${label} that started on ${shortDay(day)}.`;
+    statusMessage = `Finding GeM ${label} ${onDay}.`;
     emit();
+    const onProgress = (progress: { found: number; pagesRead: number }) => {
+      statusMessage = `Finding GeM ${label} ${onDay}: ${progress.found} found, ${progress.pagesRead} pages read.`;
+      emit();
+    };
     try {
-      const bids = await findBidsStartedOn(day, (page) => retry(() => deps.client.listBids({ page, bidType: type }), `GeM ${label}`), (progress) => {
-        statusMessage = `Finding GeM ${label} that started on ${shortDay(day)}: ${progress.found} found, ${progress.pagesRead} pages read.`;
-        emit();
-      });
+      let bids: GemBid[];
+      if (closing) {
+        const result = await findBidsClosingOn(
+          (page) => retry(() => deps.client.listBids({ page, bidType: type, endsBetween: { from: day, to: day } }), `GeM ${label}`), onProgress);
+        if (!result.complete) short.push(`${label} (${result.bids.length} of ${result.total} read)`);
+        // GeM's filter is by Indian day, as the end time is; keep only that day.
+        bids = result.bids.filter((bid) => !bid.endsAt || bid.endsAt.startsWith(day));
+      } else {
+        bids = await findBidsStartedOn(day, (page) => retry(() => deps.client.listBids({ page, bidType: type }), `GeM ${label}`), onProgress);
+      }
       for (const bid of bids) if (!bid.cancelled) found.set(bid.id, bid);
       searches.updateProgress(search.id, 0, bids.length);
       searches.updateState(search.id, 'COMPLETE');
@@ -300,7 +315,8 @@ export async function runGemDate(
     return final;
   }
   jobMachine.transition(jobId, 'CLASSIFYING', failed.length > 0 ? `GeM search finished; not searched: ${failed.join(', ')}` : 'GeM search finished');
-  if (failed.length === 0 && deps.onDayCounts) {
+  // The daily report counts the bids that started on a day; a closing day is not that.
+  if (failed.length === 0 && !closing && deps.onDayCounts) {
     const categories: Record<string, number> = {};
     for (const bid of found.values()) categories[bid.category || 'Not stated'] = (categories[bid.category || 'Not stated'] ?? 0) + 1;
     try { deps.onDayCounts(day, found.size, categories); } catch { /* the report count is a bonus; never stop the run */ }
@@ -326,7 +342,7 @@ export async function runGemDate(
       productCategory: bid.category,
       valueInRupees: '',
     });
-    gate(tender.id, 'G1', 'PASS', 'SEARCH_DATE_FILTER_MATCH', { searchDate: day, startedAt: bid.startsAt });
+    gate(tender.id, 'G1', 'PASS', 'SEARCH_DATE_FILTER_MATCH', { searchDate: day, dateMeaning: closing ? 'CLOSING' : 'PUBLISHED', startedAt: bid.startsAt, endsAt: bid.endsAt });
     const matched = config.productCategories.filter((chosen) => inChosenCategory(bid, chosen, deps.categoryCodes));
     const inCategory = matched.length > 0;
     gate(tender.id, 'G2', inCategory ? 'PASS' : 'REJECT', inCategory ? 'PRODUCT_CATEGORY_MATCH' : 'PRODUCT_CATEGORY_MISMATCH',
@@ -356,7 +372,7 @@ export async function runGemDate(
       if (isCancellationRequested(deps.signal)) return cancelled();
       const { bid, tender } = batch[index];
       statusMessage = pass === 1
-        ? `Reading bid ${index + 1} of ${batch.length} in your categories (${found.size} started on ${shortDay(day)}).`
+        ? `Reading bid ${index + 1} of ${batch.length} in your categories (${found.size} ${onDay}).`
         : `Trying bid document ${index + 1} of ${batch.length} again.`;
       emit();
       const { documentUrl, content, facts, readError } = await readGemBidDetails(
@@ -407,7 +423,8 @@ export async function runGemDate(
   jobMachine.transition(jobId, 'SHORTLISTED', `GeM bids decided: ${found.size} found, ${toRead.length} read`);
   statusMessage = failed.length > 0
     ? `${found.size} GeM bids found; ${failed.join(' and ')} could not be searched, so some may be missing. Run this date again later.`
-    : `${found.size} GeM bids started on ${shortDay(day)}; ${toRead.length} were in your categories and were read.`;
+    : `${found.size} GeM bids ${onDay}; ${toRead.length} were in your categories and were read.`;
+  if (short.length > 0) statusMessage += ` GeM’s list changed while it was read, so a few may be missing: ${short.join(', ')}. Run this date again to pick them up.`;
   const final = snapshot('SUCCESS');
   onUpdate(final);
   return final;

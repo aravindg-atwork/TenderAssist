@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import { GoogleDriveSetting } from './GoogleDriveSetting';
@@ -74,6 +74,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const broadWords = keywords.filter((word) => TOO_BROAD_INTENT_WORDS.includes(wordKey(word)));
   const missingRecommended = RECOMMENDED_INTENT_WORDS.filter((word) => !keywords.some((current) => wordKey(current) === wordKey(word)));
   const gem = isGemPortal(selectedPortal);
+  const gemCategoryCounts = useCallback((names: string[]) => window.tenderAssist.getGemCategoryCounts(selectedPortalId, names), [selectedPortalId]);
   // The website's own picks, or its starting ones until the operator changes them.
   const chosenCategories = categoriesByPortal[selectedPortal.id]
     ?? categoriesForPortal({ productCategories, keywords, excludedKeywords, categoriesByPortal: {}, gemIncludeProducts }, selectedPortal);
@@ -88,18 +89,18 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     // Only when the list arrives, not on every pick.
   }, [gem, websiteCategories, selectedPortal.id]);
 
-  // GeM's list comes from GeM itself, with product categories only when product bids are searched.
+  // GeM's list comes from GeM itself: services and products together, as GeM shows them.
   useEffect(() => {
     let current = true;
     setWebsiteCategories(null);
-    window.tenderAssist.getPortalCategories(selectedPortalId, { includeProducts: gem && gemIncludeProducts })
+    window.tenderAssist.getPortalCategories(selectedPortalId)
       .then((list) => { if (current) setWebsiteCategories(list); })
       .catch(() => {});
     window.tenderAssist.getCategoryHealth(selectedPortalId)
       .then((health) => { if (current) setCategoryHealth(health); })
       .catch(() => {});
     return () => { current = false; };
-  }, [selectedPortalId, gem, gemIncludeProducts, settings]);
+  }, [selectedPortalId, settings]);
 
   const openReplacement = (names: string[]) => setReplacing(names.map((name) =>
     categoryHealth?.missing.find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()) ?? { name, lastSeen: null, longGone: false }));
@@ -186,7 +187,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     setSaving(true);
     setSaved(false);
     setError(null);
-    const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories }, gemIncludeProducts };
+    const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories },
+      // Product bids now follow the chosen categories (a product category searches them), so the old switch is cleared.
+      gemIncludeProducts: false };
     const withCredentials = !gem && (mode === 'explicit' || password === '');
     try {
       const [next, nextCredentials, nextPublishing, nextPacing] = await Promise.all([
@@ -317,12 +320,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
               <div id="look-categories" />
               <CategoryPicker portalName="GeM" websiteList={websiteCategories} info={CATEGORY_INFO} keyOf={gemCategoryKey}
                 values={chosenCategories} onChange={setChosenCategories} startingList={DEFAULT_GEM_CATEGORIES} {...categoryHelp}
+                countsFor={gemCategoryCounts}
                 unknownListHint="GeM’s category list could not be read just now; these are the starting categories. Check the internet connection and open Settings again." />
-              <label className="check">
-                <input type="checkbox" checked={gemIncludeProducts} onChange={(event) => setGemIncludeProducts(event.target.checked)} />
-                Also search product bids (services are always searched)
-              </label>
-              <p className="hint">The list is GeM’s own Category list, exactly as GeM shows it. Each website keeps its own categories; the intent and excluded words below are shared by every website.</p>
+              <p className="hint">The list is GeM’s own Category list from its advanced search, services and products, exactly as GeM shows it. “Open now” is GeM’s own count of bids open in that category today; the other number is how many started in it on the days you searched GeM. Each website keeps its own categories; the intent and excluded words below are shared by every website.</p>
             </>
           ) : (
             <>
@@ -546,7 +546,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
       </div>
       {replacing && (
         <CategoryReplacement portalId={selectedPortalId} portalName={selectedPortal.name} missing={replacing}
-          chosen={chosenCategories} includeProducts={gem && gemIncludeProducts}
+          chosen={chosenCategories}
           onSkip={() => setReplacing(null)}
           onApply={(add, remove) => {
             // Shown in the list straight away; Save changes keeps it, as with any other edit.

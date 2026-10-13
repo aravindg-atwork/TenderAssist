@@ -69,6 +69,8 @@ export interface AuthJobUpdate {
   statusMessage?: string;
   /** The published date this job searches. */
   searchDate?: string;
+  /** What `searchDate` means; GeM can search the day bids close instead. */
+  dateMeaning?: 'PUBLISHED' | 'CLOSING';
   /** Progress through a range of published dates run in one sign-in. */
   batch?: { dates: string[]; done: string[]; skipped: string[] };
   /** Every date has run; the portal stays signed in while the operator picks more dates or finishes. */

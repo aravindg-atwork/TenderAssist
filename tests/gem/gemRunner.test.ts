@@ -187,6 +187,26 @@ describe('a GeM run for one date', () => {
     expect(finalFor('GEM/2026/B/22')).toBe('KEEP');
   });
 
+  it('finds bids by the day they close, with GeM’s end-date filter, when the run is for a closing date', async () => {
+    const closingDay = { ...bid(1, 'Custom Bid for Services - Development of web application', '2026-09-30T10:00:00'), endsAt: '2026-10-20T15:00:00' };
+    // GeM's filter is inclusive by Indian day; anything outside it is not the day asked for.
+    const otherDay = { ...bid(2, 'Custom Bid for Services - Web application upkeep', '2026-10-01T10:00:00'), endsAt: '2026-10-21T11:00:00' };
+    const queries: unknown[] = [];
+    const counted: string[] = [];
+    const run = deps([], { 1: BID_TEXT }, { onDayCounts: (day) => counted.push(day) });
+    run.client.listBids = async (query) => { queries.push(query); return { total: 2, bids: [closingDay, otherDay] }; };
+    const messages: string[] = [];
+    const result = await runGemDate(run, jobId, { ...CONFIG, searchDate: '2026-10-20', dateMeaning: 'CLOSING' }, (update) => messages.push(update.statusMessage ?? ''));
+
+    expect(result.outcome).toBe('SUCCESS');
+    expect(queries[0]).toMatchObject({ page: 1, bidType: 'service', endsBetween: { from: '2026-10-20', to: '2026-10-20' } });
+    expect(tenders.listForJob(jobId).map((tender) => tender.tender_ref)).toEqual(['GEM/2026/B/1']);
+    expect(finalFor('GEM/2026/B/1')).toBe('KEEP');
+    // The daily report counts bids that started on a day; a closing day is not counted there.
+    expect(counted).toEqual([]);
+    expect(messages.some((message) => message.includes('closing on'))).toBe(true);
+  });
+
   it('rebuilds a bid from a saved tender, to read its PDF again later', () => {
     const saved = tenders.upsert({
       jobId, tenderRef: 'GEM/2026/R/746323', tenderPortalId: '9983631', title: 'Custom Bid for Services - X',

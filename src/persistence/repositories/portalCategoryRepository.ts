@@ -14,6 +14,8 @@ export interface PortalCategoryList {
   historySince?: string | null;
   /** When the operator last looked at the categories new on the website. */
   newLookedAt?: string | null;
+  /** GeM: the entries that are product categories; the rest are services. */
+  productNames?: string[];
 }
 
 interface SettingsRow { value_json: string }

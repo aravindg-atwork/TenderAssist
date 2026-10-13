@@ -1,8 +1,16 @@
 import { CONFIGURED_SEARCHES } from '../search/searchConfig.js';
 
+/**
+ * What a run's date means: the day tenders were published (a GeM bid's
+ * start), or, on GeM only, the day bids close.
+ */
+export type RunDateMeaning = 'PUBLISHED' | 'CLOSING';
+
 export interface RunConfiguration {
   /** Native date-input format. */
   searchDate: string;
+  /** Published unless given; runs saved before closing-date searches are all published. */
+  dateMeaning?: RunDateMeaning;
   /** Defaults to Tamil Nadu for jobs created before multi-portal support. */
   portalId?: string;
   productCategories: string[];
@@ -142,5 +150,6 @@ export function normalizeRunConfiguration(input: RunConfiguration): RunConfigura
   const parsed = new Date(`${input.searchDate}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) throw new Error('Search date is invalid.');
   const portalId = typeof input.portalId === 'string' && input.portalId.trim() ? input.portalId.trim() : 'tamil-nadu';
-  return { searchDate: input.searchDate, portalId, ...normalizeLists(input) };
+  const dateMeaning: RunDateMeaning = input.dateMeaning === 'CLOSING' ? 'CLOSING' : 'PUBLISHED';
+  return { searchDate: input.searchDate, dateMeaning, portalId, ...normalizeLists(input) };
 }

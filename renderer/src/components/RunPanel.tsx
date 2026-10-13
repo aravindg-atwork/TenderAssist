@@ -288,7 +288,7 @@ export function RunPanel({ jobId, portalId, portalName, onSwitchPortal, update, 
         <span className="run__portal">{portalName}</span>
         {batch && batch.dates.length > 1 ? (
           <span className="run__count">Date {Math.min(batch.done.length + (update?.awaitingMoreDates ? 0 : 1), batch.dates.length)} of {batch.dates.length}</span>
-        ) : searchDate ? <span className="run__count">{noSignIn ? 'Started' : 'Published'} {dayLabel(searchDate).day} {dayLabel(searchDate).month}</span> : null}
+        ) : searchDate ? <span className="run__count">{update?.dateMeaning === 'CLOSING' ? 'Closing' : noSignIn ? 'Started' : 'Published'} {dayLabel(searchDate).day} {dayLabel(searchDate).month}</span> : null}
       </header>
 
       <section className={instruction.needsYou ? 'now now--you' : 'now'} aria-live="polite">

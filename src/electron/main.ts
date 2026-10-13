@@ -70,8 +70,9 @@ import type {
   LiveSessionView,
   DailyReportView,
   ReportTenderItem,
+  GemCategoryCounts,
 } from './ipcTypes.js';
-import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration } from '../config/runConfiguration.js';
+import { categoriesForPortal, normalizeRunConfiguration, type RunConfiguration, type RunDateMeaning } from '../config/runConfiguration.js';
 import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
 import { typeAllAtOnce, typeLikeAPerson, type PortalCredentials } from '../browser/portalLoginController.js';
 import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type OcrEngine } from '../documents/documentText.js';
@@ -308,7 +309,10 @@ function callOperatorForSignIn(update: AuthJobUpdate): void {
 }
 
 function emitJobUpdate(raw: AuthJobUpdate): void {
-  const update: AuthJobUpdate = withRunState(raw, { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion });
+  const update: AuthJobUpdate = {
+    dateMeaning: activeRunContext?.config.dateMeaning,
+    ...withRunState(raw, { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion }),
+  };
   callOperatorForSignIn(update);
   lastActiveJobUpdate = update;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('job-updated', update);
@@ -754,6 +758,7 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
       updatedAt: job.updated_at,
       portalId: config?.portalId ?? DEFAULT_PORTAL_ID,
       searchDate: config?.searchDate ?? null,
+      dateMeaning: config?.dateMeaning ?? 'PUBLISHED',
       tendersFound: found.length,
       kept: found.filter((tender) => (workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id)) === 'KEEP').length,
     };
@@ -866,20 +871,83 @@ async function gemCategoryCodes(portal: PortalDefinition): Promise<Map<string, s
   return codes;
 }
 
-ipcMain.handle('get-portal-categories', async (_event, portalId: string, options?: { includeProducts?: unknown }): Promise<PortalCategoryList> => {
+/** A chosen GeM name's code: the exact entry, else the same category with another example (as `inChosenCategory`). */
+function gemCodeFor(name: string, codes: ReadonlyMap<string, string>): string | undefined {
+  return codes.get(name.replace(/\s+/g, ' ').trim().toLocaleLowerCase()) ?? codes.get(`category:${gemCategoryKey(name)}`);
+}
+
+const isGemProductCode = (code: string | undefined) => Boolean(code) && !code!.startsWith('services_');
+
+// GeM's whole Category dropdown, services and products together, as GeM's own
+// advanced search shows it; product bids are searched once a product category is chosen.
+ipcMain.handle('get-portal-categories', async (_event, portalId: string): Promise<PortalCategoryList> => {
   const portal = getPortalDefinition(portalId);
   if (!isGemPortal(portal)) return portalCategories.get(portal.id);
   const { services, products } = await gemCategoryLists(portal);
-  const shown = (list: PortalCategoryList) => ({ categories: list.categories, readAt: list.readAt });
-  if (options?.includeProducts !== true) return shown(services);
-  return { categories: [...services.categories, ...products.categories], readAt: services.readAt };
+  return {
+    categories: [...services.categories, ...products.categories],
+    readAt: services.readAt,
+    productNames: products.categories,
+  };
+});
+
+/** Open bids per GeM category, as GeM counts them; read at most every few hours per category. */
+const GEM_OPEN_COUNT_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+const gemOpenCounts = new Map<string, { count: number; at: number }>();
+let gemCountClient: GemClient | null = null;
+let gemCountQueue: Promise<unknown> = Promise.resolve();
+
+/** Each category's bids in the GeM runs of the last 30 days, by the category before " - ". */
+function recentGemCategoryCounts(portalId: string): { counts: Record<string, number>; days: number } {
+  const to = new Date().toLocaleDateString('en-CA');
+  const fromDate = new Date();
+  fromDate.setDate(fromDate.getDate() - 29);
+  const counts: Record<string, number> = {};
+  const rows = dailyCounts.list(portalId, fromDate.toLocaleDateString('en-CA'), to).filter((row) => row.source === 'GEM_LIST' && row.categories);
+  for (const row of rows) {
+    for (const [name, count] of Object.entries(row.categories!)) {
+      const key = gemCategoryKey(name);
+      counts[key] = (counts[key] ?? 0) + count;
+    }
+  }
+  return { counts, days: rows.length };
+}
+
+ipcMain.handle('get-gem-category-counts', async (_event, portalId: unknown, names: unknown): Promise<GemCategoryCounts> => {
+  const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : '');
+  if (!isGemPortal(portal)) throw new Error('Category counts are for GeM only.');
+  const asked = Array.isArray(names) ? names.filter((name): name is string => typeof name === 'string').slice(0, 60) : [];
+  const codes = await gemCategoryCodes(portal);
+  const recent = recentGemCategoryCounts(portal.id);
+  // One question to GeM at a time, gently, however many pages ask.
+  const open = await (gemCountQueue = gemCountQueue.catch(() => undefined).then(async () => {
+    const result: Record<string, number | null> = {};
+    for (const name of asked) {
+      const code = gemCodeFor(name, codes);
+      if (!code) { result[name] = null; continue; }
+      const cached = gemOpenCounts.get(code);
+      if (cached && Date.now() - cached.at < GEM_OPEN_COUNT_MAX_AGE_MS) { result[name] = cached.count; continue; }
+      try {
+        gemCountClient ??= new GemClient({ timeoutMs: 30_000, pause: () => new Promise((resolve) => setTimeout(resolve, 400)) });
+        const count = await retryTransient(() => gemCountClient!.openBidCount(code), { delaysMs: [2_000, 5_000] });
+        gemOpenCounts.set(code, { count, at: Date.now() });
+        result[name] = count;
+      } catch (error) {
+        console.error('[TenderAssist] GeM open-bid count not read:', error);
+        result[name] = null;
+      }
+    }
+    return result;
+  })) as Record<string, number | null>;
+  const recentByName: Record<string, number> = {};
+  for (const name of asked) recentByName[name] = recent.counts[gemCategoryKey(name)] ?? 0;
+  return { open, recent: recentByName, recentDays: recent.days };
 });
 
 /** The website's list the chosen categories are checked against, with its history. */
 async function categoryListForHealth(portal: PortalDefinition): Promise<PortalCategoryList> {
   if (!isGemPortal(portal)) return portalCategories.get(portal.id);
   const { services, products } = await gemCategoryLists(portal);
-  if (!runConfigurations.getDefaults().gemIncludeProducts) return services;
   return {
     ...services,
     categories: [...services.categories, ...products.categories],
@@ -2480,8 +2548,11 @@ function startGemDateJob(ctx: RunContext, searchDate: string): string {
  */
 async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (jobId: string) => void): Promise<void> {
   const signal = ctx.abortController.signal;
-  const includeProducts = runConfigurations.getDefaults().gemIncludeProducts;
   const categoryCodes = await gemCategoryCodes(ctx.portal);
+  // Product bids are searched when a chosen category is a product one (GeM's
+  // service codes start "services_"), or when the old setting asked for them.
+  const includeProducts = runConfigurations.getDefaults().gemIncludeProducts
+    || ctx.config.productCategories.some((name) => isGemProductCode(gemCodeFor(name, categoryCodes)));
   let batch = { dates: [...plan.toRun], done: [] as string[], skipped: [...plan.skipped] };
   activeBatch = batch;
   const collected: CollectedCounts = { shortlisted: 0, needsReview: 0 };
@@ -3317,12 +3388,9 @@ async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknow
     const config = normalizeRunConfiguration(requestedConfig);
     const portal = getPortalDefinition(config.portalId);
     config.portalId = portal.id;
-    plan = planDatesToRun(
-      portal.id,
-      config.searchDate,
-      typeof untilDate === 'string' && untilDate ? untilDate : config.searchDate,
-      options?.runAgain === true
-    );
+    const until = typeof untilDate === 'string' && untilDate ? untilDate : config.searchDate;
+    config.dateMeaning = checkDateMeaning(portal, config.dateMeaning, config.searchDate, until);
+    plan = planDatesToRun(portal.id, config.searchDate, until, options?.runAgain === true, config.dateMeaning);
     config.searchDate = plan.toRun[0];
     const outputSettings = publishingSettings.get(portal.id);
     ctx = { portal, config, outputSettings, abortController, paceAction };
@@ -3384,14 +3452,26 @@ async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknow
   return { jobId: await started, dates: plan.toRun, skipped: plan.skipped };
 }
 
+/**
+ * Closing dates are GeM only, and today or later: GeM lists only bids still
+ * open, so an earlier closing day has nothing left to find.
+ */
+function checkDateMeaning(portal: PortalDefinition, meaning: RunDateMeaning | undefined, from: string, to: string): RunDateMeaning {
+  if (meaning !== 'CLOSING' || !isGemPortal(portal)) return 'PUBLISHED';
+  const today = new Date().toLocaleDateString('en-CA');
+  if (from < today || to < today) throw new Error('Choose closing dates from today onwards. GeM lists only bids that are still open.');
+  return 'CLOSING';
+}
+
 /** The dates in a range still to run for a portal; throws when there are none. */
-function planDatesToRun(portalId: string, from: string, to: string, runAgain = false): DateBatchPlan {
+function planDatesToRun(portalId: string, from: string, to: string, runAgain = false, meaning: RunDateMeaning = 'PUBLISHED'): DateBatchPlan {
   // Run again: search dates already run too, e.g. after the screening improved.
-  const plan = planDateBatch(from, to, runAgain ? [] : runConfigurations.listCompletedRunDates(portalId));
+  const plan = planDateBatch(from, to, runAgain ? [] : runConfigurations.listCompletedRunDates(portalId, meaning));
   if (plan.toRun.length === 0) {
+    const kind = meaning === 'CLOSING' ? 'closing-date search' : 'completed run';
     throw new Error(from === to
-      ? `${from} already has a completed run for this portal. Its tenders are in the Inbox and Tenders pages.`
-      : `Every date from ${from} to ${to} already has a completed run for this portal. Tick "Run again" to search them again.`);
+      ? `${from} already has a ${kind} for this portal. Its tenders are in the Inbox and Tenders pages. Tick "Also search days already searched" to search it again.`
+      : `Every date from ${from} to ${to} already has a ${kind} for this portal. Tick "Also search days already searched" to search them again.`);
   }
   return plan;
 }
@@ -3402,7 +3482,10 @@ ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown, options?: 
   // Dates already run in this sign-in are never run twice; with "Run
   // again", dates from earlier runs are searched again.
   const queued = activeBatch?.dates ?? [];
-  const earlier = options?.runAgain === true ? [] : runConfigurations.listCompletedRunDates(activeRunPortalId);
+  // More dates keep the run's own meaning: closing days in a closing-date run.
+  const meaning = activeRunContext?.config.dateMeaning ?? 'PUBLISHED';
+  if (meaning === 'CLOSING') checkDateMeaning(getPortalDefinition(activeRunPortalId), meaning, from, to);
+  const earlier = options?.runAgain === true ? [] : runConfigurations.listCompletedRunDates(activeRunPortalId, meaning);
   const plan = planDateBatch(from, to, [...earlier, ...queued]);
   if (plan.toRun.length === 0) {
     throw new Error(options?.runAgain === true
@@ -3436,8 +3519,10 @@ ipcMain.handle('switch-portal-run', async (_event, requestedConfig: RunConfigura
   if (!pendingMoreDates) throw new Error('The run is not waiting for more dates.');
   const portal = getPortalDefinition(normalizeRunConfiguration(requestedConfig).portalId);
   if (portal.id === activeRunPortalId) throw new Error('That is the website already signed in. Choose its dates instead.');
-  const from = normalizeRunConfiguration(requestedConfig).searchDate;
-  planDatesToRun(portal.id, from, typeof untilDate === 'string' && untilDate ? untilDate : from, options?.runAgain === true);
+  const requested = normalizeRunConfiguration(requestedConfig);
+  const from = requested.searchDate;
+  const until = typeof untilDate === 'string' && untilDate ? untilDate : from;
+  planDatesToRun(portal.id, from, until, options?.runAgain === true, checkDateMeaning(portal, requested.dateMeaning, from, until));
   const completion = activeJobCompletion;
   pendingMoreDates(null);
   await completion;

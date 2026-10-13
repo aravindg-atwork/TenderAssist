@@ -1,7 +1,8 @@
-// Finds the GeM bids that started on one day. GeM has no "published date"
-// search, but its list sorts by start date (newest first) and any page can be
-// asked for, so we jump to the day by halving the page range, then read on
-// until the day is over.
+// Finds the GeM bids that started on one day, or that close on one day.
+// GeM has no "published date" search, but its list sorts by start date
+// (newest first) and any page can be asked for, so we jump to the day by
+// halving the page range, then read on until the day is over. For a closing
+// day GeM's own end-date filter does the finding.
 
 import type { GemBid } from './gemBid.js';
 import type { GemListPage } from './gemClient.js';
@@ -63,4 +64,46 @@ export async function findBidsStartedOn(
     if (result.bids.length === 0 || (oldest !== null && oldest < day)) break;
   }
   return [...found.values()];
+}
+
+/** The most pages read for one closing day; a busy day has about 120 service pages. */
+export const MAX_CLOSING_DAY_PAGES = 600;
+
+export interface ClosingDayResult {
+  bids: GemBid[];
+  /** GeM's own count for the day at the last page read. */
+  total: number;
+  /** Every bid GeM counted was read. */
+  complete: boolean;
+}
+
+/**
+ * Finds the GeM bids that close on one day. GeM filters by end date itself,
+ * but many bids close at the same round hour and GeM orders those ties
+ * differently on each request, so the list must be read sorted by start
+ * time (to the second) to page through without skipping bids. Bids that
+ * close or appear while we read move the pages, so when the count changed
+ * or bids are short, the list is read once more and the two reads combined.
+ */
+export async function findBidsClosingOn(
+  listPage: (page: number) => Promise<GemListPage>,
+  onProgress?: (progress: DaySearchProgress) => void,
+): Promise<ClosingDayResult> {
+  const found = new Map<string, GemBid>();
+  let pagesRead = 0;
+  let total = 0;
+  for (let pass = 1; pass <= 2; pass += 1) {
+    const totals = new Set<number>();
+    for (let page = 1; pagesRead < MAX_CLOSING_DAY_PAGES; page += 1) {
+      const result = await listPage(page);
+      pagesRead += 1;
+      total = result.total;
+      totals.add(result.total);
+      for (const bid of result.bids) found.set(bid.id, bid);
+      onProgress?.({ pagesRead, found: found.size });
+      if (result.bids.length === 0 || page * PAGE_SIZE >= result.total) break;
+    }
+    if (totals.size === 1 && found.size >= total) break;
+  }
+  return { bids: [...found.values()], total, complete: found.size >= total };
 }

@@ -74,6 +74,15 @@ payload = {"page":2,
 
 Advanced search returns only ongoing bids: every result we sampled had a future end date and `b_status = 1`.
 
+Checked on 12 Oct 2026:
+
+- **Its pages cannot be trusted; its count can.** Results come in no fixed order, and the order changes on every request. Reading all 22 pages of one category's bids closing on 15 Oct (219 bids) four times found 185, 209, 188 and 168 distinct bids; only two passes together found all 219. `numFound` is right, so TenderAssist uses advanced search only to count a category's open bids, and never pages through it.
+- **No bids is HTTP 404** with `{"code":404,"message":"No data found"}`, not an empty list.
+- The dates are `YYYY-MM-DD` (the page's datepicker format), Indian days, both ends included. The page allows a year back and a year ahead.
+- The session cookie and token from `/all-bids` work here too.
+
+**Bid end date on the list page** (`byEndDate` in `/all-bids-data`, same date format) filters correctly too, but its own sort has the same problem: many bids close at the same round hour, and GeM orders those ties differently each time (700 rows read, 600 distinct, sorted by end date). Sorted by **start date** instead, which is to the second, the same filter pages cleanly: 1195 of 1195 bids closing on 15 Oct, twice over. That is how TenderAssist searches a closing day.
+
 Lists that fill the dropdowns (POST, with only the token):
 
 - `/ministry-list-adv`: 76 ministries and 38 buyer states. The list has near-duplicates such as `ANDHRA  PRADESH` with two spaces.
@@ -139,9 +148,11 @@ Agreed with the operator:
   - GeM shows its Category list exactly as GeM displays it (about 421 service entries; GeM adds an example after " - "), read from the advanced search page and refreshed every two weeks.
 - **Bids are matched by GeM's own category code**, as GeM's search does. A bid for several items carries several comma-separated codes, and any one of them counts. If the list could not be read, the category name before " - " is compared instead.
 - **The starting GeM picks** cover application development, e-learning, software support, websites and mobile apps, plus "Custom Bid For Services". GeM's "Annual Maintenance Service" entries are all hardware AMC, so they are left for the operator to add.
-- **Services by default.** "Also search product bids" adds product bids, and product categories join the list.
+- **One list, services and products** (since 12 Oct 2026), as GeM's own advanced search shows it, each tagged Service or Product with an All / Services / Products filter. Service bids are always searched; product bids are searched as soon as a product category is chosen. (The earlier "Also search product bids" switch is cleared on the next save.)
+- **How busy each category is**, beside each chosen category and the top matches of a search: "N open now" is GeM's own advanced-search count (asked one category at a time, kept three hours), and "M in your last D searched days" comes from the daily counts of past GeM runs.
+- **Search** matches every word typed, in any order; names starting with the words come first, then names containing them, then matches only in GeM's example after " - ".
 - **Every bid type is kept**, including reverse auctions and limited, single or global tenders. The type is written on the sheet ("Bid Type").
-- **Dates mean the day a bid started**, chosen with the same date picker as the other websites.
+- **Dates mean the day a bid started**, chosen with the same date picker as the other websites, **or the day bids close** ("Closing on", GeM only, today up to a year ahead). A closing-date run reads GeM's list with its Bid end date filter, sorted by start date (see 3.2), checks that it read as many bids as GeM counted, and reads the list once more if the list moved meanwhile. Closing-date and started-date runs are counted apart when skipping days already searched, and a closing day is not added to the daily report (which counts bids that started on a day).
 
 How a GeM date runs (`src/gem/`):
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { CategoryHealth, DocumentsWaiting, InboxItem, InboxView, OperatorDecision, RecoveryJob, RunHistorySummary, RunSettingsState, SettingsSection } from '../../../src/electron/ipcTypes';
 import type { PreflightReport } from '../../../src/system/preflight';
 import { getPortalDefinition, isGemPortal, PORTALS } from '../../../src/config/portalRegistry';
-import { categoriesForPortal } from '../../../src/config/runConfiguration';
+import { categoriesForPortal, type RunDateMeaning } from '../../../src/config/runConfiguration';
 import { absoluteDateTime, LIFECYCLE_LABELS } from '../format';
 import { PortalSelect } from './PortalSelect';
 import { CategoryReplacement, withReplacements } from './CategoryReplacement';
@@ -36,6 +36,19 @@ export interface TodayPageProps {
 const isoOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const todayIso = () => isoOf(new Date());
 const daysAgo = (days: number) => { const date = new Date(); date.setDate(date.getDate() - days); return isoOf(date); };
+const daysAhead = (days: number) => daysAgo(-days);
+/** GeM's own bid-end-date picker reaches a year ahead. */
+const latestClosingIso = () => daysAhead(365);
+
+/** Closing-day ranges for GeM: bids still open close today or later. */
+function closingPresets(): Array<{ label: string; from: string; to: string }> {
+  return [
+    { label: 'Today', from: todayIso(), to: todayIso() },
+    { label: 'Tomorrow', from: daysAhead(1), to: daysAhead(1) },
+    { label: 'Next 3 days', from: todayIso(), to: daysAhead(2) },
+    { label: 'Next 7 days', from: todayIso(), to: daysAhead(6) },
+  ];
+}
 const shortDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
 function daysBetween(from: string, to: string): number {
@@ -94,6 +107,8 @@ export function TodayPage({
   const [from, setFrom] = useState(todayIso());
   const [to, setTo] = useState(todayIso());
   const [customDates, setCustomDates] = useState(false);
+  /** GeM only: search the day bids started (published) or the day they close. */
+  const [dateMeaning, setDateMeaning] = useState<RunDateMeaning>('PUBLISHED');
   const [runAgain, setRunAgain] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -112,7 +127,25 @@ export function TodayPage({
   const [driveSet, setDriveSet] = useState(false);
   const portal = getPortalDefinition(selectedPortalId);
   const gem = isGemPortal(portal);
+  const closing = gem && dateMeaning === 'CLOSING';
   const [categoryHealth, setCategoryHealth] = useState<CategoryHealth | null>(null);
+
+  /** Switching between started and closing days starts from today, which both allow. */
+  const chooseMeaning = (next: RunDateMeaning) => {
+    if (next === dateMeaning) return;
+    setDateMeaning(next);
+    setFrom(todayIso());
+    setTo(todayIso());
+    setCustomDates(false);
+  };
+  // Other websites have published dates only; future closing days must not carry over.
+  useEffect(() => {
+    if (gem || dateMeaning === 'PUBLISHED') return;
+    setDateMeaning('PUBLISHED');
+    setFrom(todayIso());
+    setTo(todayIso());
+    setCustomDates(false);
+  }, [gem, dateMeaning]);
   const [followed, setFollowed] = useState(0);
 
   useEffect(() => {
@@ -310,7 +343,7 @@ export function TodayPage({
       const block = report.checks.find((check) => check.level === 'BLOCKED');
       if (block) throw new Error(block.message);
       const { jobId, skipped } = await window.tenderAssist.startJob(
-        { searchDate: from, portalId: selectedPortalId, ...settings.defaults }, to > from ? to : from, { runAgain },
+        { searchDate: from, portalId: selectedPortalId, dateMeaning: closing ? 'CLOSING' : 'PUBLISHED', ...settings.defaults }, to > from ? to : from, { runAgain },
       );
       if (skipped.length > 0) setSkippedNote(`Already searched, skipped: ${skipped.map(shortDate).join(', ')}.`);
       onRunStarted(jobId);
@@ -421,9 +454,16 @@ export function TodayPage({
             </section>
 
             <section className="guide__step">
-              <h2 className="guide__q">{gem ? 'Bids started on which days?' : 'Published on which days?'}</h2>
+              <h2 className="guide__q">{closing ? 'Bids closing on which days?' : gem ? 'Bids started on which days?' : 'Published on which days?'}</h2>
+              {gem && (
+                <div className="switch switch--sm" role="radiogroup" aria-label="Which date">
+                  <button type="button" role="radio" aria-checked={!closing} className="switch__opt" disabled={starting} onClick={() => chooseMeaning('PUBLISHED')}>Started on</button>
+                  <button type="button" role="radio" aria-checked={closing} className="switch__opt" disabled={starting} onClick={() => chooseMeaning('CLOSING')}>Closing on</button>
+                </div>
+              )}
+              {closing && <p className="hint">GeM’s own “Bid end date” search: every open bid that closes on these days, whenever it started.</p>}
               <div className="presets" role="group" aria-label="Quick dates">
-                {datePresets(missed).map((preset) => (
+                {(closing ? closingPresets() : datePresets(missed)).map((preset) => (
                   <button key={preset.label} type="button" className={!customDates && preset.from === from && preset.to === to ? 'preset is-on' : 'preset'} disabled={starting}
                     onClick={() => { setFrom(preset.from); setTo(preset.to); setCustomDates(false); }}>
                     {preset.label}
@@ -434,14 +474,14 @@ export function TodayPage({
               {customDates && (
                 <div className="dates-pick">
                   <label className="field"><span>From</span>
-                    <input type="date" value={from} max={todayIso()} disabled={starting} onChange={(event) => {
+                    <input type="date" value={from} min={closing ? todayIso() : undefined} max={closing ? latestClosingIso() : todayIso()} disabled={starting} onChange={(event) => {
                       const next = event.target.value;
                       if (to === from || to < next) setTo(next);
                       setFrom(next);
                     }} />
                   </label>
                   <label className="field"><span>To</span>
-                    <input type="date" value={to} min={from} max={todayIso()} disabled={starting} onChange={(event) => setTo(event.target.value)} />
+                    <input type="date" value={to} min={from} max={closing ? latestClosingIso() : todayIso()} disabled={starting} onChange={(event) => setTo(event.target.value)} />
                   </label>
                 </div>
               )}
@@ -454,7 +494,7 @@ export function TodayPage({
             <footer className="guide__go">
               <div className="guide__summary">
                 <span className="guide__big">{rangeLabel}</span>
-                <span className="guide__small">{dateCount > 1 ? `${dateCount} days on ` : 'On '}{isGemPortal(portal) ? 'GeM' : portal.name}{gem ? ', no sign-in needed' : '. You type the CAPTCHA and DSC PIN'}</span>
+                <span className="guide__small">{closing ? 'Bids closing, ' : ''}{dateCount > 1 ? `${dateCount} days on ` : 'On '}{isGemPortal(portal) ? 'GeM' : portal.name}{gem ? ', no sign-in needed' : '. You type the CAPTCHA and DSC PIN'}</span>
               </div>
               <button className="btn btn--red btn--xl" type="submit" disabled={starting || !settings || Boolean(blocker)}>
                 {starting ? (gem ? 'Starting' : 'Opening the website') : 'Start'}
@@ -603,7 +643,7 @@ export function TodayPage({
 
       {replacing && settings && (
         <CategoryReplacement portalId={portal.id} portalName={portal.name} missing={missingCategories}
-          chosen={categoriesForPortal(settings.defaults, portal)} includeProducts={gem && settings.defaults.gemIncludeProducts}
+          chosen={categoriesForPortal(settings.defaults, portal)}
           onSkip={skipMissing} onClose={() => setReplacing(false)} onApply={(add, remove) => void applyReplacements(add, remove)} />
       )}
 

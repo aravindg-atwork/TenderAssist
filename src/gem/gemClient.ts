@@ -8,6 +8,7 @@ export const GEM_BID_ORIGIN = 'https://bidplus.gem.gov.in';
 const LIST_PAGE = `${GEM_BID_ORIGIN}/all-bids`;
 const LIST_DATA = `${GEM_BID_ORIGIN}/all-bids-data`;
 const ADVANCED_SEARCH_PAGE = `${GEM_BID_ORIGIN}/advance-search`;
+const ADVANCED_SEARCH_DATA = `${GEM_BID_ORIGIN}/search-bids`;
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) TenderAssist';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -111,8 +112,12 @@ export class GemClient {
     this.fetchImpl = options.fetch ?? fetch;
   }
 
-  /** One page of bids, newest start first unless another order is asked. */
-  async listBids(query: { page: number; bidType: GemBidType; sort?: GemSort }): Promise<GemListPage> {
+  /**
+   * One page of bids, newest start first unless another order is asked.
+   * `endsBetween` is GeM's "Bid end date" filter: whole Indian days, both
+   * included, as `YYYY-MM-DD`.
+   */
+  async listBids(query: { page: number; bidType: GemBidType; sort?: GemSort; endsBetween?: { from: string; to: string } }): Promise<GemListPage> {
     const payload = {
       page: query.page,
       param: { searchBid: '' },
@@ -120,7 +125,7 @@ export class GemClient {
         bidStatusType: 'ongoing_bids',
         byType: query.bidType,
         highBidValue: '',
-        byEndDate: { from: '', to: '' },
+        byEndDate: { from: query.endsBetween?.from ?? '', to: query.endsBetween?.to ?? '' },
         sort: query.sort ?? 'Bid-Start-Date-Latest',
       },
     };
@@ -144,6 +149,30 @@ export class GemClient {
       }
       this.token = null;
       if (attempt >= 1) throw httpError(`GeM did not return the bid list (HTTP ${response.status}).`, response.status);
+    }
+  }
+
+  /**
+   * How many bids are open in one category right now, as GeM's advanced
+   * search counts them. Only the count is used: that search's pages come in
+   * a different order on every request, so they would skip bids.
+   */
+  async openBidCount(categoryCode: string): Promise<number> {
+    const payload = { searchType: 'bidNumber', bidNumber: '', category: categoryCode, bidEndFrom: '', bidEndTo: '', page: 1 };
+    for (let attempt = 0; ; attempt += 1) {
+      if (!this.token) await this.openSession();
+      const response = await this.request(ADVANCED_SEARCH_DATA, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Referer: ADVANCED_SEARCH_PAGE },
+        body: new URLSearchParams({ payload: JSON.stringify(payload), csrf_bd_gem_nk: this.token! }).toString(),
+      });
+      const parsed = await response.json().catch(() => null) as
+        { code?: number; message?: string; response?: { response?: { numFound?: number } } } | null;
+      if (parsed?.code === 200 && typeof parsed.response?.response?.numFound === 'number') return parsed.response.response.numFound;
+      // GeM answers a search with no bids as HTTP 404 "No data found".
+      if (parsed?.code === 404 && /no data/i.test(parsed.message ?? '')) return 0;
+      this.token = null;
+      if (attempt >= 1) throw httpError(`GeM did not return the bid count (HTTP ${response.status}).`, response.status);
     }
   }
 

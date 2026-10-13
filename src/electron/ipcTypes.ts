@@ -6,7 +6,7 @@ import type { AuthJobUpdate } from '../orchestration/authJobRunner.js';
 import type { RunQuestion, RunQuestionAnswer } from '../orchestration/runQuestion.js';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { SearchRow } from '../persistence/repositories/searchRepository.js';
-import type { RunConfiguration, RunDefaults } from '../config/runConfiguration.js';
+import type { RunConfiguration, RunDateMeaning, RunDefaults } from '../config/runConfiguration.js';
 import type {
   ClassificationGateRow,
   FinalClassification,
@@ -39,6 +39,16 @@ export type { PortalCategoryList, RunQuestion, RunQuestionAnswer, WordSuggestion
 export type { WordSuggestion } from '../review/wordSuggestions.js';
 import type { LicenceView } from '../licence/licenceManager.js';
 export type { LicenceView };
+
+/** How busy each GeM category is, by the names asked for. */
+export interface GemCategoryCounts {
+  /** Bids open on GeM right now, as GeM's advanced search counts them; null when GeM could not be asked. */
+  open: Record<string, number | null>;
+  /** Bids that started in the category on the days GeM was searched in the last 30 days. */
+  recent: Record<string, number>;
+  /** How many searched days `recent` covers. */
+  recentDays: number;
+}
 
 export interface RunSettingsState {
   defaults: RunDefaults;
@@ -177,6 +187,8 @@ export interface JobListItem {
   updatedAt: string;
   portalId: string;
   searchDate: string | null;
+  /** What `searchDate` means (GeM can search by closing day). */
+  dateMeaning?: RunDateMeaning;
   /** Tenders the run saw, and how many of them it kept. For a documents run: tenders it collected for, and how many now have files. */
   tendersFound: number;
   kept: number;
@@ -233,8 +245,10 @@ export interface TenderAssistApi {
   getRunSettings(): Promise<RunSettingsState>;
   saveRunSettings(defaults: RunDefaults): Promise<RunSettingsState>;
   /** The website's own Product Category list, as the last search read it. */
-  /** For GeM, read from GeM itself; product categories are added only when asked. */
-  getPortalCategories(portalId: string, options?: { includeProducts?: boolean }): Promise<PortalCategoryList>;
+  /** For GeM, read from GeM itself: services and products together, products named in `productNames`. */
+  getPortalCategories(portalId: string): Promise<PortalCategoryList>;
+  /** GeM: bids open now in each named category (null when unknown), and their bids in recent runs. */
+  getGemCategoryCounts(portalId: string, names: string[]): Promise<GemCategoryCounts>;
   /** Chosen categories no longer on the website's list, and categories new on it. */
   getCategoryHealth(portalId: string): Promise<CategoryHealth>;
   /** What to search instead of a category the website dropped, led by where wanted tenders were listed. */

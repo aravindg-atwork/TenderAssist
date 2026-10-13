@@ -425,6 +425,15 @@ function dataRows(sheet, width) {
   return last < 2 ? [] : sheet.getRange(2, 1, last - 1, width).getValues();
 }
 
+/** The row of the last key in column A, or 1 (the header) when there is none. */
+function lastKeyRow(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 2) return 1;
+  var keys = sheet.getRange(2, 1, last - 1, 1).getValues();
+  for (var i = keys.length - 1; i >= 0; i--) if (String(keys[i][0]).trim()) return i + 2;
+  return 1;
+}
+
 function findKeyRow(key) {
   var sheet = sheetNamed(KEYS);
   var rows = dataRows(sheet, KEY_HEADERS.length);
@@ -590,7 +599,9 @@ function createKey(form) {
     row[COL['Grace days']] = form.grace === '' || form.grace == null ? DEFAULT_GRACE_DAYS : Math.max(0, Math.round(Number(form.grace) || 0));
     row[COL['Status']] = 'Active';
     row[COL['Notes']] = String(form.notes || '').trim();
-    var r = sheet.getLastRow() + 1;
+    // Under the last key, not getLastRow(): the Days left and PCs in use
+    // array formulas fill every row, which would put new keys past row 1000.
+    var r = lastKeyRow(sheet) + 1;
     // Days left and PCs in use are array formulas: leave those two cells empty.
     sheet.getRange(r, 1, 1, COL['Status'] + 1).setValues([row.slice(0, COL['Status'] + 1)]);
     sheet.getRange(r, COL['Notes'] + 1).setValue(row[COL['Notes']]);

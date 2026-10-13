@@ -111,10 +111,24 @@ describe('RunConfigurationRepository', () => {
 
     expect(repo.getForJob(jobId)).toEqual({
       searchDate: '2026-09-21',
+      dateMeaning: 'PUBLISHED',
       portalId: 'tamil-nadu',
       productCategories: ['Information Technology'],
       keywords: ['software development'],
       excludedKeywords: ['hardware'],
     });
+  });
+
+  it('keeps closing-date runs apart from published-date runs when skipping days already searched', () => {
+    const jobs = new JobRepository(db);
+    const config = { portalId: 'gem', productCategories: ['Custom Bid For Services'], keywords: ['portal'], excludedKeywords: [] };
+    repo.saveForJob(jobId, { ...config, searchDate: '2026-10-15' });
+    const closingJob = jobs.create().id;
+    repo.saveForJob(closingJob, { ...config, searchDate: '2026-10-20', dateMeaning: 'CLOSING' });
+    db.prepare("UPDATE jobs SET state = 'COMPLETE'").run();
+
+    expect(repo.getForJob(closingJob)?.dateMeaning).toBe('CLOSING');
+    expect(repo.listCompletedRunDates('gem')).toEqual(['2026-10-15']);
+    expect(repo.listCompletedRunDates('gem', 'CLOSING')).toEqual(['2026-10-20']);
   });
 });

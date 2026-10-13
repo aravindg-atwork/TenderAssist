@@ -96,3 +96,41 @@ describe('GeM client', () => {
     });
   });
 });
+
+describe('GeM closing dates and category counts', () => {
+  it('asks GeM’s list for one closing day with its own end-date filter', async () => {
+    const posts: string[] = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (url.endsWith('/all-bids')) return response(LIST_PAGE);
+      posts.push(init.body as string);
+      return response(JSON.stringify(LIST_DATA));
+    }) as unknown as typeof fetch;
+    await new GemClient({ fetch: fakeFetch }).listBids({ page: 1, bidType: 'service', endsBetween: { from: '2026-10-15', to: '2026-10-15' } });
+    expect(JSON.parse(new URLSearchParams(posts[0]).get('payload')!).filter).toMatchObject({
+      byEndDate: { from: '2026-10-15', to: '2026-10-15' }, sort: 'Bid-Start-Date-Latest',
+    });
+  });
+
+  it('counts the open bids in a category with GeM’s advanced search, and reads “No data found” as none', async () => {
+    const asked: Array<Record<string, unknown>> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (url.endsWith('/all-bids')) return response(LIST_PAGE);
+      expect(url).toBe('https://bidplus.gem.gov.in/search-bids');
+      const payload = JSON.parse(new URLSearchParams(init.body as string).get('payload')!) as Record<string, unknown>;
+      asked.push(payload);
+      return payload.category === 'services_home_cust'
+        ? response(JSON.stringify({ code: 200, response: { response: { numFound: 2581, start: 0, docs: [] } } }))
+        : response(JSON.stringify({ code: 404, message: 'No data found' }), { status: 404 });
+    }) as unknown as typeof fetch;
+    const client = new GemClient({ fetch: fakeFetch });
+    expect(await client.openBidCount('services_home_cust')).toBe(2581);
+    expect(await client.openBidCount('services_home_appl')).toBe(0);
+    expect(asked[0]).toMatchObject({ searchType: 'bidNumber', category: 'services_home_cust', bidEndFrom: '', bidEndTo: '', page: 1 });
+  });
+
+  it('does not read GeM being busy as zero bids', async () => {
+    const fakeFetch = (async (url: string) => url.endsWith('/all-bids') ? response(LIST_PAGE) : response('busy', { status: 500 })) as unknown as typeof fetch;
+    const error = await new GemClient({ fetch: fakeFetch }).openBidCount('services_home_cust').catch((caught: unknown) => caught);
+    expect(isTransientPortalError(error)).toBe(true);
+  });
+});
