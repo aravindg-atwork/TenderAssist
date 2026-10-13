@@ -88,13 +88,22 @@ export interface ClosingDayResult {
 export async function findBidsClosingOn(
   listPage: (page: number) => Promise<GemListPage>,
   onProgress?: (progress: DaySearchProgress) => void,
+  options: {
+    maxPages?: number;
+    /**
+     * A long read (every bid closing from a day on) takes minutes, and GeM's
+     * count always moves meanwhile: read once more only when bids are short.
+     */
+    countMayMove?: boolean;
+  } = {},
 ): Promise<ClosingDayResult> {
+  const maxPages = options.maxPages ?? MAX_CLOSING_DAY_PAGES;
   const found = new Map<string, GemBid>();
   let pagesRead = 0;
   let total = 0;
   for (let pass = 1; pass <= 2; pass += 1) {
     const totals = new Set<number>();
-    for (let page = 1; pagesRead < MAX_CLOSING_DAY_PAGES; page += 1) {
+    for (let page = 1; pagesRead < maxPages; page += 1) {
       const result = await listPage(page);
       pagesRead += 1;
       total = result.total;
@@ -103,7 +112,7 @@ export async function findBidsClosingOn(
       onProgress?.({ pagesRead, found: found.size });
       if (result.bids.length === 0 || page * PAGE_SIZE >= result.total) break;
     }
-    if (totals.size === 1 && found.size >= total) break;
+    if ((totals.size === 1 || options.countMayMove) && found.size >= total) break;
   }
   return { bids: [...found.values()], total, complete: found.size >= total };
 }

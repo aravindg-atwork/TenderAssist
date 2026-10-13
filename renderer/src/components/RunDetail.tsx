@@ -124,7 +124,7 @@ export function RunDetail({ jobId, isActive, onBack, onOpenSettings }: RunDetail
       {back}
       <header className="page__head page__head--split">
         <div>
-          <h1>{documentRun ? 'Documents for approved tenders' : `Search for ${config?.dateMeaning === 'CLOSING' ? 'bids closing ' : ''}${publishedLabel(config?.searchDate ?? null)}`}</h1>
+          <h1>{documentRun ? 'Documents for approved tenders' : (config?.dateMeaning === 'CLOSING_AFTER' && config.closingFrom ? `Search for bids closing ${publishedLabel(config.closingFrom)} or later` : `Search for ${config?.dateMeaning === 'CLOSING' ? 'bids closing ' : ''}${publishedLabel(config?.searchDate ?? null)}`)}</h1>
           <p>
             <span className={`status status--${status.tone}`}>{status.text}</span>
             {config && <> on {getPortalDefinition(config.portalId).name}</>}

@@ -18,7 +18,7 @@ type ResultFilter = 'all' | 'done' | 'stopped' | 'problem' | 'documents';
 
 /** Every search TenderAssist has run, newest first, in plain words. */
 const runName = (run: JobListItem) => run.purpose === 'DOCUMENTS' ? 'the documents run'
-  : run.purpose === 'CHANGES' ? 'the check for changes' : `the search for ${run.dateMeaning === 'CLOSING' ? 'bids closing ' : ''}${publishedLabel(run.searchDate)}`;
+  : run.purpose === 'CHANGES' ? 'the check for changes' : (run.dateMeaning === 'CLOSING_AFTER' && run.closingFrom ? `the search for bids closing ${publishedLabel(run.closingFrom)} or later` : `the search for ${run.dateMeaning === 'CLOSING' ? 'bids closing ' : ''}${publishedLabel(run.searchDate)}`);
 
 export function RunsPage({ activeJobId, onOpenRun }: RunsPageProps) {
   const [runs, setRuns] = useState<JobListItem[] | null>(null);

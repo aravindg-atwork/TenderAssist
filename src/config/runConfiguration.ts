@@ -2,15 +2,19 @@ import { CONFIGURED_SEARCHES } from '../search/searchConfig.js';
 
 /**
  * What a run's date means: the day tenders were published (a GeM bid's
- * start), or, on GeM only, the day bids close.
+ * start), or, on GeM only, the day bids close (CLOSING, runs before
+ * 13 Oct 2026), or every open bid closing on `closingFrom` or later
+ * (CLOSING_AFTER: "Bids with time to prepare").
  */
-export type RunDateMeaning = 'PUBLISHED' | 'CLOSING';
+export type RunDateMeaning = 'PUBLISHED' | 'CLOSING' | 'CLOSING_AFTER';
 
 export interface RunConfiguration {
   /** Native date-input format. */
   searchDate: string;
   /** Published unless given; runs saved before closing-date searches are all published. */
   dateMeaning?: RunDateMeaning;
+  /** CLOSING_AFTER only: the earliest closing day kept (native date format). */
+  closingFrom?: string;
   /** Defaults to Tamil Nadu for jobs created before multi-portal support. */
   portalId?: string;
   productCategories: string[];
@@ -162,6 +166,9 @@ export function normalizeRunConfiguration(input: RunConfiguration): RunConfigura
   const parsed = new Date(`${input.searchDate}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) throw new Error('Search date is invalid.');
   const portalId = typeof input.portalId === 'string' && input.portalId.trim() ? input.portalId.trim() : 'tamil-nadu';
-  const dateMeaning: RunDateMeaning = input.dateMeaning === 'CLOSING' ? 'CLOSING' : 'PUBLISHED';
-  return { searchDate: input.searchDate, dateMeaning, portalId, ...normalizeLists(input) };
+  const dateMeaning: RunDateMeaning = input.dateMeaning === 'CLOSING' || input.dateMeaning === 'CLOSING_AFTER' ? input.dateMeaning : 'PUBLISHED';
+  if (dateMeaning !== 'CLOSING_AFTER') return { searchDate: input.searchDate, dateMeaning, portalId, ...normalizeLists(input) };
+  const closingFrom = typeof input.closingFrom === 'string' ? input.closingFrom : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(closingFrom) || Number.isNaN(new Date(`${closingFrom}T00:00:00`).getTime())) throw new Error('Choose the earliest closing date.');
+  return { searchDate: input.searchDate, dateMeaning, closingFrom, portalId, ...normalizeLists(input) };
 }

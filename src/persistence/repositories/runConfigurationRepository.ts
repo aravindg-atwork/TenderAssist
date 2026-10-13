@@ -18,6 +18,7 @@ interface JobConfigRow {
   portal_id: string;
   search_date: string;
   date_meaning: string;
+  closing_from: string | null;
   product_categories_json: string;
   keywords_json: string;
   excluded_keywords_json: string;
@@ -61,8 +62,8 @@ export class RunConfigurationRepository {
     this.db
       .prepare(
         `INSERT INTO job_run_configs
-           (job_id, search_date, product_categories_json, keywords_json, excluded_keywords_json, created_at, portal_id, date_meaning)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+           (job_id, search_date, product_categories_json, keywords_json, excluded_keywords_json, created_at, portal_id, date_meaning, closing_from)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         jobId,
@@ -72,7 +73,8 @@ export class RunConfigurationRepository {
         JSON.stringify(config.excludedKeywords),
         new Date().toISOString(),
         config.portalId ?? 'tamil-nadu',
-        config.dateMeaning ?? 'PUBLISHED'
+        config.dateMeaning ?? 'PUBLISHED',
+        config.closingFrom ?? null
       );
     return config;
   }
@@ -99,7 +101,7 @@ export class RunConfigurationRepository {
   getForJob(jobId: string): RunConfiguration | undefined {
     const row = this.db
       .prepare(
-        `SELECT portal_id, search_date, date_meaning, product_categories_json, keywords_json, excluded_keywords_json
+        `SELECT portal_id, search_date, date_meaning, closing_from, product_categories_json, keywords_json, excluded_keywords_json
          FROM job_run_configs WHERE job_id = ?`
       )
       .get(jobId) as JobConfigRow | undefined;
@@ -107,6 +109,7 @@ export class RunConfigurationRepository {
     return normalizeRunConfiguration({
       searchDate: row.search_date,
       dateMeaning: row.date_meaning as RunDateMeaning,
+      closingFrom: row.closing_from ?? undefined,
       portalId: row.portal_id,
       productCategories: JSON.parse(row.product_categories_json) as string[],
       keywords: JSON.parse(row.keywords_json) as string[],

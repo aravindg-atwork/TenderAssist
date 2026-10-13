@@ -70,6 +70,17 @@ export interface GemRunDeps {
   searchWords?: readonly string[];
   /** A search-word bid to leave alone: already decided by the operator, or already waiting in the Inbox. */
   skipWordHit?: (bid: GemBid) => boolean;
+  /** A catch-up search's bid to leave alone, by the same rule: it is in the Inbox or decided already. */
+  skipKnown?: (bid: GemBid) => boolean;
+}
+
+/** The most pages a catch-up search reads per bid type: about 6,000 service bids close in the coming weeks. */
+const MAX_CATCH_UP_PAGES = 2_500;
+/** GeM's end-date filter reaches a year ahead. */
+function yearAfter(day: string): string {
+  const date = new Date(`${day}T00:00:00`);
+  date.setFullYear(date.getFullYear() + 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 const quotedWords = (words: readonly string[]) => words.map((word) => `“${word}”`).join(', ');
@@ -275,7 +286,10 @@ export async function runGemDate(
 
   const day = config.searchDate;
   const closing = config.dateMeaning === 'CLOSING';
-  const onDay = `${closing ? 'closing' : 'started'} on ${shortDay(day)}`;
+  // A catch-up search: every open bid closing on closingFrom or later (enough time to prepare).
+  const closingFrom = config.dateMeaning === 'CLOSING_AFTER' ? config.closingFrom ?? day : null;
+  const onDay = closingFrom ? `closing on ${shortDay(closingFrom)} or later` : `${closing ? 'closing' : 'started'} on ${shortDay(day)}`;
+  let skippedKnown = 0;
   const bidTypes: Array<{ type: GemBidType; label: string }> = [
     { type: 'service', label: 'service bids' },
     ...(deps.includeProducts ? [{ type: 'product' as const, label: 'product bids' }] : []),
@@ -297,7 +311,16 @@ export async function runGemDate(
     };
     try {
       let bids: GemBid[];
-      if (closing) {
+      if (closingFrom) {
+        const result = await findBidsClosingOn(
+          (page) => retry(() => deps.client.listBids({ page, bidType: type, endsBetween: { from: closingFrom, to: yearAfter(closingFrom) } }), `GeM ${label}`),
+          onProgress, { maxPages: MAX_CATCH_UP_PAGES, countMayMove: true });
+        if (!result.complete) short.push(`${label} (${result.bids.length} of ${result.total} read)`);
+        bids = result.bids.filter((bid) => !bid.endsAt || bid.endsAt.slice(0, 10) >= closingFrom);
+        const before = bids.length;
+        bids = bids.filter((bid) => !deps.skipKnown?.(bid));
+        skippedKnown += before - bids.length;
+      } else if (closing) {
         const result = await findBidsClosingOn(
           (page) => retry(() => deps.client.listBids({ page, bidType: type, endsBetween: { from: day, to: day } }), `GeM ${label}`), onProgress);
         if (!result.complete) short.push(`${label} (${result.bids.length} of ${result.total} read)`);
@@ -327,7 +350,7 @@ export async function runGemDate(
   }
   jobMachine.transition(jobId, 'CLASSIFYING', failed.length > 0 ? `GeM search finished; not searched: ${failed.join(', ')}` : 'GeM search finished');
   // The daily report counts the bids that started on a day; a closing day is not that.
-  if (failed.length === 0 && !closing && deps.onDayCounts) {
+  if (failed.length === 0 && !closing && !closingFrom && deps.onDayCounts) {
     const categories: Record<string, number> = {};
     for (const bid of found.values()) categories[bid.category || 'Not stated'] = (categories[bid.category || 'Not stated'] ?? 0) + 1;
     try { deps.onDayCounts(day, found.size, categories); } catch { /* the report count is a bonus; never stop the run */ }
@@ -383,7 +406,7 @@ export async function runGemDate(
       // A search word is the work itself: its day and category do not matter.
       // An excluded word as well is the operator's call, never a silent reject.
       gate(tender.id, 'G1', 'PASS', found.has(bid.id) ? 'SEARCH_DATE_FILTER_MATCH' : 'SEARCH_WORD_MATCH',
-        { searchDate: day, dateMeaning: closing ? 'CLOSING' : 'PUBLISHED', startedAt: bid.startsAt, endsAt: bid.endsAt, searchWords: hit.words });
+        { searchDate: day, dateMeaning: config.dateMeaning ?? 'PUBLISHED', closingFrom, startedAt: bid.startsAt, endsAt: bid.endsAt, searchWords: hit.words });
       gate(tender.id, 'G2', 'PASS', 'SEARCH_WORD_MATCH', { searchWords: hit.words, actual: [bid.category], actualCode: bid.categoryCode, configured: config.productCategories, matched: [] });
       const excluded = evaluateExcludedScope(`${bid.title} ${bid.itemName}`, config.excludedKeywords);
       gate(tender.id, 'G4', excluded.result === 'REJECT' ? 'UNCERTAIN' : excluded.result, excluded.result === 'REJECT' ? 'SEARCH_WORD_AND_EXCLUDED' : excluded.reasonCode,
@@ -391,7 +414,7 @@ export async function runGemDate(
       toRead.push({ bid, tender, hit });
       continue;
     }
-    gate(tender.id, 'G1', 'PASS', 'SEARCH_DATE_FILTER_MATCH', { searchDate: day, dateMeaning: closing ? 'CLOSING' : 'PUBLISHED', startedAt: bid.startsAt, endsAt: bid.endsAt });
+    gate(tender.id, 'G1', 'PASS', 'SEARCH_DATE_FILTER_MATCH', { searchDate: day, dateMeaning: config.dateMeaning ?? 'PUBLISHED', closingFrom, startedAt: bid.startsAt, endsAt: bid.endsAt });
     const matched = config.productCategories.filter((chosen) => inChosenCategory(bid, chosen, deps.categoryCodes));
     const inCategory = matched.length > 0;
     gate(tender.id, 'G2', inCategory ? 'PASS' : 'REJECT', inCategory ? 'PRODUCT_CATEGORY_MATCH' : 'PRODUCT_CATEGORY_MISMATCH',
@@ -496,6 +519,7 @@ export async function runGemDate(
   statusMessage = failed.length > 0
     ? `${found.size} GeM bids found; ${failed.join(' and ')} could not be searched, so some may be missing. Run this date again later.`
     : `${found.size} GeM bids ${onDay}; ${toRead.length - wordOnly.length} were in your categories and were read.`;
+  if (skippedKnown > 0) statusMessage += ` ${skippedKnown} more were already in your Inbox or decided, so they were not read again.`;
   if (wordOnly.length > 0) statusMessage += ` ${wordOnly.length} more open ${wordOnly.length === 1 ? 'bid has' : 'bids have'} your search words and ${wordOnly.length === 1 ? 'was' : 'were'} read.`;
   statusMessage += wordNote;
   if (short.length > 0) statusMessage += ` GeM’s list changed while it was read, so a few may be missing: ${short.join(', ')}. Run this date again to pick them up.`;

@@ -118,6 +118,27 @@ describe('a GeM run for one date', () => {
     expect(asked[0].url).toBe('https://bidplus.gem.gov.in/showbidDocument/7');
   });
 
+  it('a catch-up search keeps every bid with enough time to prepare, not only the chosen day, and skips known ones', async () => {
+    const closingOn = (id: number, endsAt: string) => ({ ...bid(id, `Custom Bid for Services - Web application for site ${id}`), endsAt });
+    const bids = [
+      closingOn(60, '2026-10-17T15:00:00'), // too soon
+      closingOn(61, '2026-10-19T11:00:00'), // the earliest day kept (one day of grace)
+      closingOn(62, '2026-11-05T15:00:00'), // weeks later: kept too
+      closingOn(63, '2026-10-25T15:00:00'), // already in the Inbox
+    ];
+    const asked: Array<{ from: string; to: string } | undefined> = [];
+    const run = deps(bids, { 61: BID_TEXT, 62: BID_TEXT }, { skipKnown: (item) => item.id === '63' });
+    const list = run.client.listBids;
+    run.client = { ...run.client, listBids: async (query) => { asked.push(query.endsBetween); return list(query); } };
+    const result = await runGemDate(run, jobId, { ...CONFIG, searchDate: '2026-10-13', dateMeaning: 'CLOSING_AFTER', closingFrom: '2026-10-19' }, () => {});
+    expect(asked[0]).toEqual({ from: '2026-10-19', to: '2027-10-19' });
+    expect(tenders.listForJob(jobId).map((tender) => tender.tender_ref).sort()).toEqual(['GEM/2026/B/61', 'GEM/2026/B/62']);
+    expect(finalFor('GEM/2026/B/61')).toBe('KEEP');
+    expect(finalFor('GEM/2026/B/62')).toBe('KEEP');
+    expect(result.statusMessage).toContain('closing on');
+    expect(result.statusMessage).toContain('1 more were already in your Inbox or decided');
+  });
+
   describe('search words', () => {
     /** The day's list as usual; a keyword search returns GeM's loose matches (inside words too). */
     function withWords(dayBids: GemBid[], wordBids: GemBid[], pdfText: Record<string, string>, extra: Partial<GemRunDeps> = {}): GemRunDeps {

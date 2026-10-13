@@ -207,6 +207,8 @@ export interface JobListItem {
   searchDate: string | null;
   /** What `searchDate` means (GeM can search by closing day). */
   dateMeaning?: RunDateMeaning;
+  /** CLOSING_AFTER: the earliest closing day kept. */
+  closingFrom?: string;
   /** Tenders the run saw, and how many of them it kept. For a documents run: tenders it collected for, and how many now have files. */
   tendersFound: number;
   kept: number;

@@ -322,6 +322,7 @@ function emitJobUpdate(raw: AuthJobUpdate): void {
   const update: AuthJobUpdate = {
     ...(backgroundRun ? { background: true } : {}),
     dateMeaning: activeRunContext?.config.dateMeaning,
+    closingFrom: activeRunContext?.config.closingFrom,
     ...withRunState(raw, { searchDate: activeSearchDate, batch: activeBatch, question: activeQuestion }),
   };
   callOperatorForSignIn(update);
@@ -773,6 +774,7 @@ ipcMain.handle('list-jobs', (): JobListItem[] => {
       portalId: config?.portalId ?? DEFAULT_PORTAL_ID,
       searchDate: config?.searchDate ?? null,
       dateMeaning: config?.dateMeaning ?? 'PUBLISHED',
+      closingFrom: config?.closingFrom,
       tendersFound: found.length,
       kept: found.filter((tender) => (workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id)) === 'KEEP').length,
     };
@@ -2681,6 +2683,7 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
       askOperator: (tender, reason, documentUrl) => askOperatorDuringRun(ctx, jobId, tender, reason, documentUrl),
       searchWords: index === 0 ? searchWords : undefined,
       skipWordHit,
+      skipKnown: skipWordHit,
     }, jobId, config, emitJobUpdate);
     syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, jobId, ctx.portal.id, { screening: decided.outcome === 'SUCCESS' }));
     let result = decided;
@@ -3502,9 +3505,18 @@ async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknow
     const config = normalizeRunConfiguration(requestedConfig);
     const portal = getPortalDefinition(config.portalId);
     config.portalId = portal.id;
-    const until = typeof untilDate === 'string' && untilDate ? untilDate : config.searchDate;
-    config.dateMeaning = checkDateMeaning(portal, config.dateMeaning, config.searchDate, until);
-    plan = planDatesToRun(portal.id, config.searchDate, until, options?.runAgain === true, config.dateMeaning);
+    let until = typeof untilDate === 'string' && untilDate ? untilDate : config.searchDate;
+    if (config.dateMeaning === 'CLOSING_AFTER') {
+      // A catch-up search is one search, on the day it runs, of every bid closing from closingFrom on.
+      if (!isGemPortal(portal)) throw new Error('Searching by time to prepare is for GeM only.');
+      config.searchDate = until = new Date().toLocaleDateString('en-CA');
+      if (!config.closingFrom || config.closingFrom < config.searchDate) throw new Error('Choose an earliest closing date from today onwards.');
+    } else {
+      config.dateMeaning = checkDateMeaning(portal, config.dateMeaning, config.searchDate, until);
+    }
+    plan = config.dateMeaning === 'CLOSING_AFTER'
+      ? { toRun: [config.searchDate], skipped: [] }
+      : planDatesToRun(portal.id, config.searchDate, until, options?.runAgain === true, config.dateMeaning);
     config.searchDate = plan.toRun[0];
     const outputSettings = publishingSettings.get(portal.id);
     ctx = { portal, config, outputSettings, abortController, paceAction };
@@ -3598,6 +3610,7 @@ ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown, options?: 
   const queued = activeBatch?.dates ?? [];
   // More dates keep the run's own meaning: closing days in a closing-date run.
   const meaning = activeRunContext?.config.dateMeaning ?? 'PUBLISHED';
+  if (meaning === 'CLOSING_AFTER') throw new Error('This search already covered every later closing day. Start a new search for other dates.');
   if (meaning === 'CLOSING') checkDateMeaning(getPortalDefinition(activeRunPortalId), meaning, from, to);
   const earlier = options?.runAgain === true ? [] : runConfigurations.listCompletedRunDates(activeRunPortalId, meaning);
   const plan = planDateBatch(from, to, [...earlier, ...queued]);

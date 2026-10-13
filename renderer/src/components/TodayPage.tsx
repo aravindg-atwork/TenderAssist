@@ -43,14 +43,14 @@ const daysAhead = (days: number) => daysAgo(-days);
 /** GeM's own bid-end-date picker reaches a year ahead. */
 const latestClosingIso = () => daysAhead(365);
 
-/** Closing-day ranges for GeM: bids still open close today or later. */
-function closingPresets(): Array<{ label: string; from: string; to: string }> {
-  return [
-    { label: 'Today', from: todayIso(), to: todayIso() },
-    { label: 'Tomorrow', from: daysAhead(1), to: daysAhead(1) },
-    { label: 'Next 3 days', from: todayIso(), to: daysAhead(2) },
-    { label: 'Next 7 days', from: todayIso(), to: daysAhead(6) },
-  ];
+/**
+ * Time to prepare, for GeM: "7 days or more" keeps every open bid closing in
+ * 6 days or later (one day's grace), not only the 7th day.
+ */
+const PREPARE_DAYS = [3, 7, 14, 30];
+const earliestClosingFor = (days: number) => daysAhead(days - 1);
+function preparePresets(): Array<{ label: string; from: string; to: string }> {
+  return PREPARE_DAYS.map((days) => ({ label: `${days} days or more`, from: earliestClosingFor(days), to: earliestClosingFor(days) }));
 }
 const shortDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
@@ -130,15 +130,16 @@ export function TodayPage({
   const [driveSet, setDriveSet] = useState(false);
   const portal = getPortalDefinition(selectedPortalId);
   const gem = isGemPortal(portal);
-  const closing = gem && dateMeaning === 'CLOSING';
+  const closing = gem && dateMeaning === 'CLOSING_AFTER';
   const [categoryHealth, setCategoryHealth] = useState<CategoryHealth | null>(null);
 
-  /** Switching between started and closing days starts from today, which both allow. */
+  /** New bids start from today; time to prepare from "7 days or more". */
   const chooseMeaning = (next: RunDateMeaning) => {
     if (next === dateMeaning) return;
     setDateMeaning(next);
-    setFrom(todayIso());
-    setTo(todayIso());
+    const start = next === 'CLOSING_AFTER' ? earliestClosingFor(7) : todayIso();
+    setFrom(start);
+    setTo(start);
     setCustomDates(false);
   };
   // Other websites have published dates only; future closing days must not carry over.
@@ -346,7 +347,10 @@ export function TodayPage({
       const block = report.checks.find((check) => check.level === 'BLOCKED');
       if (block) throw new Error(block.message);
       const { jobId, skipped } = await window.tenderAssist.startJob(
-        { searchDate: from, portalId: selectedPortalId, dateMeaning: closing ? 'CLOSING' : 'PUBLISHED', ...settings.defaults }, to > from ? to : from, { runAgain },
+        closing
+          ? { searchDate: todayIso(), portalId: selectedPortalId, dateMeaning: 'CLOSING_AFTER', closingFrom: from, ...settings.defaults }
+          : { searchDate: from, portalId: selectedPortalId, dateMeaning: 'PUBLISHED', ...settings.defaults },
+        closing ? todayIso() : to > from ? to : from, { runAgain: closing || runAgain },
       );
       if (skipped.length > 0) setSkippedNote(`Already searched, skipped: ${skipped.map(shortDate).join(', ')}.`);
       onRunStarted(jobId);
@@ -411,7 +415,7 @@ export function TodayPage({
   // The websites shown as one-click choices: the chosen one, Tamil Nadu and GeM.
   const quickPortals = [...new Set([selectedPortalId, 'tamil-nadu', 'gem'])].map((id) => getPortalDefinition(id));
 
-  const rangeLabel = from === to ? shortDate(from) : `${shortDate(from)} to ${shortDate(to)}`;
+  const rangeLabel = closing ? `${shortDate(from)} or later` : from === to ? shortDate(from) : `${shortDate(from)} to ${shortDate(to)}`;
 
   const queueGroups: TrayGroup[] = inbox ? [
     { id: 'recommended', title: 'Kept by TenderAssist', items: inbox.recommended },
@@ -467,18 +471,18 @@ export function TodayPage({
                       <span className="tile__name">New bids</span>
                       <span className="tile__hint">Bids that came out on GeM on these days. Use daily.</span>
                     </button>
-                    <button type="button" role="radio" aria-checked={closing} className={closing ? 'tile is-on' : 'tile'} disabled={starting} onClick={() => chooseMeaning('CLOSING')}>
-                      <span className="tile__name">Bids closing soon</span>
-                      <span className="tile__hint">Every open bid whose deadline is on these days, however old. Use to catch up after a break.</span>
+                    <button type="button" role="radio" aria-checked={closing} className={closing ? 'tile is-on' : 'tile'} disabled={starting} onClick={() => chooseMeaning('CLOSING_AFTER')}>
+                      <span className="tile__name">Bids with time to prepare</span>
+                      <span className="tile__hint">Every open bid, however old, whose deadline leaves you at least this long. Use to catch up after a break.</span>
                     </button>
                   </div>
-                  <h3 className="guide__sub">{closing ? 'Deadline on which days?' : 'Came out on which days?'}</h3>
+                  <h3 className="guide__sub">{closing ? 'How much time do you need to prepare?' : 'Came out on which days?'}</h3>
                 </>
               ) : (
                 <h2 className="guide__q">Published on which days?</h2>
               )}
               <div className="presets" role="group" aria-label="Quick dates">
-                {(closing ? closingPresets() : datePresets(missed)).map((preset) => (
+                {(closing ? preparePresets() : datePresets(missed)).map((preset) => (
                   <button key={preset.label} type="button" className={!customDates && preset.from === from && preset.to === to ? 'preset is-on' : 'preset'} disabled={starting}
                     onClick={() => { setFrom(preset.from); setTo(preset.to); setCustomDates(false); }}>
                     {preset.label}
@@ -486,7 +490,21 @@ export function TodayPage({
                 ))}
                 <button type="button" className={customDates ? 'preset is-on' : 'preset'} onClick={() => setCustomDates(!customDates)}>Choose dates</button>
               </div>
-              {customDates && (
+              {customDates && closing && (
+                <div className="dates-pick">
+                  <label className="field"><span>Closing on or after</span>
+                    <input type="date" value={from} min={todayIso()} max={latestClosingIso()} disabled={starting}
+                      onChange={(event) => { setFrom(event.target.value); setTo(event.target.value); }} />
+                  </label>
+                </div>
+              )}
+              {closing && (
+                <p className="hint">
+                  Bids closing on {shortDate(from)} or later: {daysBetween(todayIso(), from) - 1} days or more to prepare. Reads every such open bid on GeM,
+                  which takes about 10 minutes (longer when product categories are chosen). Bids already in your Inbox or decided are not read again.
+                </p>
+              )}
+              {customDates && !closing && (
                 <div className="dates-pick">
                   <label className="field"><span>From</span>
                     <input type="date" value={from} min={closing ? todayIso() : undefined} max={closing ? latestClosingIso() : todayIso()} disabled={starting} onChange={(event) => {
@@ -500,17 +518,19 @@ export function TodayPage({
                   </label>
                 </div>
               )}
-              <label className="check">
-                <input type="checkbox" checked={runAgain} disabled={starting} onChange={(event) => setRunAgain(event.target.checked)} />
-                Also search days already searched
-              </label>
+              {!closing && (
+                <label className="check">
+                  <input type="checkbox" checked={runAgain} disabled={starting} onChange={(event) => setRunAgain(event.target.checked)} />
+                  Also search days already searched
+                </label>
+              )}
             </section>
 
             <footer className="guide__go">
               <div className="guide__summary">
                 <span className="guide__big">{rangeLabel}</span>
                 <span className="guide__small">{gem
-                  ? `${closing ? 'Bids closing' : 'New bids'}${dateCount > 1 ? `, ${dateCount} days,` : ''} on GeM, no sign-in needed`
+                  ? (closing ? 'Bids closing, on GeM, no sign-in needed' : `New bids${dateCount > 1 ? `, ${dateCount} days,` : ''} on GeM, no sign-in needed`)
                   : `${dateCount > 1 ? `${dateCount} days on ` : 'On '}${portal.name}. You type the CAPTCHA and DSC PIN`}</span>
               </div>
               <button className="btn btn--red btn--xl" type="submit" disabled={starting || !settings || Boolean(blocker)}>

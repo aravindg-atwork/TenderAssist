@@ -61,6 +61,11 @@ describe('RunConfigurationRepository', () => {
     expect(repo.hasSavedDefaults()).toBe(false);
   });
 
+  it('keeps a catch-up search’s earliest closing day', () => {
+    repo.saveForJob(jobId, { searchDate: '2026-10-13', dateMeaning: 'CLOSING_AFTER', closingFrom: '2026-10-19', portalId: 'gem', productCategories: ['A'], keywords: ['b'], excludedKeywords: [] });
+    expect(repo.getForJob(jobId)).toMatchObject({ dateMeaning: 'CLOSING_AFTER', closingFrom: '2026-10-19', searchDate: '2026-10-13' });
+  });
+
   it('normalizes, de-duplicates, and persists future-run defaults', () => {
     repo.saveDefaults({
       productCategories: [' Computer- S/W ', 'computer- s/w', 'Information Technology'],
