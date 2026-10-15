@@ -100,12 +100,12 @@ export function inChosenCategory(bid: Pick<GemBid, 'category' | 'categoryCode'>,
 
 const STATES = ['Andaman and Nicobar', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli', 'Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'];
 
-/** Where the work is: the buyer's state when the buyer is a state, and the delivery PIN code. */
-export function gemLocation(facts: Pick<GemDocumentFacts, 'ministry' | 'deliveryPincode'> | null): string | null {
+/** Where the work is: the buyer's state when the buyer is a state, and the delivery PIN code (or city, when the address is hidden). */
+export function gemLocation(facts: Pick<GemDocumentFacts, 'ministry' | 'deliveryPincode' | 'deliveryCity'> | null): string | null {
   if (!facts) return null;
   const buyer = facts.ministry?.toLowerCase().replace(/&/g, 'and') ?? '';
   const state = STATES.find((name) => buyer.startsWith(name.toLowerCase()));
-  const parts = [state, facts.deliveryPincode && `PIN ${facts.deliveryPincode}`].filter(Boolean);
+  const parts = [state, facts.deliveryPincode ? `PIN ${facts.deliveryPincode}` : facts.deliveryCity].filter(Boolean);
   return parts.length > 0 ? parts.join(' - ') : null;
 }
 
