@@ -73,6 +73,22 @@ function rejectClause(gate: ScreenedGate): string {
   }
 }
 
+/**
+ * What made a tender a candidate before a check turned it down: the search
+ * word GeM listed it for, your category it is in, or your words it mentions.
+ */
+function pickedUpClause(byGate: (id: ScreenedGate['gate']) => ScreenedGate | undefined): string {
+  const parts: string[] = [];
+  const category = byGate('G2');
+  const searchWords = list(category?.evidence.searchWords);
+  const matchedCategories = list(category?.evidence.matched);
+  if (category?.reasonCode === 'SEARCH_WORD_MATCH' && searchWords.length) parts.push(`GeM listed it for your search word ${quoted(searchWords)}`);
+  else if (category?.result === 'PASS' && matchedCategories.length) parts.push(`it is in your category ${quoted(matchedCategories)}`);
+  const intent = list(byGate('G3')?.evidence.matchedKeywords);
+  if (intent.length) parts.push(`it mentions your words ${quoted(intent)}`);
+  return parts.length ? parts.join(', and ') : 'it was listed for the date you searched, but none of your categories or words matched';
+}
+
 function uncertainSentence(gate: ScreenedGate | undefined): string {
   if (!gate) return 'Not decided yet: not every check ran. The next search finishes them.';
   if (gate.reasonCode === 'NOT_IN_MY_TENDERS') {
@@ -107,7 +123,7 @@ export function explainScreening(recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN'
   if (recommendation === 'REJECT') {
     const failed = GATE_ORDER.map(byGate).filter((gate): gate is ScreenedGate => gate?.result === 'REJECT');
     return {
-      sentence: failed.length ? `Rejected: ${failed.map(rejectClause).join('; ')}.` : 'Rejected by an automatic check.',
+      sentence: `Came up because ${pickedUpClause(byGate)}. ${failed.length ? `Rejected because ${failed.map(rejectClause).join('; ')}.` : 'Rejected by an automatic check.'}`,
       matchedExclusions,
       matchedIntent,
     };

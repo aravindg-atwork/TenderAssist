@@ -27,8 +27,21 @@ describe('explainScreening', () => {
       gate('G1', 'PASS', 'SEARCH_DATE_FILTER_MATCH'),
       gate('G4', 'REJECT', 'TITLE_EXCLUDED_SCOPE', { matchedExcludedKeywords: ['supply of computers'] }),
     ]);
-    expect(explanation.sentence).toBe('Rejected: matched exclusion “supply of computers”.');
+    expect(explanation.sentence).toBe('Came up because it was listed for the date you searched, but none of your categories or words matched. Rejected because matched exclusion “supply of computers”.');
     expect(explanation.matchedExclusions).toEqual(['supply of computers']);
+  });
+
+  it('says first what made a rejected tender a candidate, then what rejected it', () => {
+    expect(explainScreening('REJECT', [
+      gate('G1', 'PASS', 'SEARCH_DATE_FILTER_MATCH'),
+      gate('G2', 'PASS', 'PRODUCT_CATEGORY_MATCH', { actual: ['Custom Bid for Services'], matched: ['Custom Bid for Services'] }),
+      gate('G3', 'PASS', 'TITLE_INTENT_MATCH', { matchedKeywords: ['website'] }),
+      gate('G4', 'REJECT', 'TITLE_EXCLUDED_SCOPE', { matchedExcludedKeywords: ['AMC'] }),
+    ]).sentence).toBe('Came up because it is in your category “Custom Bid for Services”, and it mentions your words “website”. Rejected because matched exclusion “AMC”.');
+    expect(explainScreening('REJECT', [
+      gate('G2', 'PASS', 'SEARCH_WORD_MATCH', { searchWords: ['LMS'] }),
+      gate('G3', 'REJECT', 'SEARCH_WORD_NOT_VISIBLE', { searchWords: ['LMS'] }),
+    ]).sentence).toBe('Came up because GeM listed it for your search word “LMS”. Rejected because GeM listed it for “LMS”, but the word is not in its title or bid document.');
   });
 
   it('lists every failed check and names missing data as missing', () => {
@@ -37,7 +50,7 @@ describe('explainScreening', () => {
       gate('G2', 'REJECT', 'PRODUCT_CATEGORY_MISMATCH', { actual: [] }),
       gate('G3', 'REJECT', 'NO_INTENT_KEYWORD_MATCH'),
       gate('G4', 'PASS', 'NO_EXCLUDED_PRIMARY_SCOPE'),
-    ]).sentence).toBe('Rejected: published date could not be read; category was not captured; no intent phrase matched.');
+    ]).sentence).toBe('Came up because it was listed for the date you searched, but none of your categories or words matched. Rejected because published date could not be read; category was not captured; no intent phrase matched.');
   });
 
   it('explains a failed detail read and a run that never screened', () => {
@@ -117,7 +130,7 @@ describe('buildInbox', () => {
     // Reopened, but its recommendation is still REJECT from an acknowledged
     // run, so it must surface for review rather than vanish.
     expect(inbox.uncertain.map((item) => item.tenderId)).toEqual(['B']);
-    expect(inbox.uncertain[0].explanation).toBe('Rejected: matched exclusion “hardware”.');
+    expect(inbox.uncertain[0].explanation).toBe('Came up because it was listed for the date you searched, but none of your categories or words matched. Rejected because matched exclusion “hardware”.');
   });
 
   it('brings a hidden older tender back into the Inbox when moved to review', () => {

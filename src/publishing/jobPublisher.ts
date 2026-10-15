@@ -237,6 +237,9 @@ export async function publishJobWorkbook(
       ...row,
       viewTenderLink: row.viewTenderLink ? { text: row.viewTenderLink.text, hyperlink: row.viewTenderLink.target } : '',
       tenderDocumentLink: row.tenderDocumentLink ? { text: row.tenderDocumentLink.text, hyperlink: row.tenderDocumentLink.target } : '',
+      gemPdfLink: row.gemPdfLink ? { text: row.gemPdfLink.text, hyperlink: row.gemPdfLink.target } : '',
+      originalBidLink: row.originalBidLink ? { text: row.originalBidLink.text, hyperlink: row.originalBidLink.target } : '',
+      originalBidPdfLink: row.originalBidPdfLink ? { text: row.originalBidPdfLink.text, hyperlink: row.originalBidPdfLink.target } : '',
       website: website?.name ?? '',
       reference: item.tender.tender_ref,
       title: item.tender.title,
@@ -265,7 +268,7 @@ export async function publishJobWorkbook(
   sheet.getRow(1).alignment = { vertical: 'middle', wrapText: true };
   for (const row of items.length > 0 ? sheet.getRows(2, items.length) ?? [] : []) {
     row.alignment = { vertical: 'top', wrapText: true };
-    for (const key of ['viewTenderLink', 'tenderDocumentLink'] as const) {
+    for (const key of ['viewTenderLink', 'tenderDocumentLink', 'gemPdfLink', 'originalBidLink', 'originalBidPdfLink'] as const) {
       const cell = row.getCell(key);
       if (cell.value) cell.font = { color: { argb: 'FF1F4E9E' }, underline: true };
     }

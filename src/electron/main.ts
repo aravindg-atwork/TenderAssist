@@ -1169,7 +1169,7 @@ function operatorDecisionReview(tender: TenderRow): TenderReviewRow | undefined 
 
 /** The tenders of one run that belong on its day's sheet. */
 function sheetItemsFor(jobId: string, plan: JobOutputPlan, portal: PortalDefinition): PublishableTender[] {
-  const allItems = tenders.listForJob(jobId).map((tender) => ({
+  const allItems = tenders.listForJob(jobId).filter((tender) => !isFiledElsewhere(tender)).map((tender) => ({
     tender,
     automaticDecision: classifications.getFinalForTender(tender.id),
     manualReview: workflow.getReview(tender.id) ?? operatorDecisionReview(tender),
@@ -1879,6 +1879,27 @@ function isApprovedTender(tender: TenderRow): boolean {
   return lifecycle !== undefined && APPROVED_LIFECYCLES.includes(lifecycle);
 }
 
+const hasSavedDocuments = (tender: TenderRow) => workflow.listDocuments(tender.id).some((document) => document.state === 'DOWNLOADED');
+
+/**
+ * A website lists an open bid in every search until it closes, so one
+ * approved bid can have a row in several runs (two GeM searches on one day
+ * gave each of 15 approved bids two folders, and Drive got 30). It is filed
+ * once: under its latest row with saved files, or else its latest row. Another
+ * row stays off the sheets and Drive, unless it has saved files of its own.
+ */
+function isFiledElsewhere(tender: TenderRow): boolean {
+  if (!tender.opportunity_id || !isApprovedTender(tender) || hasSavedDocuments(tender)) return false;
+  const filed = filedRow(tender.opportunity_id);
+  return filed !== undefined && filed.id !== tender.id;
+}
+
+/** The row an approved bid is filed under (see isFiledElsewhere). */
+function filedRow(opportunityId: string): TenderRow | undefined {
+  const rows = tenders.listForOpportunity(opportunityId);
+  return [...rows].reverse().find(hasSavedDocuments) ?? rows.at(-1);
+}
+
 /**
  * Copy approved tenders' saved folders from the local output folder to the
  * portal's Drive folder. Tenders without a saved folder, or portals without
@@ -1888,7 +1909,7 @@ function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
   const problems: string[] = [];
   const sheetsCopied = new Set<string>();
   for (const tender of tenderRows) {
-    if (!isApprovedTender(tender)) continue;
+    if (!isApprovedTender(tender) || isFiledElsewhere(tender)) continue;
     const portalId = runConfigurations.getForJob(tender.job_id)?.portalId ?? DEFAULT_PORTAL_ID;
     const driveRoot = publishingSettings.get(portalId).driveOutputRoot;
     const plan = jobOutputs.getPlan(tender.job_id);
@@ -2063,7 +2084,7 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
       for (const tender of folderId ? tenderRows : []) {
         // A tender waiting for the operator stays on this computer; it goes
         // to Drive when approved (afterApproval), never when rejected.
-        if (!isApprovedTender(tender)) continue;
+        if (!isApprovedTender(tender) || isFiledElsewhere(tender)) continue;
         const plan = jobOutputs.getPlan(tender.job_id);
         const serialNumber = jobOutputs.findSerialNumber(tender.id);
         if (!plan || serialNumber === undefined) continue;
@@ -2752,7 +2773,7 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
 function gemApprovedWaitingForDocuments(portalId: string): TenderRow[] {
   const waiting: TenderRow[] = [];
   for (const opportunity of opportunities.list({ lifecycles: ['APPROVED'], portalId })) {
-    const latest = tenders.listForOpportunity(opportunity.id).at(-1);
+    const latest = filedRow(opportunity.id);
     if (!latest) continue;
     let links: unknown[] = [];
     try { links = JSON.parse(latest.document_links_json) as unknown[]; } catch { links = []; }

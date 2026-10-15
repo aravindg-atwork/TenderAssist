@@ -34,13 +34,13 @@ describe('publishJobWorkbook', () => {
     // The office's own columns, in its order.
     expect(sheet.getRow(1).values).toEqual([undefined, 'SI No', 'TDR Number', 'Department', 'Location', 'Tender Title (short)',
       'Project Nature', 'Tender Value', 'Bid Start Date', 'Bid End Date', 'EMD', 'Pre-bid Meeting Date', 'Eligibility',
-      'Eligibility Notes', 'View Tender Link', 'Tender Document Link', 'Corrigenda',
+      'Eligibility Notes', 'View Tender Link', 'Tender Document Link', 'GeM PDF Link', 'Original Bid Link (for RA)', 'Original Bid PDF (for RA)', 'Corrigenda',
       // The earlier columns follow, without the ones the office's set already has.
       'Website', 'Reference', 'Full title', 'Decision', 'Decision source', 'Review reason', 'Category', 'Organisation', 'State',
       'Published date', 'Scope', 'Tender fee', 'Submission method', 'Contact', 'Extraction confidence', 'Documents downloaded', 'Tender folder']);
-    expect(sheet.getCell('Q2').value).toBe('Tamil Nadu');
-    expect(sheet.getCell('R2').value).toBe('REF-1');
-    expect(sheet.getCell('S2').value).toBe(tender.title);
+    expect(sheet.getCell('T2').value).toBe('Tamil Nadu');
+    expect(sheet.getCell('U2').value).toBe('REF-1');
+    expect(sheet.getCell('V2').value).toBe(tender.title);
     expect(sheet.getCell('A2').value).toBe(1);
     expect(sheet.getCell('B2').value).toBe('PORTAL-1');
     expect(sheet.getCell('C2').value).toBe('Information Technology Department');

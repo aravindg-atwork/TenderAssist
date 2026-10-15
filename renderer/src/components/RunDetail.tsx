@@ -3,6 +3,7 @@ import { FilterPills, Pager, usePage } from './Pager';
 import type { JobDetail, SettingsSection, TenderDetailItem } from '../../../src/electron/ipcTypes';
 import type { ClassificationGateRow } from '../../../src/persistence/repositories/classificationRepository';
 import { describePortalError } from '../../../src/orchestration/transientRetry';
+import { explainScreening, screeningEvidence } from '../../../src/review/tenderExplanation';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
 import { plainError, plural, publishedLabel, runStatus } from '../words';
 import { NoMatchesSummary } from './NoMatchesSummary';
@@ -33,12 +34,11 @@ function reasonFor(tender: TenderDetailItem): string {
   }
   const failed = tender.classificationGates.find((gate) => /REVIEW_FAILED/.test(gate.reason_code));
   if (failed) return `Its details page did not open, even on a second try (${String(evidence(failed).error ?? 'no answer from the portal')}).`;
-  const excluded = words(evidence(byGate.get('G4')).matchedExcludedKeywords);
-  if (byGate.get('G4')?.result === 'REJECT') return `Its title or category has an excluded word: ${excluded.join(', ') || 'an exclusion'}.`;
-  if (byGate.get('G2')?.result === 'REJECT') return 'Its product category is not one you search for.';
-  if (byGate.get('G1')?.result === 'REJECT') return 'It was published too long before this date.';
+  // A rejection says what made it a candidate first, then what turned it down (as on Today).
+  if (tender.classificationGates.some((gate) => gate.result === 'REJECT')) {
+    return explainScreening('REJECT', screeningEvidence(tender.classificationGates).gates).sentence;
+  }
   const matched = words(evidence(byGate.get('G3')).matchedKeywords);
-  if (byGate.get('G3')?.result === 'REJECT') return 'Its details do not mention any of your intent words.';
   if (byGate.get('G3')?.result === 'UNCERTAIN') return 'Waiting for its details to be read.';
   if (matched.length > 0) return `Mentions ${matched.map((word) => `“${word}”`).join(', ')}.`;
   return 'Passed every check.';

@@ -159,6 +159,7 @@ export function detailFieldsFor(bid: GemBid, facts: GemDocumentFacts | null): Ar
     { label: 'Bid to Reverse Auction', value: facts?.bidToRa ?? null },
     { label: 'Quantity', value: facts?.totalQuantity ?? (bid.quantity !== null ? String(bid.quantity) : null) },
     { label: 'Parent Bid', value: bid.parentBidNumber },
+    { label: 'Parent Bid ID', value: bid.parentBidId ?? null },
   ];
 }
 
@@ -182,33 +183,52 @@ export interface GemBidDetails {
   readError: string | null;
 }
 
+type BidReadDeps = {
+  client: Pick<GemClient, 'fetchFile'>;
+  tenders: TenderRepository;
+  readPdf?: (data: Uint8Array) => Promise<PdfContent>;
+  retry?: <T>(task: () => Promise<T>) => Promise<T>;
+};
+
+async function readBidPdf(deps: BidReadDeps, url: string): Promise<{ content: PdfContent | null; readError: string | null }> {
+  const retry = deps.retry ?? (<T>(task: () => Promise<T>) => task());
+  try {
+    const file = await retry(() => deps.client.fetchFile(url));
+    if (!/pdf/i.test(file.contentType) && file.body.subarray(0, 5).toString() !== '%PDF-') throw new Error('GeM did not return the bid PDF.');
+    return { content: await (deps.readPdf ?? readPdfFile)(new Uint8Array(file.body)), readError: null };
+  } catch (error) {
+    return { content: null, readError: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The RA's own facts, with what only its bid's PDF gives (EMD, turnover, value…) filled in. */
+function withParentFacts(facts: GemDocumentFacts | null, parent: GemDocumentFacts | null): GemDocumentFacts | null {
+  if (!facts || !parent) return facts ?? parent;
+  const merged = { ...facts };
+  for (const key of Object.keys(parent) as Array<keyof GemDocumentFacts>) merged[key] ??= parent[key];
+  return merged;
+}
+
 /**
  * Downloads a bid's PDF and records what it says on the tender: its facts,
  * text, and the files to save (the PDF and the buyer's attachments). A PDF
- * that cannot be read is recorded too, and still listed for saving.
+ * that cannot be read is recorded too, and still listed for saving. A reverse
+ * auction also gets the PDF and attachments of the bid it came from: the RA
+ * PDF holds only the auction, the bid's PDF the work and its conditions.
  */
-export async function readGemBidDetails(
-  deps: {
-    client: Pick<GemClient, 'fetchFile'>;
-    tenders: TenderRepository;
-    readPdf?: (data: Uint8Array) => Promise<PdfContent>;
-    retry?: <T>(task: () => Promise<T>) => Promise<T>;
-  },
-  tenderId: string,
-  bid: GemBid,
-): Promise<GemBidDetails> {
+export async function readGemBidDetails(deps: BidReadDeps, tenderId: string, bid: GemBid): Promise<GemBidDetails> {
   const documentUrl = bidDocumentUrl(bid);
-  const retry = deps.retry ?? (<T>(task: () => Promise<T>) => task());
-  let content: PdfContent | null = null;
-  let readError: string | null = null;
-  try {
-    const file = await retry(() => deps.client.fetchFile(documentUrl));
-    if (!/pdf/i.test(file.contentType) && file.body.subarray(0, 5).toString() !== '%PDF-') throw new Error('GeM did not return the bid PDF.');
-    content = await (deps.readPdf ?? readPdfFile)(new Uint8Array(file.body));
-  } catch (error) {
-    readError = error instanceof Error ? error.message : String(error);
-  }
-  const facts = content ? factsFromBidText(content.text) : null;
+  const { content, readError } = await readBidPdf(deps, documentUrl);
+  const parentUrl = bid.kind === 'RA' && bid.parentBidId ? bidDocumentUrl({ id: bid.parentBidId, kind: 'BID' }) : null;
+  const parent = parentUrl ? await readBidPdf(deps, parentUrl) : null;
+  const facts = withParentFacts(content ? factsFromBidText(content.text) : null, parent?.content ? factsFromBidText(parent.content.text) : null);
+  const links = [
+    { url: documentUrl, fileName: bidFileName(bid) },
+    ...(content ? attachmentsFromBid(content) : []),
+    ...(parentUrl ? [{ url: parentUrl, fileName: bidFileName({ bidNumber: bid.parentBidNumber ?? `bid ${bid.parentBidId}` }) }] : []),
+    // Prefixed, so a name both PDFs use ("Service level agreement.pdf") is not saved over.
+    ...(parent?.content ? attachmentsFromBid(parent.content).map((file) => ({ ...file, fileName: `Original bid - ${file.fileName}` })) : []),
+  ];
   deps.tenders.updateDetail(tenderId, {
     organisationChain: [facts?.ministry ?? bid.ministry, facts?.department ?? bid.department, facts?.organisation, facts?.office].filter(Boolean).join('||') || null,
     department: facts?.department ?? bid.department,
@@ -216,7 +236,7 @@ export async function readGemBidDetails(
     productCategory: bid.category,
     tenderCategory: bidKindLabel(bid),
     detailText: detailTextFor(bid, facts, content ? readableBidText(content.text) : `The bid PDF could not be read: ${readError}`),
-    documentLinks: [{ url: documentUrl, fileName: bidFileName(bid) }, ...(content ? attachmentsFromBid(content) : [])],
+    documentLinks: [...new Map(links.map((link) => [link.url, link])).values()],
     valueInRupees: rupees(facts?.estimatedValue ?? null),
     closingDate: closingFromPdf(facts?.bidEndsAt ?? null),
   });
@@ -240,7 +260,8 @@ export function bidFromTender(tender: TenderRow): GemBid {
     startsAt: wallClock(tender.published_date),
     endsAt: null,
     quantity: null,
-    parentBidNumber: null,
+    parentBidNumber: /^Parent Bid: (.+)$/m.exec(tender.detail_text ?? '')?.[1].trim() ?? null,
+    parentBidId: /^Parent Bid ID: (\d+)$/m.exec(tender.detail_text ?? '')?.[1] ?? null,
     cancelled: false,
     highValue: false,
     rateContract: false,

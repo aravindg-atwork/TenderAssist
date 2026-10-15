@@ -34,6 +34,9 @@ describe('the day report sheet', () => {
       eligibilityNotes: '',
       viewTenderLink: { text: 'Open Tamil Nadu (Tender ID 2026_POLIS_702131_1)', target: 'https://tntenders.gov.in/nicgep/app' },
       tenderDocumentLink: { text: 'Open documents', target: '05-10-2026_3_OARS/Documents' },
+      gemPdfLink: null,
+      originalBidLink: null,
+      originalBidPdfLink: null,
       corrigenda: '',
     });
   });
@@ -63,6 +66,20 @@ describe('the day report sheet', () => {
     });
     expect(row.viewTenderLink?.target).toBe('https://bidplus.gem.gov.in/bidding/bid/getBidResultView/9900001');
     expect(row.tenderDocumentLink).toEqual({ text: 'Open documents', target: '13-10-2026_1_WDRA/Documents' });
+  });
+
+  it('links a GeM reverse auction to its own PDF and to the bid it came from, page and PDF', () => {
+    const row = reportRow({
+      serialNumber: 1, documentsFolder: '15-10-2026_1_RA/Documents',
+      tender: {
+        ...base, tender_ref: 'GEM/2026/R/746323', tender_portal_id: '8800001',
+        detail_text: 'Bid Number: GEM/2026/R/746323\nBid Type: Reverse auction\nParent Bid: GEM/2026/B/7801861\nParent Bid ID: 7700001\n\ntext',
+      },
+    });
+    expect(row.tenderDocumentLink).toEqual({ text: 'Open documents', target: '15-10-2026_1_RA/Documents' });
+    expect(row.gemPdfLink).toEqual({ text: 'RA PDF on GeM', target: 'https://bidplus.gem.gov.in/showradocumentPdf/8800001' });
+    expect(row.originalBidLink).toEqual({ text: 'View GEM/2026/B/7801861', target: 'https://bidplus.gem.gov.in/bidding/bid/getBidResultView/7700001' });
+    expect(row.originalBidPdfLink).toEqual({ text: 'Original bid PDF', target: 'https://bidplus.gem.gov.in/showbidDocument/7700001' });
   });
 
   it('names the kind of work in the office’s own words', () => {
