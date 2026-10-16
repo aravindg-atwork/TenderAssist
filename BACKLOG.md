@@ -2,10 +2,10 @@
 
 Last updated: 12 Oct 2026. Pick up from **Next up**.
 
-## Built 16 Oct 2026, not released: choose an existing Drive folder (not seen running)
+## 0.7.5, 16 Oct 2026: choose an existing Drive folder
 
 - **Settings → Upload to Google Drive → Choose a folder in Drive** (operator, 16 Oct: not everyone uploads to My Drive; some use shared folders). It opens Google's own folder chooser (Google Picker) in the browser, with My Drive, Shared with me and Shared drives. Picking a folder is what lets TenderAssist use it under `drive.file`, so there is no wider permission and no security assessment. A typed name still makes a new folder in My Drive; with drive.file, a name can never find the operator's own folder. A chosen folder that is gone or no longer shared stops uploads with a message, and is never made again in My Drive. Folder lookups now search shared drives too (`corpora=allDrives`). Code: `src/publishing/drivePicker.ts` (tested: page, choose, cancel, error, timeout), `choose-google-drive-folder` in `main.ts`, `folderPicked` setting.
-- **Needs before release:** the Google Picker API turned on and an API key in `google-oauth-client.json` as `picker_api_key`, and in the `GOOGLE_OAUTH_CLIENT_JSON` secret (docs/google-drive-setup.md, step 5a). Without the key, the button is hidden. The Picker served from `http://127.0.0.1` has not been tried against Google yet.
+- **Tried against Google, 16 Oct:** signed in as the office account, the chooser opened from 127.0.0.1, a folder was picked, and a test folder was made in it, found again without a duplicate, and binned. Picker API on; key in `google-oauth-client.json` (`picker_api_key`). The `GOOGLE_OAUTH_CLIENT_JSON` secret must hold it too, or GitHub builds hide the button.
 
 ## Fixed 16 Oct 2026, 0.7.4 (not seen running)
 
