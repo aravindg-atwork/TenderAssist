@@ -7,10 +7,11 @@ import { DEFAULT_OUTPUT_STRUCTURE } from '../../../src/publishing/outputStructur
 
 describe('JobOutputRepository', () => {
   let repo: JobOutputRepository;
+  let db: DatabaseSync;
   const root = 'C:\\TenderAssist';
 
   beforeEach(() => {
-    const db = new DatabaseSync(':memory:');
+    db = new DatabaseSync(":memory:");
     runMigrations(db, join(process.cwd(), 'src', 'persistence', 'migrations'));
     repo = new JobOutputRepository(db);
   });
@@ -48,5 +49,28 @@ describe('JobOutputRepository', () => {
     expect(repo.serialNumberFor(second, 'c')).toBe(3);
     expect(repo.serialNumberFor(first, 'a')).toBe(1);
     expect(repo.serialNumberFor(otherDay, 'd')).toBe(1);
+  });
+
+  it('gives a bid found again by a later run of the same date its earlier folder', () => {
+    const tender = (id: string, jobId: string, ref: string, portalId = 'gem') => {
+      db.prepare(`INSERT OR IGNORE INTO job_run_configs (job_id, search_date, product_categories_json, keywords_json, excluded_keywords_json, created_at, portal_id)
+        VALUES (?, '2026-10-14', '[]', '[]', '[]', '', ?)`).run(jobId, portalId);
+      db.prepare(`INSERT INTO tenders (id, job_id, tender_ref, tender_portal_id, title, organisation_chain, product_category, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'WhatsApp Chatbot', '', '', '', '')`).run(id, jobId, ref, ref);
+    };
+    db.prepare(`INSERT INTO jobs (id, state, created_at, updated_at) VALUES ('job-1', 'COMPLETE', '', ''), ('job-2', 'COMPLETE', '', ''), ('job-3', 'COMPLETE', '', '')`).run();
+    tender('old', 'job-1', 'GEM/2026/B/1');
+    tender('other', 'job-1', 'GEM/2026/B/2');
+    tender('again', 'job-2', 'GEM/2026/B/1');
+    tender('tn', 'job-3', 'GEM/2026/B/2', 'tamil-nadu');
+    const first = repo.getOrCreatePlan('job-1', root, '2026-10-14', DEFAULT_OUTPUT_STRUCTURE);
+    const second = repo.getOrCreatePlan('job-2', root, '2026-10-14', DEFAULT_OUTPUT_STRUCTURE);
+    const third = repo.getOrCreatePlan('job-3', root, '2026-10-14', DEFAULT_OUTPUT_STRUCTURE);
+    expect(repo.serialNumberFor(first, 'old')).toBe(1);
+    expect(repo.serialNumberFor(first, 'other')).toBe(2);
+    expect(repo.serialNumberFor(second, 'again')).toBe(1);
+    expect(repo.findSerialNumber('old')).toBeUndefined();
+    // Another website's tender never takes a folder, even with the same reference.
+    expect(repo.serialNumberFor(third, 'tn')).toBe(3);
   });
 });

@@ -2,7 +2,11 @@
 
 Last updated: 12 Oct 2026. Pick up from **Next up**.
 
-## Fixed 16 Oct 2026 (not yet in an installer; not seen running)
+## Fixed 16 Oct 2026, 0.7.4 (not seen running)
+
+- **Searching a date again replaces the earlier search** (operator, 16 Oct). A second 14-10 GeM search, run after changing the words, left the first search's 14 folders beside its own 28 (folders 1–42, six bids twice) and both on the sheet. The rule, per website and kind of search (`supersededRuns`, tested): once a later search of the date has saved its tenders, the earlier one's tenders leave the day sheet. Their folders go to the Recycle Bin and, at the next upload of that day, to Drive's bin. Exception: a tender the operator approved stays when the later search did not find the bid again. A bid found again takes over its earlier folder number (`serialNumberFor`, tested), so it never gets a second folder. At start-up, days already searched twice are cleaned once (`retireReplacedSearches`). On this PC that is 14-10 (14), 07-10 (4), 09-10 (3) and about 22 from the September Tamil Nadu test days. Numbers are never reused, so a re-searched day may start at 15. Not done: the Drive for desktop copy (`copyApprovedTendersToDrive`) does not remove replaced folders.
+
+## Fixed 16 Oct 2026, 0.7.3
 
 - **Shortlisted tenders' folders never reached Drive** (operator report, 16 Oct). The 13-10 and 14-10 GeM runs shortlisted 13 and 14 bids. Their documents and Eligibility.xlsx were saved locally, and the sheet on Drive listed them, but no folder was uploaded: since 0.5.1 only operator-approved tenders went. The owner chose (16 Oct): **Drive gets every tender the sheet keeps**, meaning TenderAssist's shortlist plus the operator's approvals. "Needs a look" and rejected tenders stay local. Code: `belongsOnDrive` in `main.ts` (Drive API upload and the Drive for desktop copy). Earlier days: Settings → Upload to Google Drive → "Upload everything saved so far".
 

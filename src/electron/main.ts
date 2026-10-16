@@ -1,6 +1,6 @@
 // src/electron/main.ts
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, safeStorage, shell, type MenuItemConstructorOptions } from 'electron';
-import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, join, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReadStream, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -87,6 +87,7 @@ import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windows
 import { extractTenderRequirements } from '../extraction/requirementExtractor.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { daySheetFileName, isDaySheet, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory, type PublishableTender, type ReportSheetMode } from '../publishing/jobPublisher.js';
+import { supersededRuns } from '../publishing/supersededRuns.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
 import { driveFolderLink, driveFolderNameParts, driveFolderPath, GoogleDriveClient, GoogleDriveError, parseGoogleClientFile, signInWithGoogle, type DriveCredentials, type GoogleSignIn } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
@@ -1169,7 +1170,7 @@ function operatorDecisionReview(tender: TenderRow): TenderReviewRow | undefined 
 
 /** The tenders of one run that belong on its day's sheet. */
 function sheetItemsFor(jobId: string, plan: JobOutputPlan, portal: PortalDefinition): PublishableTender[] {
-  const allItems = tenders.listForJob(jobId).filter((tender) => !isFiledElsewhere(tender)).map((tender) => ({
+  const allItems = tenders.listForJob(jobId).filter((tender) => !isFiledElsewhere(tender) && !isReplacedByLaterSearch(tender)).map((tender) => ({
     tender,
     automaticDecision: classifications.getFinalForTender(tender.id),
     manualReview: workflow.getReview(tender.id) ?? operatorDecisionReview(tender),
@@ -1229,6 +1230,7 @@ async function publishDaySheets(plan: JobOutputPlan): Promise<void> {
       catch (error) { console.error(`[TenderAssist] Could not remove the old report sheet ${name}:`, error); }
     }
   }
+  await binReplacedTenderFolders(plan.jobDirectory);
 }
 
 // Jobs published before output plans existed get one from today's settings
@@ -1886,6 +1888,7 @@ function isApprovedTender(tender: TenderRow): boolean {
  * had none of their folders). Tenders needing a look, and rejected ones, stay local.
  */
 function belongsOnDrive(tender: TenderRow): boolean {
+  if (isReplacedByLaterSearch(tender)) return false;
   if (isApprovedTender(tender)) return true;
   const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
   if (lifecycle === 'REJECTED') return false;
@@ -1905,6 +1908,78 @@ function isFiledElsewhere(tender: TenderRow): boolean {
   if (!tender.opportunity_id || !isApprovedTender(tender) || hasSavedDocuments(tender)) return false;
   const filed = filedRow(tender.opportunity_id);
   return filed !== undefined && filed.id !== tender.id;
+}
+
+// A search past these has saved its tenders and is writing its sheet.
+const SEARCH_SAVED_STATES: readonly string[] = ['UPLOADING', 'REPORTING', 'COMPLETE'];
+
+// Asked for every tender during an upload or sheet write: read again at most every 2 seconds.
+let supersededCache: { at: number; byDirectory: Map<string, Set<string>> } = { at: 0, byDirectory: new Map() };
+
+/** The runs in a day folder that a later search of the same date replaced (supersededRuns). */
+function supersededInDayFolder(jobDirectory: string): Set<string> {
+  if (Date.now() - supersededCache.at > 2_000) supersededCache = { at: Date.now(), byDirectory: new Map() };
+  const key = resolve(jobDirectory).toLocaleLowerCase();
+  const cached = supersededCache.byDirectory.get(key);
+  if (cached) return cached;
+  const superseded = supersededRuns(jobOutputs.jobsInDirectory(jobDirectory).flatMap((jobId) => {
+    const config = runConfigurations.getForJob(jobId);
+    const plan = jobOutputs.getPlan(jobId);
+    const job = jobs.getById(jobId);
+    if (!config || !plan || !job) return [];
+    return [{
+      jobId,
+      runNumber: plan.runNumber,
+      portalId: config.portalId ?? DEFAULT_PORTAL_ID,
+      searchKey: [config.searchDate, config.dateMeaning ?? 'PUBLISHED', config.closingFrom ?? ''].join(' '),
+      finished: SEARCH_SAVED_STATES.includes(job.state),
+      isSearch: (job.purpose ?? 'SEARCH') === 'SEARCH',
+    }];
+  }));
+  supersededCache.byDirectory.set(key, superseded);
+  return superseded;
+}
+
+/**
+ * A tender of a search the same date's later search replaced: off the sheet,
+ * its folder binned here and on Drive. One the operator approved stays,
+ * unless the later search found the bid again (its row carries the approval).
+ */
+function isReplacedByLaterSearch(tender: TenderRow): boolean {
+  const plan = jobOutputs.getPlan(tender.job_id);
+  if (!plan) return false;
+  const superseded = supersededInDayFolder(plan.jobDirectory);
+  if (!superseded.has(tender.job_id)) return false;
+  if (!isApprovedTender(tender)) return true;
+  const portalId = runConfigurations.getForJob(tender.job_id)?.portalId;
+  return jobOutputs.jobsInDirectory(plan.jobDirectory).some((jobId) => !superseded.has(jobId)
+    && runConfigurations.getForJob(jobId)?.portalId === portalId
+    && db.prepare(`SELECT 1 FROM tenders WHERE job_id = ? AND tender_ref = ? AND COALESCE(tender_portal_id, '') = ?`)
+      .get(jobId, tender.tender_ref, tender.tender_portal_id ?? '') !== undefined);
+}
+
+/** The saved folders of a day folder's replaced tenders (isReplacedByLaterSearch). */
+function replacedTenderFolders(jobDirectory: string): string[] {
+  const folders: string[] = [];
+  for (const jobId of supersededInDayFolder(jobDirectory)) {
+    const plan = jobOutputs.getPlan(jobId);
+    if (!plan) continue;
+    for (const tender of tenders.listForJob(jobId)) {
+      const serialNumber = jobOutputs.findSerialNumber(tender.id);
+      if (serialNumber === undefined || !isReplacedByLaterSearch(tender)) continue;
+      folders.push(tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate));
+    }
+  }
+  return folders;
+}
+
+/** Moves replaced tenders' folders to the Recycle Bin, so the day folder holds only the latest search. */
+async function binReplacedTenderFolders(jobDirectory: string): Promise<void> {
+  for (const folder of replacedTenderFolders(jobDirectory)) {
+    if (!existsSync(folder)) continue;
+    try { await shell.trashItem(folder); }
+    catch (error) { console.error(`[TenderAssist] Could not move the replaced folder ${folder} to the Recycle Bin:`, error); }
+  }
 }
 
 /** The row an approved bid is filed under (see isFiledElsewhere). */
@@ -2071,6 +2146,9 @@ let driveUploads: Promise<void> = Promise.resolve();
 
 interface DriveUploadSummary { tenders: number; files: number; problems: string[] }
 
+// Replaced tender folders already looked for on Drive this session (day folder id / name).
+const driveBinnedFolders = new Set<string>();
+
 /**
  * Uploads tenders' saved folders, and the report sheets of their day folders,
  * to the Google Drive folder in the same layout as the local output folder.
@@ -2132,6 +2210,14 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
           const kept = new Set(sheets.map((name) => name.toLocaleLowerCase()));
           for (const file of await drive.client.files(dayId)) {
             if (isDaySheet(baseName, file.name) && !kept.has(file.name.toLocaleLowerCase())) await drive.client.binFile(file.id);
+          }
+          // Folders of tenders a later search of the date replaced go to Drive's bin too.
+          for (const folder of replacedTenderFolders(plan.jobDirectory)) {
+            const name = basename(folder);
+            if (driveBinnedFolders.has(`${dayId}/${name}`)) continue;
+            const item = await drive.client.child(dayId, name, true);
+            if (item) await drive.client.binFile(item.id);
+            driveBinnedFolders.add(`${dayId}/${name}`);
           }
         } catch (error) {
           summary.problems.push(`Report sheet for ${plan.outputDate}: ${error instanceof Error ? error.message : String(error)}`);
@@ -2931,6 +3017,26 @@ function catchUpDocumentReading(): void {
   if (rows.length > 0) void readTenderDocuments(rows).catch((error) => console.error('[TenderAssist] document catch-up failed:', error));
 }
 setTimeout(catchUpDocumentReading, 20_000);
+
+/**
+ * Days searched again before a later search replaced the earlier one (before
+ * 0.7.4): at start-up, each such day's sheet is written again without the
+ * replaced search and its folders go to the Recycle Bin. "Upload everything
+ * saved so far" then bins them on Drive too.
+ */
+function retireReplacedSearches(): void {
+  const days = new Map<string, string>();
+  for (const job of jobs.listAll()) {
+    const plan = jobOutputs.getPlan(job.id);
+    if (plan && job.id !== activeJobId) days.set(resolve(plan.jobDirectory).toLocaleLowerCase(), job.id);
+  }
+  for (const jobId of days.values()) {
+    const plan = jobOutputs.getPlan(jobId);
+    if (!plan || !replacedTenderFolders(plan.jobDirectory).some((folder) => existsSync(folder))) continue;
+    publishStoredJob(jobId).catch((error) => console.error(`[TenderAssist] Could not clear the replaced search of ${plan.outputDate}:`, error));
+  }
+}
+setTimeout(retireReplacedSearches, 15_000);
 
 /** At most this many tender pages are reopened per check, soonest closing first, to keep runs short. */
 const WATCH_MAX_PER_CHECK = 40;
