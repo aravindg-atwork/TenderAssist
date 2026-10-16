@@ -67,6 +67,7 @@ const api: TenderAssistApi = {
   saveGoogleDrive: (input) => ipcRenderer.invoke('save-google-drive', input),
   connectGoogleDrive: () => ipcRenderer.invoke('connect-google-drive'),
   checkGoogleDrive: () => ipcRenderer.invoke('check-google-drive'),
+  chooseGoogleDriveFolder: () => ipcRenderer.invoke('choose-google-drive-folder'),
   disconnectGoogleDrive: () => ipcRenderer.invoke('disconnect-google-drive'),
   openGoogleDriveFolder: () => ipcRenderer.invoke('open-google-drive-folder'),
   getSignerStatus: () => ipcRenderer.invoke('get-signer-status'),

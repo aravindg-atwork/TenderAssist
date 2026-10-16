@@ -11,6 +11,12 @@ export interface GoogleDriveSettings {
   refreshTokenEncrypted: string | null;
   folderId: string;
   folderName: string;
+  /**
+   * The operator chose this folder in Google's folder chooser (in My Drive,
+   * shared with them, or in a shared drive), rather than TenderAssist making
+   * it by name. A chosen folder that is gone is never made again in My Drive.
+   */
+  folderPicked: boolean;
   accountEmail: string;
   connectedAt: string | null;
   /** SAVED: everything a search saves goes to Drive after the run. APPROVED: only tenders the operator approves. */
@@ -20,7 +26,7 @@ export interface GoogleDriveSettings {
 const KEY = 'google_drive';
 
 export const EMPTY_GOOGLE_DRIVE_SETTINGS: GoogleDriveSettings = {
-  clientId: '', clientSecretEncrypted: null, refreshTokenEncrypted: null, folderId: '', folderName: '', accountEmail: '', connectedAt: null, uploadMode: 'SAVED',
+  clientId: '', clientSecretEncrypted: null, refreshTokenEncrypted: null, folderId: '', folderName: '', folderPicked: false, accountEmail: '', connectedAt: null, uploadMode: 'SAVED',
 };
 
 export class GoogleDriveSettingsRepository {
@@ -39,6 +45,7 @@ export class GoogleDriveSettingsRepository {
         refreshTokenEncrypted: optional(saved.refreshTokenEncrypted),
         folderId: text(saved.folderId),
         folderName: text(saved.folderName),
+        folderPicked: saved.folderPicked === true,
         accountEmail: text(saved.accountEmail),
         connectedAt: optional(saved.connectedAt),
         uploadMode: saved.uploadMode === 'APPROVED' ? 'APPROVED' : 'SAVED',

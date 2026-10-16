@@ -88,6 +88,7 @@ import { extractTenderRequirements } from '../extraction/requirementExtractor.js
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { daySheetFileName, isDaySheet, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory, type PublishableTender, type ReportSheetMode } from '../publishing/jobPublisher.js';
 import { supersededRuns } from '../publishing/supersededRuns.js';
+import { chooseDriveFolder, projectNumberOf } from '../publishing/drivePicker.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
 import { driveFolderLink, driveFolderNameParts, driveFolderPath, GoogleDriveClient, GoogleDriveError, parseGoogleClientFile, signInWithGoogle, type DriveCredentials, type GoogleSignIn } from '../publishing/googleDrive.js';
 import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
@@ -1045,7 +1046,7 @@ ipcMain.handle('save-google-drive', async (_event, input: unknown): Promise<Goog
   const folderName = driveFolderNameParts(typeof value.folderName === 'string' ? value.folderName : '').join('/');
   if (folderName === current.folderName) return googleDriveStatus();
   // A new name means a new folder: found (or made) in My Drive when signed in, otherwise at the first upload.
-  googleDriveSettings.save({ ...googleDriveSettings.get(), folderName, folderId: '' });
+  googleDriveSettings.save({ ...googleDriveSettings.get(), folderName, folderId: '', folderPicked: false });
   const client = await googleDriveClient();
   if (client && folderName) await driveFolderFor(client);
   return googleDriveStatus();
@@ -1063,6 +1064,26 @@ ipcMain.handle('check-google-drive', async (): Promise<GoogleDriveStatus> => {
   const account = await client.account();
   googleDriveSettings.save({ ...googleDriveSettings.get(), accountEmail: account.email });
   if (googleDriveSettings.get().folderName) await driveFolderFor(client);
+  return googleDriveStatus();
+});
+
+/**
+ * Google's folder chooser, in the browser: the operator picks a folder they
+ * can edit in My Drive, shared with them, or in a shared drive, and uploads
+ * go there. Picking it is what lets TenderAssist (drive.file) use it.
+ */
+ipcMain.handle('choose-google-drive-folder', async (): Promise<GoogleDriveStatus> => {
+  const credentials = builtInGoogleClient();
+  if (!credentials?.pickerApiKey) throw new Error('This copy of TenderAssist cannot open Google Drive’s folder chooser. Type a folder name instead.');
+  const client = await googleDriveClient();
+  if (!client) throw new Error('Sign in to Google first.');
+  const picked = await chooseDriveFolder(
+    { apiKey: credentials.pickerApiKey, appId: projectNumberOf(credentials.clientId), accessToken: await client.pickerToken() },
+    async (url) => { await shell.openExternal(url); });
+  if (!picked) return googleDriveStatus();
+  // Checks it is a folder TenderAssist may now add files to (an Editor's, or a shared drive's Content manager's).
+  const folder = await client.folder(picked.id);
+  googleDriveSettings.save({ ...googleDriveSettings.get(), folderId: folder.id, folderName: folder.name || picked.name, folderPicked: true });
   return googleDriveStatus();
 });
 
@@ -2111,6 +2132,9 @@ async function driveFolderFor(client: GoogleDriveClient): Promise<string> {
       return settings.folderId;
     } catch (error) {
       if (!(error instanceof GoogleDriveError && error.status === 404)) throw error;
+      if (settings.folderPicked) {
+        throw new Error(`The Drive folder you chose, “${settings.folderName}”, is in the bin, deleted, or no longer shared with you. Choose a folder again in Settings → Upload to Google Drive.`);
+      }
     }
   }
   const parts = driveFolderNameParts(settings.folderName);
@@ -2130,6 +2154,8 @@ async function googleDriveStatus(): Promise<GoogleDriveStatus> {
     signInLink: googleSignInLink,
     folderId: settings.folderId,
     folderName: settings.folderName,
+    folderPicked: settings.folderPicked,
+    pickerAvailable: Boolean(builtInGoogleClient()?.pickerApiKey),
     accountEmail: settings.accountEmail,
     signedIn: driveSignInUsable(),
     encryptionAvailable: await safeStorage.isAsyncEncryptionAvailable(),
