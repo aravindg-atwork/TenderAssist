@@ -2,6 +2,10 @@
 
 Last updated: 12 Oct 2026. Pick up from **Next up**.
 
+## Fixed 16 Oct 2026 (not yet in an installer; not seen running)
+
+- **Shortlisted tenders' folders never reached Drive** (operator report, 16 Oct). The 13-10 and 14-10 GeM runs shortlisted 13 and 14 bids. Their documents and Eligibility.xlsx were saved locally, and the sheet on Drive listed them, but no folder was uploaded: since 0.5.1 only operator-approved tenders went. The owner chose (16 Oct): **Drive gets every tender the sheet keeps**, meaning TenderAssist's shortlist plus the operator's approvals. "Needs a look" and rejected tenders stay local. Code: `belongsOnDrive` in `main.ts` (Drive API upload and the Drive for desktop copy). Earlier days: Settings → Upload to Google Drive → "Upload everything saved so far".
+
 ## Done 12 Oct 2026 (not yet in an installer; unit-tested, not seen running)
 
 - **One Google sign-in for the key and Drive** (owner's call, 12 Oct). Activating the key asks `openid email drive.file`; the Drive part is kept once the key server accepts the key (`keepGoogleSignIn`, `activate-licence` in `main.ts`). Settings → Upload to Google Drive only needs a folder name. One client for both: `google-oauth-client.json` (`google-licence-client.json` dropped).

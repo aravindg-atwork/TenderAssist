@@ -1823,7 +1823,7 @@ async function collectDocuments(ctx: RunContext, jobId: string, authSessionId: s
       // Tenders approved in the Inbox before this run had their documents
       // collected just now, so they go to Drive straight away.
       reportDriveProblems(copyApprovedTendersToDrive(tenders.listForJob(jobId)));
-      // Drive gets the approved tenders and the report sheet; the rest wait for a decision.
+      // Drive gets the kept tenders and the report sheet; the ones needing a look wait for a decision.
       uploadRunToGoogleDrive(jobId);
       // The caller reports success, since more dates may follow in this sign-in.
       return result;
@@ -1873,10 +1873,23 @@ function selectionFor(jobId: string): string[] {
 // Lifecycles in which the operator has approved a tender.
 const APPROVED_LIFECYCLES: readonly string[] = ['APPROVED', 'DOCUMENTS_COLLECTED', 'ELIGIBILITY_REVIEWED', 'PREPARING'];
 
-/** Only tenders the operator approved go to Drive; ones waiting for a decision, or rejected, stay local. */
+/** Whether the operator approved the tender (on Today, Tenders, or in the run's review). */
 function isApprovedTender(tender: TenderRow): boolean {
   const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
   return lifecycle !== undefined && APPROVED_LIFECYCLES.includes(lifecycle);
+}
+
+/**
+ * Drive gets what the day's sheet lists as kept: tenders the operator
+ * approved, and ones TenderAssist shortlisted that the operator has not
+ * rejected (operator, 16 Oct: the sheet listed 14 shortlisted bids and Drive
+ * had none of their folders). Tenders needing a look, and rejected ones, stay local.
+ */
+function belongsOnDrive(tender: TenderRow): boolean {
+  if (isApprovedTender(tender)) return true;
+  const lifecycle = tender.opportunity_id ? opportunities.getById(tender.opportunity_id)?.lifecycle : undefined;
+  if (lifecycle === 'REJECTED') return false;
+  return (workflow.getReview(tender.id)?.decision ?? classifications.getFinalForTender(tender.id)) === 'KEEP';
 }
 
 const hasSavedDocuments = (tender: TenderRow) => workflow.listDocuments(tender.id).some((document) => document.state === 'DOWNLOADED');
@@ -1909,7 +1922,7 @@ function copyApprovedTendersToDrive(tenderRows: TenderRow[]): string[] {
   const problems: string[] = [];
   const sheetsCopied = new Set<string>();
   for (const tender of tenderRows) {
-    if (!isApprovedTender(tender) || isFiledElsewhere(tender)) continue;
+    if (!belongsOnDrive(tender) || isFiledElsewhere(tender)) continue;
     const portalId = runConfigurations.getForJob(tender.job_id)?.portalId ?? DEFAULT_PORTAL_ID;
     const driveRoot = publishingSettings.get(portalId).driveOutputRoot;
     const plan = jobOutputs.getPlan(tender.job_id);
@@ -2082,9 +2095,9 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
     }
     try {
       for (const tender of folderId ? tenderRows : []) {
-        // A tender waiting for the operator stays on this computer; it goes
-        // to Drive when approved (afterApproval), never when rejected.
-        if (!isApprovedTender(tender) || isFiledElsewhere(tender)) continue;
+        // A tender needing a look stays on this computer until approved
+        // (afterApproval); a rejected one never goes (belongsOnDrive).
+        if (!belongsOnDrive(tender) || isFiledElsewhere(tender)) continue;
         const plan = jobOutputs.getPlan(tender.job_id);
         const serialNumber = jobOutputs.findSerialNumber(tender.id);
         if (!plan || serialNumber === undefined) continue;
@@ -2145,7 +2158,7 @@ function uploadSavedTendersToGoogleDrive(tenderRows: TenderRow[]): void {
   if (tenderRows.length > 0) void uploadToGoogleDrive(tenderRows, tenderRows.map((tender) => ({ jobId: tender.job_id })), 'saved tenders upload');
 }
 
-/** After a run: the report sheet, and the tender folders already approved; tenders waiting for a decision stay local. */
+/** After a run: the report sheet, and the folders of the tenders kept on it; tenders needing a look stay local. */
 function uploadRunToGoogleDrive(jobId: string): void {
   void uploadToGoogleDrive(tenders.listForJob(jobId), [{ jobId }], 'run upload');
 }
@@ -2239,7 +2252,7 @@ function runsUploadToDrive(): boolean {
 
 function runFinishedMessage(counts: CollectedCounts, dateCount = 1, inSession = false): string {
   const dates = dateCount > 1 ? ` across ${dateCount} published dates` : '';
-  const drive = runsUploadToDrive() ? ` The report sheet is being uploaded to Google Drive; each tender goes there once you approve it.` : '';
+  const drive = runsUploadToDrive() ? ` The report sheet is being uploaded to Google Drive; shortlisted tenders go with their documents, and the rest once you approve them.` : '';
   if (counts.shortlisted + counts.needsReview === 0) return `No tender matched your filters${dates}. ${inSession ? 'See “This search” below for what was found and why; you can still approve one there.' : 'Open a run to see what was checked.'}${drive}`;
   const parts = [
     counts.shortlisted > 0 && `${counts.shortlisted} shortlisted`,

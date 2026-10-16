@@ -64,7 +64,7 @@ TenderAssist cannot see folders it did not make. If you already have a folder wi
   ```
 
 - **Report sheets**: one per website each day by default; every search of that website that day is on it. Settings → Folders → Report sheets → **One sheet for the day** puts every website on one sheet, with a Website column. Changing it rewrites saved days, on this computer and on Drive (old sheets go to Drive's bin).
-- Approved tenders go to Drive; tenders waiting for a decision stay on this computer, rejected ones never go.
+- Tenders kept on the day sheet go to Drive with their documents and Eligibility.xlsx: ones TenderAssist shortlisted and ones you approved. Tenders needing a look stay on this computer until you approve them; rejected ones never go.
 - Files saved later, for example by "Collect their documents" or a rewritten report sheet, are uploaded as well.
 - **"Upload everything saved so far"** in Settings sends everything already on the computer, including earlier days.
 - **Files already on Drive and unchanged are not sent again.** A changed file replaces the old one.
