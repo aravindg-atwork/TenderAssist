@@ -1,6 +1,23 @@
 # TenderAssist backlog
 
-Last updated: 12 Oct 2026. Pick up from **Next up**.
+Last updated: 21 Oct 2026. Pick up from **Next up**.
+
+## On dev, 21 Oct 2026 (not released; unit-tested, not yet seen running in the app)
+
+- **Fast start:** retender linking at start compared every tender with every other (57 s on 2,154 GeM bids, minutes in offices). Now only tenders sharing a reference or buyer are compared, written in one transaction: ~0.35 s, same 1,816 links (checked on the dev database).
+- **GeM reverse auctions closed by mistake:** an RA's PDF says "RA End Date/Time", which was not read, so the original bid's end date (days earlier) became its closing date and the decide screen said "Closed … ago". Read now; the original bid's end, opening and pre-bid dates never stand in for the RA's. RAs saved wrongly are corrected at start (and opened again if they closed only for that), noted as "Closing date corrected".
+- **Drive: "Open documents" opened the sheet again:** the sheet's relative folder link breaks on Drive. The copy uploaded to Drive links each tender's Drive folder ("on this computer only" when not there); kept in a cache so an unchanged sheet is not sent again.
+- **Today:** GeM bids outside the chosen categories are counted, never saved ("1,850 outside your categories were skipped"); those saved before stay off Today (Tenders → Rejected). The rule-reject step says why: "182 in your categories, but without your intent words", "12 with an excluded word".
+- **Drive stays automatic** (owner, 21 Oct): kept tenders still go up; one the operator rejects after it went up moves to Drive's bin (restorable; local folder kept). GeM's standard forms (GAR, "Undertaking of Competent Authority") are not sent, and a file the buyer attached under several names is sent once.
+- **Reading the documents:** new section reader (`src/extraction/qualificationSections.ts`) finds pre-qualification / eligibility criteria point by point, technical evaluation (A–D groups, marks), documents to submit, and GeM's "Buyer Added text based ATC clauses" (e.g. "only these EoI-shortlisted firms may bid"). Handles "Qualification/Eligibility/Evaluation Criteria", "Eligiblity", "A." and "PQ1:" headings, tables over page breaks, and numbered conditions with no heading. OCR now reads past 15 pages (up to 60) only to reach the criteria. Junk values stopped (EMD "Detail", contact "of"); GeM pre-bid date read; scope from the documents.
+- **Sheets:** Eligibility.xlsx groups the facts, keeps every field the website or bid PDF gave, and adds **Qualifications** (one row per criterion, with file and page) and **Do we qualify**. The approved sheet's Eligibility column says "Meets" / "Not met (2 of 9)" once the company facts are filled in. Older tenders are read again from saved text when their sheet is made again (`REQUIREMENTS_VERSION`).
+- **Settings → Your company** (turnover, years, staff, certificates, MSE/startup, projects) and **Do we qualify?** on every tender's file and the decide screen, not-met first; anything it cannot check is "Check", never guessed.
+- **Bid tab** on approved tenders: Preparing / Submitted / Not submitting / Won / Lost, and a checklist of what to prepare and upload (GeM's seller documents, the buyer's "Submit …" terms, each criterion's evidence, EMD), ticks kept. **Reminders** (Windows notifications) for a pre-bid meeting within a day and closing within 3 days and 1 day. **Reports → Your bids:** submitted, won, lost by category and intent word.
+- **`npm run check:reading -- <output folder> [--ocr] [--expected file.json]`** measures the reading on real saved tenders (9 Oct GeM folders on this PC: criteria found for 7 of 12; the rest are RAs or have no attached criteria).
+- **Tamil Nadu sign-in retyped the password every 3-5 s** while the operator typed the CAPTCHA (seen 21 Oct; also in 0.7.5): the refill compared the box with the saved password, but the page changes what the box holds. Now it refills only an emptied box.
+- **A search with no results table** counted as "0 tenders"; now only the portal's "No Open Tenders Found." does, anything else stops that search with a message.
+- **Tamil Nadu pages** (12 real ones from a 16 Oct run): one reader for the saved field block (`src/review/portalPage.ts`) leaves out table rows ("1: SBI Bank", ".pdf: …", document sizes such as "Tender Inviting Authority: 262.93") and the login lines; the **Cover Details list** (files to upload in each cover) goes to the Bid tab checklist and Eligibility.xlsx. Tender Value, Location, Pincode, pre-bid and EMD fill from the page.
+- **Still to do (reading plan):** Tamil Nadu tender documents (needs an approved tender's documents), Tamil Nadu page fields by section (needs a saved Tamil Nadu run to build against), criteria tables split into criterion / evidence columns, a hand-counted `--expected` set of 20–30 tenders.
 
 ## 0.7.5, 16 Oct 2026: choose an existing Drive folder
 
