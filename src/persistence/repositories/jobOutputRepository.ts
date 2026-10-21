@@ -82,6 +82,25 @@ export class JobOutputRepository {
     ).get(tenderId) as { serial_number: number } | undefined;
     if (existing) return existing.serial_number;
     const key = directoryKey(plan.jobDirectory);
+    // The same bid filed in this day folder by another run of the same
+    // website (the date searched again): this tender takes over its S.No and
+    // folder, so a bid kept twice has one folder.
+    const earlier = this.db.prepare(
+      `SELECT x.tender_id, x.serial_number FROM job_output_tenders x
+       JOIN tenders other ON other.id = x.tender_id
+       JOIN tenders self ON self.id = ?
+       LEFT JOIN job_run_configs otherRun ON otherRun.job_id = other.job_id
+       LEFT JOIN job_run_configs selfRun ON selfRun.job_id = self.job_id
+       WHERE x.directory_key = ? AND other.job_id <> self.job_id
+         AND other.tender_ref = self.tender_ref
+         AND COALESCE(other.tender_portal_id, '') = COALESCE(self.tender_portal_id, '')
+         AND COALESCE(otherRun.portal_id, '') = COALESCE(selfRun.portal_id, '')
+       ORDER BY x.serial_number DESC LIMIT 1`
+    ).get(tenderId, key) as { tender_id: string; serial_number: number } | undefined;
+    if (earlier) {
+      this.db.prepare('UPDATE job_output_tenders SET tender_id = ?, job_id = ? WHERE tender_id = ?').run(tenderId, plan.jobId, earlier.tender_id);
+      return earlier.serial_number;
+    }
     const { next } = this.db.prepare(
       'SELECT COALESCE(MAX(serial_number), 0) + 1 AS next FROM job_output_tenders WHERE directory_key = ?'
     ).get(key) as { next: number };

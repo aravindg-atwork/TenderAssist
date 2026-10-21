@@ -33,6 +33,11 @@ export interface ReportRow {
   eligibilityNotes: string;
   viewTenderLink: ReportLink | null;
   tenderDocumentLink: ReportLink | null;
+  /** GeM's PDF of this bid or RA: a web link, so the sheet can be shared. */
+  gemPdfLink: ReportLink | null;
+  /** For a GeM reverse auction, the bid it came from: its page and its PDF. */
+  originalBidLink: ReportLink | null;
+  originalBidPdfLink: ReportLink | null;
   /** The website's corrigenda for the tender: "1. DUE DATE EXTENSION (Date)". */
   corrigenda: string;
 }
@@ -53,6 +58,9 @@ export const REPORT_COLUMNS: readonly ReportColumn[] = [
   { header: 'Eligibility Notes', key: 'eligibilityNotes', width: 48 },
   { header: 'View Tender Link', key: 'viewTenderLink', width: 22 },
   { header: 'Tender Document Link', key: 'tenderDocumentLink', width: 22 },
+  { header: 'GeM PDF Link', key: 'gemPdfLink', width: 22 },
+  { header: 'Original Bid Link (for RA)', key: 'originalBidLink', width: 24 },
+  { header: 'Original Bid PDF (for RA)', key: 'originalBidPdfLink', width: 24 },
   { header: 'Corrigenda', key: 'corrigenda', width: 40 },
 ];
 
@@ -141,6 +149,10 @@ export function reportRow(input: ReportRowInput): ReportRow {
   const location = [field(fields, /^location$/), field(fields, /^pincode$/)].filter(Boolean).join(' - ') || tender.state_name || '';
   const title = field(fields, /^work description$/) || tender.title;
   const bidId = tender.tender_portal_id ?? '';
+  const bidType = field(fields, /^bid type$/);
+  const kind = /^direct reverse auction/i.test(bidType) ? 'DIRECT_RA' : /^reverse auction/i.test(bidType) || /^GEM\/\d{4}\/R\//i.test(tender.tender_ref) ? 'RA' : 'BID';
+  const parentBidId = field(fields, /^parent bid id$/);
+  const parentBidNumber = field(fields, /^parent bid$/);
   return {
     serialNumber: input.serialNumber,
     tdrNumber: gem ? tender.tender_ref : field(fields, /^tender id$/) || bidId || tender.tender_ref,
@@ -167,6 +179,15 @@ export function reportRow(input: ReportRowInput): ReportRow {
       : gem && bidId && /^GEM\/\d{4}\/B\//i.test(tender.tender_ref)
         ? { text: 'Download bid PDF', target: bidDocumentUrl({ id: bidId, kind: 'BID' }) }
         : null,
+    gemPdfLink: gem && bidId
+      ? { text: kind === 'BID' ? 'Bid PDF on GeM' : 'RA PDF on GeM', target: bidDocumentUrl({ id: bidId, kind }) }
+      : null,
+    originalBidLink: gem && kind === 'RA' && parentBidId
+      ? { text: `View ${parentBidNumber || 'original bid'}`, target: bidPageUrl(parentBidId) }
+      : null,
+    originalBidPdfLink: gem && kind === 'RA' && parentBidId
+      ? { text: 'Original bid PDF', target: bidDocumentUrl({ id: parentBidId, kind: 'BID' }) }
+      : null,
     corrigenda: corrigendaSummary(tenderPageFacts(tender.detail_text).corrigenda),
   };
 }

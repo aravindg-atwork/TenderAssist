@@ -173,6 +173,8 @@ describe('the app’s own Google sign-in credential', () => {
   it('is read from the file Google Cloud gives for a Desktop app', () => {
     expect(parseGoogleClientFile('{"installed":{"client_id":"abc.apps.googleusercontent.com","client_secret":"GOCSPX-x","redirect_uris":["http://localhost"]}}'))
       .toEqual({ clientId: 'abc.apps.googleusercontent.com', clientSecret: 'GOCSPX-x' });
+    expect(parseGoogleClientFile('{"installed":{"client_id":"abc.apps.googleusercontent.com","client_secret":"GOCSPX-x","picker_api_key":" AIza-key "}}'))
+      .toEqual({ clientId: 'abc.apps.googleusercontent.com', clientSecret: 'GOCSPX-x', pickerApiKey: 'AIza-key' });
     expect(parseGoogleClientFile('{"installed":{"client_id":"abc"}}')).toBeNull();
     expect(parseGoogleClientFile('not json')).toBeNull();
   });

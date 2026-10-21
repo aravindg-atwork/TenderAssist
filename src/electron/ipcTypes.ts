@@ -225,8 +225,12 @@ export interface GoogleDriveStatus {
   signInLink: string | null;
   /** Empty until the folder is found or made in My Drive. */
   folderId: string;
-  /** The folder name typed in Settings ("Tenders" or "Office/Tenders"). */
+  /** The folder name typed in Settings ("Tenders" or "Office/Tenders"), or the chosen folder's name. */
   folderName: string;
+  /** The folder was chosen in Google's folder chooser (My Drive, shared with me, or a shared drive), not made by name. */
+  folderPicked: boolean;
+  /** This build can open Google's folder chooser (it has a Picker API key). */
+  pickerAvailable: boolean;
   /** The Google account uploads are made as, once signed in. */
   accountEmail: string;
   signedIn: boolean;
@@ -370,6 +374,8 @@ export interface TenderAssistApi {
   /** Opens Google sign-in in the browser and waits for it to finish. */
   connectGoogleDrive(): Promise<GoogleDriveStatus>;
   checkGoogleDrive(): Promise<GoogleDriveStatus>;
+  /** Opens Google's folder chooser in the browser; uploads go to the folder picked there. */
+  chooseGoogleDriveFolder(): Promise<GoogleDriveStatus>;
   disconnectGoogleDrive(): Promise<GoogleDriveStatus>;
   /** Opens the open question's own document (a GeM bid PDF) in the browser. */
   openQuestionDocument(questionId: string): Promise<void>;

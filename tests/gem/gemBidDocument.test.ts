@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BID_TEXT } from './bidTextFixture.js';
 import { attachmentsFromBid, bidSpecificText, factsFromBidText, readableBidText, rupees } from '../../src/gem/gemBidDocument.js';
+import { gemLocation } from '../../src/gem/gemRunner.js';
 
 const LINKS = [
   'https://bidplus.gem.gov.in/resources/upload_nas/SepQ326/bidding/excel/bid-9843119/1789541602.xlsx',
@@ -39,7 +40,14 @@ describe('reading a GeM bid PDF', () => {
       totalQuantity: null,
       preBidAt: null,
       deliveryPincode: null,
+      deliveryCity: null,
     });
+  });
+
+  it('takes the city when a defence buyer hides the consignee address', () => {
+    const text = 'Consignees/Reporting Officer and Quantity S.No. /Consignee Reporting/Officer /Address Quantity /Additional Requirement 1 *********** ***********KANPUR CITY Project / Lumpsum Based N/A';
+    expect(factsFromBidText(text)).toMatchObject({ deliveryPincode: null, deliveryCity: 'KANPUR CITY' });
+    expect(gemLocation({ ministry: 'Ministry Of Defence', deliveryPincode: null, deliveryCity: 'Ernakulam' })).toBe('Ernakulam');
   });
 
   it('names the buyer’s attachments as the bid names them, and skips general GeM pages', () => {

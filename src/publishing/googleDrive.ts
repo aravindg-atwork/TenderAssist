@@ -28,6 +28,13 @@ const RETRY_DELAYS_MS = [1_000, 3_000, 8_000, 20_000];
 export interface DriveCredentials {
   clientId: string;
   clientSecret: string;
+  /**
+   * An API key of the same Google Cloud project with the Google Picker API
+   * on ("picker_api_key" in the client file). Without one, a folder can only
+   * be made by name; with one, the operator can choose any folder they can
+   * edit, in My Drive, shared with them, or in a shared drive.
+   */
+  pickerApiKey?: string;
 }
 
 export class GoogleDriveError extends Error {
@@ -48,7 +55,9 @@ export function parseGoogleClientFile(text: string): DriveCredentials | null {
     const client = parsed.installed ?? parsed.web ?? parsed;
     const clientId = typeof client.client_id === 'string' ? client.client_id.trim() : '';
     const clientSecret = typeof client.client_secret === 'string' ? client.client_secret.trim() : '';
-    return clientId && clientSecret ? { clientId, clientSecret } : null;
+    const pickerApiKey = typeof client.picker_api_key === 'string' ? client.picker_api_key.trim() : '';
+    if (!clientId || !clientSecret) return null;
+    return pickerApiKey ? { clientId, clientSecret, pickerApiKey } : { clientId, clientSecret };
   } catch {
     return null;
   }
@@ -241,7 +250,7 @@ export class GoogleDriveClient {
   async child(parentId: string, name: string, folderOnly = false): Promise<DriveItem | null> {
     const q = [`${quoted(parentId)} in parents`, `name = ${quoted(name)}`, 'trashed = false', ...(folderOnly ? [`mimeType = '${FOLDER_TYPE}'`] : [])].join(' and ');
     const list = await this.json<{ files?: DriveItem[] }>(
-      `${API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,md5Checksum)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+      `${API}/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,md5Checksum)&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives`);
     return list.files?.[0] ?? null;
   }
 
@@ -252,7 +261,7 @@ export class GoogleDriveClient {
     let pageToken = '';
     do {
       const list = await this.json<{ files?: DriveItem[]; nextPageToken?: string }>(
-        `${API}/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,md5Checksum)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`);
+        `${API}/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType,md5Checksum)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`);
       found.push(...(list.files ?? []));
       pageToken = list.nextPageToken ?? '';
     } while (pageToken);
@@ -313,6 +322,11 @@ export class GoogleDriveClient {
       }
     }
     return report;
+  }
+
+  /** A short-lived access token, for Google's folder chooser (drivePicker.ts). */
+  async pickerToken(): Promise<string> {
+    return this.accessToken();
   }
 
   private async accessToken(): Promise<string> {

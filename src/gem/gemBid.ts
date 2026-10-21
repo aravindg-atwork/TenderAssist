@@ -51,6 +51,8 @@ export interface GemBid {
   quantity: number | null;
   /** For a reverse auction, the bid it came from. */
   parentBidNumber: string | null;
+  /** For a reverse auction, GeM's internal id of the bid it came from, for that bid's page and PDF. */
+  parentBidId?: string | null;
   cancelled: boolean;
   highValue: boolean;
   rateContract: boolean;
@@ -114,6 +116,7 @@ export function parseGemBid(doc: GemListDoc): GemBid | null {
     endsAt: istWallClock(first(doc.final_end_date_sort)),
     quantity: typeof first(doc.b_total_quantity) === 'number' ? first(doc.b_total_quantity)! : null,
     parentBidNumber: text(doc.b_bid_number_parent),
+    parentBidId: first(doc.b_id_parent) ? String(first(doc.b_id_parent)) : null,
     cancelled: status === 3 || status === 5,
     highValue: first(doc.is_high_value) === true,
     rateContract: first(doc.is_rc_bid) === 1,

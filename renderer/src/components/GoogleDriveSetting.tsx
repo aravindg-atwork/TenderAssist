@@ -13,9 +13,11 @@ function todayOnDrive(): { month: string; day: string } {
 }
 
 /**
- * Upload tenders to Google Drive: type a folder name. TenderAssist makes the
- * folder in My Drive (month and day folders inside), signed in with the same
- * Google account that activated the key.
+ * Upload tenders to Google Drive: choose a folder the operator already has
+ * (My Drive, shared with them, or a shared drive) in Google's own folder
+ * chooser, or type a name and TenderAssist makes the folder in My Drive.
+ * Month and day folders go inside, signed in with the Google account that
+ * activated the key.
  */
 export function GoogleDriveSetting() {
   const [status, setStatus] = useState<GoogleDriveStatus | null>(null);
@@ -53,13 +55,16 @@ export function GoogleDriveSetting() {
   if (!status) return null;
   const nameChanged = folderName.trim() !== status.folderName;
   const shownName = folderName.trim() || 'your folder';
+  // Where the folder is, as the operator knows it.
+  const place = status.folderPicked && !nameChanged ? status.folderName : `My Drive / ${shownName}`;
+  const choose = () => act('choose', () => window.tenderAssist.chooseGoogleDriveFolder(), 'Folder chosen. Tenders are uploaded there from now on.');
   const { month, day } = todayOnDrive();
 
   return (
     <fieldset className="settings-fieldset">
-      <legend>Upload to Google Drive<InfoTip label="the Google Drive upload">TenderAssist uses the Google account that activated your key. It makes the folder you name in that account’s My Drive and can only see the files it made itself, never the rest of your Drive. Share the folder in Drive with colleagues as you like.</InfoTip></legend>
+      <legend>Upload to Google Drive<InfoTip label="the Google Drive upload">TenderAssist uses the Google account that activated your key. It can only see the folder you choose or name, and the files it makes there, never the rest of your Drive. A folder shared with you, or in a shared drive, works too if you can add files to it.</InfoTip></legend>
       <p className="field-helper">
-        Type a folder name. TenderAssist makes that folder in your Google Drive and, after every search, uploads each approved tender’s folder
+        Choose the Drive folder tenders go to, or type a name for a new one. After every search, TenderAssist uploads each kept tender’s folder
         (documents and eligibility sheet) and the day’s report sheet into it, a folder for each month and inside it a folder for each day.
         Files already uploaded are not sent again.
       </p>
@@ -68,13 +73,24 @@ export function GoogleDriveSetting() {
       ) : status.signedIn ? (
         <p className="notice notice--done" role="status">
           Signed in as <strong>{status.accountEmail || 'your Google account'}</strong>
-          {status.folderName ? <>. Uploading to <strong>My Drive / {status.folderName}</strong>.</> : '. Type a folder name below to start uploading.'}
+          {status.folderName
+            ? <>. Uploading to <strong>{status.folderPicked ? status.folderName : `My Drive / ${status.folderName}`}</strong>{status.folderPicked ? ' (the folder you chose)' : ''}.</>
+            : '. Choose a folder or type a folder name below to start uploading.'}
           {status.lastUpload && ` Last upload ${absoluteDateTime(status.lastUpload.at)}: ${status.lastUpload.uploaded} uploaded${status.lastUpload.failed ? `, ${status.lastUpload.failed} not uploaded` : ''}.`}
         </p>
       ) : (
         <p className="hint">Not signed in to Google. The Google account that activated your key is used for Drive; sign in again below if it was signed out.</p>
       )}
-      <label className="field field--wide" htmlFor="drive-folder-name"><span>Folder name in your Google Drive</span>
+      {status.pickerAvailable && (
+        <div className="now__actions">
+          <button type="button" className="btn btn--primary" disabled={busy !== null || !status.signedIn}
+            onClick={choose}>
+            {busy === 'choose' ? 'Choose the folder in your browser…' : status.folderPicked ? 'Choose another folder in Drive' : 'Choose a folder in Drive'}
+          </button>
+          <span className="hint">A folder you already have: in My Drive, shared with you, or in a shared drive.{!status.signedIn && ' Sign in to Google first.'}</span>
+        </div>
+      )}
+      <label className="field field--wide" htmlFor="drive-folder-name"><span>{status.pickerAvailable ? 'Or type a name for a new folder in My Drive' : 'Folder name in your Google Drive'}</span>
         <input id="drive-folder-name" type="text" value={folderName} maxLength={240} onChange={(event) => setFolderName(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && nameChanged && busy === null) {
@@ -85,8 +101,10 @@ export function GoogleDriveSetting() {
           placeholder="Tenders 2026-27" disabled={!status.available} />
       </label>
       <p className="hint">
-        On Drive: My Drive / {shownName} / {month} / {day} / <em>each tender’s folder</em> and the day’s report sheet.
-        If you already have a folder with this name, TenderAssist makes its own next to it: it can only see folders it made.
+        On Drive: {place} / {month} / {day} / <em>each tender’s folder</em> and the day’s report sheet.
+        {status.pickerAvailable
+          ? <>A name makes a new folder, even if you already have one called that. To use a folder you already have, or one shared with you, choose it in Drive instead.</>
+          : <>If you already have a folder with this name, TenderAssist makes its own next to it: it can only see folders it made.</>}
       </p>
       <div className="now__actions">
         {nameChanged && (
@@ -125,6 +143,9 @@ export function GoogleDriveSetting() {
           </>
         )}
       </div>
+      {busy === 'choose' && (
+        <p className="hint" role="status">Google Drive’s folder chooser opened in your browser. Pick the folder, then select <strong>Select</strong>. Nothing changes if you close it.</p>
+      )}
       {status.signedIn && status.folderName && (
         <p className="hint">
           <button type="button" className="btn btn--quiet btn--small" disabled={busy !== null}

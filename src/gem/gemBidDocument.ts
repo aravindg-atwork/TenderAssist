@@ -35,6 +35,8 @@ export interface GemDocumentFacts {
   preBidAt: string | null;
   /** The PIN code of the first delivery (consignee) address. */
   deliveryPincode: string | null;
+  /** The consignee's city, when the buyer hides the address (defence bids). */
+  deliveryCity: string | null;
 }
 
 export interface GemAttachment {
@@ -115,6 +117,8 @@ export function factsFromBidText(text: string): GemDocumentFacts {
     totalQuantity: after(flat, /\/Total Quantity/, /([\d,]+)/),
     preBidAt: after(flat, /Pre-Bid Date and Time/, /[^\d]{0,160}?(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})/),
     deliveryPincode: /Consignee[\s\S]{0,600}?\b(\d{6})\s*,/i.exec(flat)?.[1] ?? null,
+    // Defence buyers hide the consignee's name and address ("*********** ***********") and leave only the city.
+    deliveryCity: /Consignee[\s\S]{0,600}?\*{3,}\s*\*{3,}\s*([A-Za-z][A-Za-z .'()-]{1,40}?)\s+(?=Project\b|Lumpsum\b|N\/A\b|\d)/i.exec(flat)?.[1].trim() ?? null,
   };
 }
 
