@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p renderer/tsconfig.json",
     "verify:auth": "node dist/scripts/manualAuthVerification.js",
+    "check:reading": "node dist/scripts/readingCheck.js",
     "renderer:build": "vite build --config renderer/vite.config.ts",
     "electron": "npm run build && npm run renderer:build && electron .",
     "package": "npm run build && npm run renderer:build && electron-builder --dir",

@@ -46,8 +46,26 @@ export interface TenderSummary {
   related: RelatedTender[];
 }
 
+/**
+ * Why the rules rejected a tender, for the one-step check on Today:
+ * in a chosen category but without an intent word, with an excluded word, or else.
+ */
+export type RuleRejectKind = 'NO_INTENT' | 'EXCLUDED' | 'OTHER';
+
 export interface InboxItem extends TenderSummary {
   group: InboxGroup;
+  /** For a rule reject only. */
+  rejectKind?: RuleRejectKind;
+}
+
+/** The screening check that decided a reject, by its gates. */
+function ruleRejectKind(row: InboxRow): RuleRejectKind | 'OUTSIDE_CATEGORIES' {
+  const gates = parseScreenedGates(row.screening_json);
+  const failed = (gate: string) => gates.find((entry) => entry.gate === gate && entry.result === 'REJECT');
+  if (failed('G2')) return 'OUTSIDE_CATEGORIES';
+  if (failed('G4')) return 'EXCLUDED';
+  if (failed('G3')?.reasonCode === 'NO_INTENT_KEYWORD_MATCH') return 'NO_INTENT';
+  return 'OTHER';
 }
 
 export interface InboxView {
@@ -65,7 +83,9 @@ function groupFor(row: InboxRow): InboxGroup | null {
   const reopenedByOperator = row.reopened_at !== null && (row.screening_at === null || row.reopened_at >= row.screening_at);
   if (row.recommendation === 'REJECT' && !reopenedByOperator) {
     // Auto-rejects stay visible until their run is acknowledged; after
-    // that they live only under Tenders → Rejected.
+    // that they live only under Tenders → Rejected. Tenders outside the chosen
+    // categories never come to Today (GeM's thousands a day): only there.
+    if (ruleRejectKind(row) === 'OUTSIDE_CATEGORIES') return null;
     return row.screening_job_reviewed_at ? null : 'AUTO_REJECTED';
   }
   return 'UNCERTAIN';
@@ -136,6 +156,7 @@ function toItem(row: InboxRow, group: InboxGroup, related: RelatedTender[], chan
     ...summary,
     group,
     explanation: group === 'CHANGED' ? changes() ?? 'Changed since your decision: dates, value, or a corrigendum.' : summary.explanation,
+    ...(group === 'AUTO_REJECTED' ? { rejectKind: ruleRejectKind(row) as RuleRejectKind } : {}),
   };
 }
 

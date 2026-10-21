@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { CompanyProfileSetting } from './CompanyProfileSetting';
 import type { SettingsSection } from '../../../src/electron/ipcTypes';
 import { TextSizeSetting } from './TextSizeSetting';
 import { GoogleDriveSetting } from './GoogleDriveSetting';
@@ -275,7 +276,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   };
 
   // One section at a time: the side list switches between them.
-  const [active, setActive] = useState<'look' | 'login' | 'signer' | 'folders' | 'display' | 'speed' | 'updates' | 'licence'>('look');
+  const [active, setActive] = useState<'look' | 'company' | 'login' | 'signer' | 'folders' | 'display' | 'speed' | 'updates' | 'licence'>('look');
   useEffect(() => {
     if (focusRequest?.section === 'relevance') setActive('look');
     if (focusRequest?.section === 'folders') setActive('folders');
@@ -293,7 +294,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
 
   const canSave = !saving && Boolean(credentialSettings && publishing && pacing);
   const SECTIONS = [
-    ['look', 'What to look for'], ['login', 'Portal login'], ['signer', 'DSC signer'], ['folders', 'Folders'],
+    ['look', 'What to look for'], ['company', 'Your company'], ['login', 'Portal login'], ['signer', 'DSC signer'], ['folders', 'Folders'],
     ['display', 'Display'], ['speed', 'Speed'], ['updates', 'Updates'], ['licence', 'Licence'],
   ] as const;
 
@@ -369,6 +370,8 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             <p className="hint">Suggestions are only added when you select Add, then Save changes.</p>
           )}
         </section>
+
+        <section id="settings-company" hidden={active !== 'company'} className="block"><CompanyProfileSetting /></section>
 
         <section id="settings-login" hidden={active !== 'login'} className="block">
           <h2>Portal login<InfoTip label="the portal login">Your login ID and password for the tender website. At sign-in TenderAssist fills them in; you still type the CAPTCHA and your DSC PIN yourself. The password is locked to your Windows account and is never shown again. GeM needs no login.</InfoTip></h2>

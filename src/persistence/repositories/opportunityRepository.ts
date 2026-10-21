@@ -17,7 +17,9 @@ export type OpportunityActor = 'automation' | 'operator';
 export type OpportunityEventKind =
   | 'SEEN' | 'SCREENED' | 'CHANGED' | 'CORRIGENDUM'
   | 'APPROVED' | 'REJECTED' | 'DEFERRED' | 'REOPENED'
-  | 'DOCUMENTS_COLLECTED' | 'EXPIRED' | 'CANCELLED' | 'ACKNOWLEDGED' | 'LINK_DISMISSED' | 'NOTE';
+  | 'DOCUMENTS_COLLECTED' | 'EXPIRED' | 'CANCELLED' | 'ACKNOWLEDGED' | 'LINK_DISMISSED' | 'NOTE' | 'PROGRESS';
+/** The steps the bidder marks after approving a tender. */
+export type BidProgress = 'PREPARING' | 'SUBMITTED' | 'NOT_SUBMITTED' | 'WON' | 'LOST';
 export type OpportunityLinkKind = 'POSSIBLE_RETENDER';
 
 export interface OpportunityRow {
@@ -338,6 +340,11 @@ export class OpportunityRepository {
     this.insertEvent(opportunityId, 'NOTE', actor, { ...context, note }, {});
   }
 
+  /** The bidder's progress on an approved tender: preparing, submitted or not, then won or lost. */
+  markProgress(opportunityId: string, to: BidProgress, context: EventContext = {}): OpportunityRow {
+    return this.transition(opportunityId, to, 'PROGRESS', 'operator', context, { to });
+  }
+
   markDocumentsCollected(opportunityId: string, context: EventContext = {}, data: Record<string, unknown> = {}): OpportunityRow {
     return this.transition(opportunityId, 'DOCUMENTS_COLLECTED', 'DOCUMENTS_COLLECTED', 'automation', context, data);
   }
@@ -385,6 +392,19 @@ export class OpportunityRepository {
     return this.db.prepare(
       `SELECT * FROM opportunity_links WHERE from_opportunity_id = ? AND to_opportunity_id = ? AND kind = 'POSSIBLE_RETENDER'`
     ).get(fromId, toId) as unknown as OpportunityLinkRow;
+  }
+
+  /** Many retender suggestions, newer first in each pair, in one transaction. */
+  linkPossibleRetenders(pairs: ReadonlyArray<readonly [fromId: string, toId: string]>, at = new Date().toISOString()): void {
+    if (pairs.length === 0) return;
+    const insert = this.db.prepare(
+      `INSERT INTO opportunity_links (id, workspace_id, from_opportunity_id, to_opportunity_id, kind, created_at)
+       VALUES (?, ?, ?, ?, 'POSSIBLE_RETENDER', ?)
+       ON CONFLICT (from_opportunity_id, to_opportunity_id, kind) DO NOTHING`
+    );
+    this.inTransaction(() => {
+      for (const [fromId, toId] of pairs) insert.run(randomUUID(), this.workspaceId, fromId, toId, at);
+    });
   }
 
   /** Every retender suggestion in the workspace. */
@@ -449,6 +469,25 @@ export class OpportunityRepository {
   fillClosingDate(opportunityId: string, closingDate: string): void {
     this.db.prepare('UPDATE opportunities SET closing_date = ?, closing_at = ? WHERE id = ? AND closing_date IS NULL')
       .run(closingDate, toClosingAt(closingDate), opportunityId);
+  }
+
+  /**
+   * Puts right a closing date TenderAssist read wrongly (not a change on the
+   * portal, so the operator is not told it changed). A tender that closed only
+   * because of the wrong date is open again, as it was before.
+   */
+  correctClosingDate(opportunityId: string, closingDate: string, now = new Date()): void {
+    this.inTransaction(() => {
+      const opportunity = this.require(opportunityId);
+      if (opportunity.closing_date === closingDate) return;
+      const closingAt = toClosingAt(closingDate);
+      const at = now.toISOString();
+      const reopen = opportunity.lifecycle === 'EXPIRED' && closingAt !== null && Date.parse(closingAt) > now.getTime();
+      const lifecycle = reopen ? this.lifecycleBeforeExpiry(opportunityId) ?? 'SCREENED' : opportunity.lifecycle;
+      this.db.prepare('UPDATE opportunities SET closing_date = ?, closing_at = ?, lifecycle = ?, updated_at = ? WHERE id = ?')
+        .run(closingDate, closingAt, lifecycle, at, opportunityId);
+      this.insertEvent(opportunityId, 'CHANGED', 'automation', { at }, { corrected: { closingDate: { from: opportunity.closing_date, to: closingDate } }, reopenedTo: reopen ? lifecycle : null });
+    });
   }
 
   /** What an expired tender was before it expired (approved, decide later, ...); null if it never expired. */

@@ -4,7 +4,7 @@ import type { TenderWorkflowRepository } from '../persistence/repositories/tende
 import type { OpportunityRepository } from '../persistence/repositories/opportunityRepository.js';
 import { canTransition, DECISION_TARGETS, type OperatorDecision } from '../state/opportunityLifecycle.js';
 import { screeningEvidence } from '../review/tenderExplanation.js';
-import { retenderReason } from '../review/relatedTenders.js';
+import { possibleRetenderPairs } from '../review/relatedTenders.js';
 import { applyPortalCorrigenda } from '../review/corrigenda.js';
 import { tenderPageFacts } from '../review/watchedTenders.js';
 
@@ -81,19 +81,12 @@ export function linkAllPossibleRetenders(deps: Pick<OpportunitySyncDeps, 'opport
  * suggestion: the two records stay separate.
  */
 export function linkPossibleRetenders(deps: Pick<OpportunitySyncDeps, 'opportunities'>, portalId: string, opportunityIds: Iterable<string>): void {
-  const all = deps.opportunities.list({ portalId });
-  const byId = new Map(all.map((row) => [row.id, row]));
-  for (const id of opportunityIds) {
-    const current = byId.get(id);
-    if (!current) continue;
-    for (const other of all) {
-      if (other.id === current.id || !retenderReason(current, other)) continue;
-      const currentIsNewer = current.first_seen_at > other.first_seen_at
-        || (current.first_seen_at === other.first_seen_at && current.identity_key > other.identity_key);
-      if (currentIsNewer) deps.opportunities.linkPossibleRetender(current.id, other.id);
-      else deps.opportunities.linkPossibleRetender(other.id, current.id);
-    }
-  }
+  const pairs = possibleRetenderPairs(deps.opportunities.list({ portalId }), opportunityIds);
+  deps.opportunities.linkPossibleRetenders(pairs.map(([current, other]) => {
+    const currentIsNewer = current.first_seen_at > other.first_seen_at
+      || (current.first_seen_at === other.first_seen_at && current.identity_key > other.identity_key);
+    return currentIsNewer ? [current.id, other.id] : [other.id, current.id];
+  }));
 }
 
 /**

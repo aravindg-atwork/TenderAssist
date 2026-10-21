@@ -42,23 +42,82 @@ function similarity(a: Set<string>, b: Set<string>): number {
   return shared / (a.size + b.size - shared);
 }
 
-function sameBuyer(a: Comparable, b: Comparable): boolean {
-  const department = normalize(a.department);
-  if (department && department === normalize(b.department)) return true;
-  const organisation = normalize(a.organisation_chain);
-  return Boolean(organisation) && organisation === normalize(b.organisation_chain);
+/** A tender's matching facts, worked out once. */
+interface Prepared<T extends Comparable> {
+  row: T;
+  reference: string | null;
+  department: string;
+  organisation: string;
+  words: Set<string>;
+}
+
+function prepare<T extends Comparable>(row: T): Prepared<T> {
+  return {
+    row,
+    reference: meaningfulReference(row.tender_ref),
+    department: normalize(row.department),
+    organisation: normalize(row.organisation_chain),
+    words: titleWords(row.title),
+  };
+}
+
+function reasonBetween(a: Prepared<Comparable>, b: Prepared<Comparable>): RetenderReason | null {
+  if (a.row.portal_id !== b.row.portal_id || a.row.identity_key === b.row.identity_key) return null;
+  if (a.reference && a.reference === b.reference) return 'SAME_REFERENCE';
+  const sameBuyer = (a.department && a.department === b.department) || (a.organisation && a.organisation === b.organisation);
+  if (!sameBuyer) return null;
+  const smaller = Math.min(a.words.size, b.words.size);
+  if (smaller < MIN_TITLE_WORDS) return null;
+  // Shared words cannot exceed the smaller title, so titles of very different length never reach the bar.
+  if (smaller / Math.max(a.words.size, b.words.size) < MIN_TITLE_SIMILARITY) return null;
+  return similarity(a.words, b.words) >= MIN_TITLE_SIMILARITY ? 'SIMILAR_TITLE' : null;
 }
 
 /** Why two tenders look related, or null. Same Tender ID is identity, not a retender. */
 export function retenderReason(a: Comparable, b: Comparable): RetenderReason | null {
-  if (a.portal_id !== b.portal_id || a.identity_key === b.identity_key) return null;
-  const reference = meaningfulReference(a.tender_ref);
-  if (reference && reference === meaningfulReference(b.tender_ref)) return 'SAME_REFERENCE';
-  if (!sameBuyer(a, b)) return null;
-  const wordsA = titleWords(a.title);
-  const wordsB = titleWords(b.title);
-  if (Math.min(wordsA.size, wordsB.size) < MIN_TITLE_WORDS) return null;
-  return similarity(wordsA, wordsB) >= MIN_TITLE_SIMILARITY ? 'SIMILAR_TITLE' : null;
+  return reasonBetween(prepare(a), prepare(b));
+}
+
+/**
+ * Every pair of `rows` that look related, where at least one of the pair is
+ * in `focusIds`; each pair once. Only tenders that share a reference or a
+ * buyer are compared, so thousands of tenders take moments, not minutes.
+ */
+export function possibleRetenderPairs<T extends Comparable & { id: string }>(rows: readonly T[], focusIds: Iterable<string>): Array<[T, T]> {
+  const prepared = new Map(rows.map((row) => [row.id, prepare(row)]));
+  const buckets = new Map<string, Prepared<T>[]>();
+  const add = (key: string, entry: Prepared<T>) => {
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(entry); else buckets.set(key, [entry]);
+  };
+  for (const entry of prepared.values()) {
+    if (entry.reference) add(`r:${entry.reference}`, entry);
+    if (entry.department) add(`d:${entry.department}`, entry);
+    if (entry.organisation) add(`o:${entry.organisation}`, entry);
+  }
+  const pairs: Array<[T, T]> = [];
+  // A focus tender already done has met every tender it shares a bucket with.
+  const finished = new Set<Prepared<T>>();
+  for (const id of focusIds) {
+    const current = prepared.get(id);
+    if (!current || finished.has(current)) continue;
+    const met = new Set<Prepared<T>>([current]);
+    const keys = [
+      current.reference && `r:${current.reference}`,
+      current.department && `d:${current.department}`,
+      current.organisation && `o:${current.organisation}`,
+    ];
+    for (const key of keys) {
+      if (!key) continue;
+      for (const other of buckets.get(key) ?? []) {
+        if (met.has(other) || finished.has(other)) continue;
+        met.add(other);
+        if (reasonBetween(current, other)) pairs.push([current.row, other.row]);
+      }
+    }
+    finished.add(current);
+  }
+  return pairs;
 }
 
 export const RETENDER_REASON_TEXT: Record<RetenderReason, string> = {

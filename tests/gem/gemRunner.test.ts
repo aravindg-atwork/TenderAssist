@@ -84,9 +84,11 @@ describe('a GeM run for one date', () => {
 
     expect(result.outcome).toBe('SUCCESS');
     expect(jobs.getById(jobId)!.state).toBe('SHORTLISTED');
-    expect(tenders.listForJob(jobId).map((tender) => tender.tender_ref).sort()).toEqual(['GEM/2026/B/1', 'GEM/2026/B/2', 'GEM/2026/B/3', 'GEM/2026/B/4']);
+    expect(tenders.listForJob(jobId).map((tender) => tender.tender_ref).sort()).toEqual(['GEM/2026/B/1', 'GEM/2026/B/3', 'GEM/2026/B/4']);
     expect(finalFor('GEM/2026/B/1')).toBe('KEEP');
-    expect(finalFor('GEM/2026/B/2')).toBe('REJECT'); // not in your categories
+    // Not in your categories: counted, never saved, so it never reaches Today.
+    expect(tenders.findByJobAndRef(jobId, 'GEM/2026/B/2')).toBeUndefined();
+    expect(result.statusMessage).toContain('1 outside your categories were skipped.');
     expect(finalFor('GEM/2026/B/3')).toBe('REJECT'); // excluded word in the title
     expect(finalFor('GEM/2026/B/4')).toBe('REJECT'); // read, no intent word
     // Only bids in your categories without an excluded word are read.
@@ -165,7 +167,7 @@ describe('a GeM run for one date', () => {
       const result = await runGemDate(run, jobId, WORDS, () => {});
       expect(finalFor('GEM/2026/B/20')).toBe('KEEP');
       expect(tenders.findByJobAndRef(jobId, 'GEM/2026/B/21')).toBeUndefined();
-      expect(finalFor('GEM/2026/B/1')).toBe('REJECT');
+      expect(tenders.findByJobAndRef(jobId, 'GEM/2026/B/1')).toBeUndefined();
       expect(result.statusMessage).toContain('1 more open bid has your search words');
     });
 

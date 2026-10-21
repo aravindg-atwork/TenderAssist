@@ -312,12 +312,17 @@ export class GoogleDriveClient {
   }
 
   /** Uploads a local folder and everything in it into a Drive folder, same names, same layout. */
-  async putFolder(parentId: string, localDirectory: string, report: UploadReport = { uploaded: 0, unchanged: 0 }): Promise<UploadReport> {
+  async putFolder(
+    parentId: string,
+    localDirectory: string,
+    report: UploadReport = { uploaded: 0, unchanged: 0 },
+    wanted: (path: string) => boolean = () => true,
+  ): Promise<UploadReport> {
     for (const entry of readdirSync(localDirectory)) {
       const path = join(localDirectory, entry);
       if (statSync(path).isDirectory()) {
-        await this.putFolder(await this.ensureFolder(parentId, entry), path, report);
-      } else if (!/^~\$|\.tmp$|^desktop\.ini$|^thumbs\.db$/i.test(entry)) {
+        await this.putFolder(await this.ensureFolder(parentId, entry), path, report, wanted);
+      } else if (!/^~\$|\.tmp$|^desktop\.ini$|^thumbs\.db$/i.test(entry) && wanted(path)) {
         report[await this.putFile(parentId, path, entry)] += 1;
       }
     }

@@ -176,6 +176,30 @@ function closingFromPdf(raw: string | null): string | null {
   return match ? portalStyleDate(`${match[3]}-${match[2]}-${match[1]}T${match[4]}:00`) : null;
 }
 
+const DATE_TIME_TEXT = '(\\d{2}-\\d{2}-\\d{4} \\d{2}:\\d{2}:\\d{2})';
+
+/**
+ * A reverse auction saved before 0.7.6 took its closing date, opening and
+ * pre-bid dates from the bid it came from. Its own end date is in its saved
+ * PDF text; returns the corrected closing date and page text, or null when
+ * nothing needs correcting.
+ */
+export function correctedReverseAuction(tender: Pick<TenderRow, 'closing_date' | 'detail_text'>): { closingDate: string; detailText: string } | null {
+  const text = tender.detail_text ?? '';
+  const split = text.indexOf('\n\n');
+  if (split < 0) return null;
+  const [fields, body] = [text.slice(0, split), text.slice(split)];
+  const flatBody = body.replace(/\s+/g, ' ');
+  const closingDate = closingFromPdf(new RegExp(`RA End Date/Time\\s*${DATE_TIME_TEXT}`).exec(flatBody)?.[1] ?? null);
+  if (!closingDate) return null;
+  const lines = fields.split('\n')
+    .filter((line) => !(line.startsWith('Bid Opening Date: ') && !/Bid Opening Date\/Time/.test(flatBody)))
+    .filter((line) => !(line.startsWith('Pre Bid Meeting Date: ') && !/Pre-Bid Date and Time/.test(flatBody)))
+    .map((line) => line.startsWith('Bid Submission End Date: ') ? `Bid Submission End Date: ${closingDate}` : line);
+  const detailText = `${lines.join('\n')}${body}`;
+  return closingDate === tender.closing_date && detailText === text ? null : { closingDate, detailText };
+}
+
 export interface GemBidDetails {
   documentUrl: string;
   content: PdfContent | null;
@@ -201,11 +225,17 @@ async function readBidPdf(deps: BidReadDeps, url: string): Promise<{ content: Pd
   }
 }
 
+// The bid's own dates: the RA comes after them, so they never stand in for the RA's.
+const BID_ONLY_DATES = new Set<keyof GemDocumentFacts>(['bidEndsAt', 'bidOpensAt', 'preBidAt']);
+
 /** The RA's own facts, with what only its bid's PDF gives (EMD, turnover, value…) filled in. */
-function withParentFacts(facts: GemDocumentFacts | null, parent: GemDocumentFacts | null): GemDocumentFacts | null {
-  if (!facts || !parent) return facts ?? parent;
-  const merged = { ...facts };
-  for (const key of Object.keys(parent) as Array<keyof GemDocumentFacts>) merged[key] ??= parent[key];
+export function withParentFacts(facts: GemDocumentFacts | null, parent: GemDocumentFacts | null): GemDocumentFacts | null {
+  if (!parent) return facts;
+  const merged = { ...(facts ?? parent) };
+  for (const key of Object.keys(parent) as Array<keyof GemDocumentFacts>) {
+    if (BID_ONLY_DATES.has(key)) merged[key] = facts?.[key] ?? null;
+    else merged[key] ??= parent[key];
+  }
   return merged;
 }
 
@@ -407,7 +437,15 @@ export async function runGemDate(
   const gate = (tenderId: string, gateName: 'G1' | 'G2' | 'G3' | 'G4', result: 'PASS' | 'REJECT' | 'UNCERTAIN', reasonCode: string, evidence: unknown) =>
     classifications.saveGate({ tenderId, gate: gateName, result, reasonCode, evidence, classifierVersion: CLASSIFIER_VERSION });
   const toRead: Array<{ bid: GemBid; tender: TenderRow; hit?: SearchWordHit }> = [];
+  // Bids outside the chosen categories (most of GeM's ~2,000 a day) are only
+  // counted: never saved, so they never fill Today or the database. A later
+  // search finds them again if a category is added.
+  let outsideCategories = 0;
   for (const bid of [...found.values(), ...wordOnly]) {
+    if (!wordHits.has(bid.id) && !config.productCategories.some((chosen) => inChosenCategory(bid, chosen, deps.categoryCodes))) {
+      outsideCategories += 1;
+      continue;
+    }
     const tender = tenders.upsert({
       jobId,
       tenderRef: bid.bidNumber,
@@ -540,6 +578,7 @@ export async function runGemDate(
   statusMessage = failed.length > 0
     ? `${found.size} GeM bids found; ${failed.join(' and ')} could not be searched, so some may be missing. Run this date again later.`
     : `${found.size} GeM bids ${onDay}; ${toRead.length - wordOnly.length} were in your categories and were read.`;
+  if (outsideCategories > 0) statusMessage += ` ${outsideCategories.toLocaleString('en-IN')} outside your categories were skipped.`;
   if (skippedKnown > 0) statusMessage += ` ${skippedKnown} more were already in your Inbox or decided, so they were not read again.`;
   if (wordOnly.length > 0) statusMessage += ` ${wordOnly.length} more open ${wordOnly.length === 1 ? 'bid has' : 'bids have'} your search words and ${wordOnly.length === 1 ? 'was' : 'were'} read.`;
   statusMessage += wordNote;

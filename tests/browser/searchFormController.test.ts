@@ -89,14 +89,20 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
   let blankAfterFavorite = false;
   let flakyHomeFailures = 0;
   let slowResultsMs = 0;
+  let resultsPage: 'TABLE' | 'NONE_FOUND' | 'ERROR' = 'TABLE';
 
   beforeEach(async () => {
     currentRows = [];
     lastFavoriteBody = '';
     blankAfterFavorite = false;
+    resultsPage = 'TABLE';
     server = http.createServer((req, res) => {
       if (req.url?.startsWith('/results')) {
-        setTimeout(() => res.end(resultsHtml(currentRows)), slowResultsMs);
+        // As Tamil Nadu shows an empty search (21 Oct 2026), and a page it did not mean to show.
+        const page = resultsPage === 'NONE_FOUND'
+          ? '<html><body><a href="/">Search Active Tenders</a> Open Tenders S.No Tender ID Tender Title No Open Tenders Found.</body></html>'
+          : resultsPage === 'ERROR' ? '<html><body><a href="/">Search Active Tenders</a> Invalid date range. Please try again.</body></html>' : resultsHtml(currentRows);
+        setTimeout(() => res.end(page), slowResultsMs);
       } else if (req.url?.startsWith('/favorited')) {
         req.on('data', (chunk) => { lastFavoriteBody += chunk.toString(); });
         req.on('end', () => res.end(blankAfterFavorite ? '' : '<html><body>Favorited. <a href="/">Search Active Tenders</a></body></html>'));
@@ -199,6 +205,17 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
     const rows = await searchCategory(page, 'Information Technology', '21/09/2026');
 
     expect(rows).toEqual([]);
+  });
+
+  it('searchCategory takes "No Open Tenders Found." as none, and any other page without results as a problem', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    resultsPage = 'NONE_FOUND';
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    expect(await searchCategory(page, 'Information Technology', '21/09/2026')).toEqual([]);
+    resultsPage = 'ERROR';
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+    await expect(searchCategory(page, 'Information Technology', '21/09/2026')).rejects.toThrow(/did not show its results table.*Invalid date range/);
   });
 
   it('favoriteAllVisibleRows checks every row and submits without a validation alert', async () => {

@@ -108,6 +108,24 @@ describe('buildInbox', () => {
     expect(inbox.attentionCount).toBe(3);
   });
 
+  it('never brings tenders outside your categories to Today, and says why each rule reject was rejected', () => {
+    const job = jobs.create();
+    const reject = (id: string, gates: ScreenedGate[]) => {
+      const tender = tenders.upsert({
+        jobId: job.id, tenderRef: `GEM/2026/B/${id}`, tenderPortalId: id, title: `Bid ${id}`, organisationChain: null,
+        publishedDate: null, closingDate: null, openingDate: null, productCategory: 'Custom Bid for Services', valueInRupees: '',
+      });
+      const opportunity = opportunities.recordSighting(tender, 'gem', { jobId: job.id });
+      opportunities.recordScreening(opportunity.id, 'REJECT', { jobId: job.id }, { gates });
+    };
+    reject('1', [gate('G2', 'REJECT', 'PRODUCT_CATEGORY_MISMATCH', { actual: ['Manpower Outsourcing Services'] })]);
+    reject('2', [gate('G2', 'PASS', 'PRODUCT_CATEGORY_MATCH'), gate('G3', 'REJECT', 'NO_INTENT_KEYWORD_MATCH')]);
+    reject('3', [gate('G2', 'PASS', 'PRODUCT_CATEGORY_MATCH'), gate('G4', 'REJECT', 'TITLE_EXCLUDED_SCOPE', { matchedExcludedKeywords: ['AMC'] })]);
+
+    const rejected = buildInbox(opportunities).autoRejected;
+    expect(rejected.map((item) => [item.tenderId, item.rejectKind]).sort()).toEqual([['2', 'NO_INTENT'], ['3', 'EXCLUDED']]);
+  });
+
   it('drops auto-rejects once their run is acknowledged', () => {
     const job = jobs.create();
     screened(job.id, 'NO', 'REJECT');

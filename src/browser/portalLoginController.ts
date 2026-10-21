@@ -147,7 +147,11 @@ export async function refillVisiblePortalLogin(page: Page, credentials: PortalCr
     await typeText(loginId, credentials.loginId);
     changed = true;
   }
-  if ((await password.inputValue().catch(() => '')) !== credentials.password) {
+  // Only an emptied password box is filled again (the portal clears the form
+  // after a wrong CAPTCHA). Tamil Nadu's page changes what the box holds once
+  // typed in, so comparing it with the saved password retyped it every few
+  // seconds while the operator was typing the CAPTCHA (21 Oct 2026).
+  if ((await password.inputValue().catch(() => '')) === '') {
     await paceAction();
     await typeText(password, credentials.password);
     changed = true;

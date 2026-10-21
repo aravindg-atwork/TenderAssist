@@ -94,7 +94,8 @@ export function factsFromBidText(text: string): GemDocumentFacts {
   // Line breaks inside a label or value carry no meaning in this PDF.
   const flat = text.replace(/\s+/g, ' ');
   return {
-    bidEndsAt: after(flat, /Bid End Date\/Time/, DATE_TIME),
+    // A reverse auction's PDF names its closing time "RA End Date/Time".
+    bidEndsAt: after(flat, /Bid End Date\/Time/, DATE_TIME) ?? after(flat, /RA End Date\/Time/, DATE_TIME),
     bidOpensAt: after(flat, /Bid Opening Date\/Time/, DATE_TIME),
     offerValidity: after(flat, /Bid Offer Validity \(From End Date\)/, /(\d+ \(Days\))/),
     ministry: after(flat, /\/Ministry\/State Name/),
@@ -115,7 +116,8 @@ export function factsFromBidText(text: string): GemDocumentFacts {
     epbgPercentage: after(flat, /ePBG Percentage\(%\)/, /([\d.]+)/),
     evaluationMethod: after(flat, /\/Evaluation Method/, /([A-Za-z ]{3,80}?)(?= [^\x20-\x7E]|$| \S*\/)/),
     totalQuantity: after(flat, /\/Total Quantity/, /([\d,]+)/),
-    preBidAt: after(flat, /Pre-Bid Date and Time/, /[^\d]{0,160}?(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})/),
+    // The Hindi between label and date can hold digits ("9ी-बड 'थान"), so look for the date itself.
+    preBidAt: after(flat, /Pre-Bid Date and Time/, /[\s\S]{0,200}?(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})/),
     deliveryPincode: /Consignee[\s\S]{0,600}?\b(\d{6})\s*,/i.exec(flat)?.[1] ?? null,
     // Defence buyers hide the consignee's name and address ("*********** ***********") and leave only the city.
     deliveryCity: /Consignee[\s\S]{0,600}?\*{3,}\s*\*{3,}\s*([A-Za-z][A-Za-z .'()-]{1,40}?)\s+(?=Project\b|Lumpsum\b|N\/A\b|\d)/i.exec(flat)?.[1].trim() ?? null,

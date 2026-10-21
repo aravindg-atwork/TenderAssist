@@ -24,17 +24,20 @@ const VALID_TRANSITIONS: Record<OpportunityLifecycle, OpportunityLifecycle[]> = 
   NEW: ['SCREENED', 'APPROVED', 'REJECTED', 'DEFERRED', 'EXPIRED', 'CANCELLED'],
   SCREENED: ['APPROVED', 'REJECTED', 'DEFERRED', 'EXPIRED', 'CANCELLED'],
   DEFERRED: ['SCREENED', 'APPROVED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
-  APPROVED: ['DOCUMENTS_COLLECTED', 'SCREENED', 'REJECTED', 'DEFERRED', 'EXPIRED', 'CANCELLED'],
+  // The bidder marks progress from any approved step (Bid progress on the tender's file).
+  APPROVED: ['DOCUMENTS_COLLECTED', 'PREPARING', 'SUBMITTED', 'NOT_SUBMITTED', 'SCREENED', 'REJECTED', 'DEFERRED', 'EXPIRED', 'CANCELLED'],
   REJECTED: ['SCREENED', 'APPROVED', 'CANCELLED'],
-  DOCUMENTS_COLLECTED: ['ELIGIBILITY_REVIEWED', 'SCREENED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
-  ELIGIBILITY_REVIEWED: ['PREPARING', 'REJECTED', 'EXPIRED', 'CANCELLED'],
+  DOCUMENTS_COLLECTED: ['ELIGIBILITY_REVIEWED', 'PREPARING', 'SUBMITTED', 'NOT_SUBMITTED', 'SCREENED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
+  ELIGIBILITY_REVIEWED: ['PREPARING', 'SUBMITTED', 'NOT_SUBMITTED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
   PREPARING: ['SUBMITTED', 'NOT_SUBMITTED', 'EXPIRED', 'CANCELLED'],
-  SUBMITTED: ['WON', 'LOST', 'CANCELLED'],
-  NOT_SUBMITTED: [],
-  WON: [],
-  LOST: [],
-  // A corrigendum can extend the deadline of an expired tender.
-  EXPIRED: ['SCREENED', 'CANCELLED'],
+  // Won or lost is known weeks later; a slip of the mouse can be put back.
+  SUBMITTED: ['WON', 'LOST', 'PREPARING', 'CANCELLED'],
+  NOT_SUBMITTED: ['PREPARING'],
+  WON: ['SUBMITTED'],
+  LOST: ['SUBMITTED'],
+  // A corrigendum can extend the deadline of an expired tender; a bid sent
+  // just before closing is marked submitted (or not) after it expired.
+  EXPIRED: ['SCREENED', 'SUBMITTED', 'NOT_SUBMITTED', 'CANCELLED'],
   CANCELLED: [],
 };
 

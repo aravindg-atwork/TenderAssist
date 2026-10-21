@@ -478,6 +478,7 @@ textarea {
 .rulecheck__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .rulecheck__why { max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8125rem; color: var(--ink-3); }
 .rulecheck__list .rulecheck__more { background: transparent; color: var(--ink-3); font-size: 0.875rem; }
+.rulecheck__why-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; color: var(--ink-2); }
 .rulecheck__actions { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px; }
 .alldone { align-items: center; padding: 48px 32px; text-align: center; }
 .alldone .btn { margin-top: 6px; }
@@ -1195,3 +1196,51 @@ textarea {
 .words__bid a { color: var(--ink); font-weight: 600; }
 .words__bid small { color: var(--ink-3); font-size: 0.8125rem; }
 .words__add { display: flex; justify-content: flex-end; }
+
+/* Do we qualify? on a tender's file: not met first, in red; to check in amber; met in green */
+.qualify { margin-bottom: 16px; padding: 14px 16px; border-radius: var(--r-control); border: 1px solid var(--line); background: var(--sheet-2); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.qualify--no { border-color: var(--red); background: var(--red-soft); }
+.qualify--check { border-color: var(--amber); background: var(--amber-soft); }
+.qualify--yes { border-color: var(--green); background: var(--green-soft); }
+.qualify__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; width: 100%; }
+.qualify__head .unread__title { margin: 0; }
+.qualify__verdict { margin: 0; font-weight: 600; color: var(--ink); flex: 1 1 240px; }
+.qualify__counts { display: flex; flex-wrap: wrap; gap: 6px; }
+.qualify__count { font-size: 0.8125rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--sheet); }
+.qualify__count--NOT_MET { color: var(--red-ink); }
+.qualify__count--CHECK { color: var(--amber-ink); }
+.qualify__count--MET { color: var(--green-ink); }
+.qualify__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.qualify__item { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--sheet); }
+.qualify__mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 700; font-size: 0.8125rem; color: #fff; }
+.qualify__item--NOT_MET .qualify__mark { background: var(--red); }
+.qualify__item--CHECK .qualify__mark { background: var(--amber); color: var(--ink); }
+.qualify__item--MET .qualify__mark { background: var(--green); }
+.qualify__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.qualify__text strong { font-weight: 600; color: var(--ink); }
+.qualify__req { font-size: 0.875rem; color: var(--ink-2); }
+.qualify__src { font-size: 0.8125rem; color: var(--ink-3); }
+
+/* Settings → Your company */
+.company__checks { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 14px 0; }
+.company__sub { margin: 22px 0 4px; font-size: 1rem; }
+.company__projects { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.company__project { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.company__project input { min-height: 38px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--sheet); font: inherit; min-width: 0; }
+.company__project--head { font-size: 0.8125rem; font-weight: 650; color: var(--ink-2); }
+.company__save { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 20px; }
+@media (max-width: 720px) { .company__project { grid-template-columns: 1fr 1fr; } }
+
+/* The Bid tab: where the bid stands, and the checklist */
+.bid { display: flex; flex-direction: column; gap: 18px; }
+.bid__progress { padding: 14px 16px; border-radius: var(--r-control); background: var(--sheet-2); border: 1px solid var(--line); }
+.bid__progress .unread__title { margin-top: 0; }
+.bid__standing { margin: 4px 0 10px; font-weight: 600; color: var(--ink); }
+.bid__steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.bid__count { margin-left: 8px; font-weight: 500; color: var(--ink-3); font-size: 0.875rem; }
+.bid__list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.bid__item { padding: 8px 10px; border-radius: 8px; background: var(--sheet); border: 1px solid var(--line); }
+.bid__item .check { align-items: flex-start; }
+.bid__item .check input { margin-top: 2px; }
+.bid__item.is-done span { color: var(--ink-3); text-decoration: line-through; }
+.bid__from { display: block; font-size: 0.8125rem; color: var(--ink-3); text-decoration: none; }

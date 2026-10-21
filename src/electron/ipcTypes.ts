@@ -12,6 +12,19 @@ import type {
   FinalClassification,
 } from '../persistence/repositories/classificationRepository.js';
 import type { WordSuggestions } from '../review/wordSuggestions.js';
+import type { CompanyProfile } from '../review/qualifyCheck.js';
+export type { CheckStatus, CompanyProfile, CriterionCheck, QualifyReport, CompanyProject, LegalForm } from '../review/qualifyCheck.js';
+export type { BidProgress } from '../persistence/repositories/opportunityRepository.js';
+import type { BidProgress } from '../persistence/repositories/opportunityRepository.js';
+import type { ChecklistEntry } from '../review/bidChecklist.js';
+import type { BidResults } from '../review/bidResults.js';
+export type { BidResults, BidResultLine } from '../review/bidResults.js';
+
+/** A tender's bid checklist and where its bid stands. */
+export interface BidChecklistView {
+  lifecycle: OpportunityLifecycle;
+  items: Array<ChecklistEntry & { done: boolean }>;
+}
 import type { PortalCategoryList } from '../persistence/repositories/portalCategoryRepository.js';
 import type { PublishingSettings } from '../persistence/repositories/publishingSettingsRepository.js';
 import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow, ManualTenderDecision } from '../persistence/repositories/tenderWorkflowRepository.js';
@@ -30,7 +43,7 @@ export type { InboxItem, InboxView, TenderSummary } from '../review/inbox.js';
 export type { TendersView } from '../review/tenders.js';
 export type { TimelineEntry } from '../review/timeline.js';
 export type { TenderField, TenderFileView } from '../review/tenderFile.js';
-export type { OperatorDecision } from '../state/opportunityLifecycle.js';
+export type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import type { CategoryHealth, CategorySuggestion, MissingCategory, ReplacementAdvice } from '../config/categoryHealth.js';
 import type { DailyReport, DayRow, CategoryRow } from '../review/dailyReport.js';
 export type { DailyReport, DayRow, CategoryRow };
@@ -309,6 +322,16 @@ export interface TenderAssistApi {
   portalReload(): Promise<void>;
   getTextSize(): Promise<TextSize>;
   saveTextSize(textSize: TextSize): Promise<TextSize>;
+  /** The company's facts for "Do we qualify?" (Settings → Your company). */
+  getCompanyProfile(): Promise<CompanyProfile>;
+  saveCompanyProfile(profile: CompanyProfile): Promise<CompanyProfile>;
+  /** What to prepare and upload for a tender, with the bidder's ticks. */
+  getBidChecklist(opportunityId: string): Promise<BidChecklistView>;
+  setChecklistTick(opportunityId: string, itemKey: string, done: boolean): Promise<void>;
+  /** Preparing, submitted or not, won or lost; returns the tender's new state. */
+  markBidProgress(opportunityId: string, step: BidProgress, note?: string): Promise<OpportunityLifecycle>;
+  /** Bids sent, won and lost, by category and intent word. */
+  getBidResults(): Promise<BidResults>;
   /** Portal zoom is a whole percentage, 80-200 in 10% steps, remembered per portal. */
   getPortalZoom(portalId: string): Promise<number>;
   setPortalZoom(portalId: string, percent: number): Promise<number>;

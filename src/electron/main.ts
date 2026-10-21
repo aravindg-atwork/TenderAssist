@@ -52,11 +52,12 @@ import { findBidsStartedOn } from '../gem/gemDaySearch.js';
 import { bidDocumentUrl, portalStyleDate, type GemBid } from '../gem/gemBid.js';
 import { findBidsWithWords } from '../gem/gemWordSearch.js';
 import { reviewForLifecycle } from '../review/reviewAlignment.js';
-import { bidFromTender, GEM_RETRY_DELAYS_MS, readGemBidDetails, runGemDate } from '../gem/gemRunner.js';
+import { bidFromTender, correctedReverseAuction, GEM_RETRY_DELAYS_MS, readGemBidDetails, runGemDate } from '../gem/gemRunner.js';
 import { attemptLogout } from '../browser/logoutController.js';
 import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
 import type { Page } from 'playwright-core';
 import type {
+  BidChecklistView,
   JobListItem,
   JobDetail,
   DocumentsWaiting,
@@ -84,10 +85,21 @@ import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvide
 import { typeAllAtOnce, typeLikeAPerson, type PortalCredentials } from '../browser/portalLoginController.js';
 import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type OcrEngine } from '../documents/documentText.js';
 import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windowsOcr.js';
-import { extractTenderRequirements } from '../extraction/requirementExtractor.js';
+import { extractTenderRequirements, isOutdatedReading } from '../extraction/requirementExtractor.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { daySheetFileName, isDaySheet, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory, type PublishableTender, type ReportSheetMode } from '../publishing/jobPublisher.js';
 import { supersededRuns } from '../publishing/supersededRuns.js';
+import { driveCopyOfSheet, linkSegments } from '../publishing/driveSheetLinks.js';
+import { filesForDrive } from '../publishing/driveSelection.js';
+import { CompanyProfileRepository } from '../persistence/repositories/companyProfileRepository.js';
+import { BidTrackingRepository } from '../persistence/repositories/bidTrackingRepository.js';
+import { checklistFor, dueReminders, type ReminderTender } from '../review/bidChecklist.js';
+import { coverDocuments } from '../review/portalPage.js';
+import { bidResults, type BidResults } from '../review/bidResults.js';
+import type { BidProgress } from '../persistence/repositories/opportunityRepository.js';
+import { checkQualification, type CompanyProfile, type QualifyReport } from '../review/qualifyCheck.js';
+import { findQualificationSections } from '../extraction/qualificationSections.js';
+import { factsFromBidText } from '../gem/gemBidDocument.js';
 import { chooseDriveFolder, projectNumberOf } from '../publishing/drivePicker.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
 import { driveFolderLink, driveFolderNameParts, driveFolderPath, GoogleDriveClient, GoogleDriveError, parseGoogleClientFile, signInWithGoogle, type DriveCredentials, type GoogleSignIn } from '../publishing/googleDrive.js';
@@ -188,6 +200,8 @@ const googleDriveSettings = new GoogleDriveSettingsRepository(db);
 const reportSheetSettings = new ReportSheetSettingsRepository(db);
 const setupState = new SetupChecklistRepository(db);
 const dailyCounts = new DailyCountRepository(db);
+const companyProfile = new CompanyProfileRepository(db);
+const bidTracking = new BidTrackingRepository(db);
 const opportunitySync = { tenders, classifications, opportunities, workflow };
 
 // Tender records are a view over run data; a failure to update them must
@@ -213,7 +227,30 @@ function catchUpTenderPages(): void {
     if (closing) opportunities.fillClosingDate(opportunity.id, closing);
   }
 }
+/**
+ * GeM reverse auctions saved before 0.7.6 closed on their original bid's end
+ * date, so many showed as closed the day they were published. Each takes its
+ * own end date from its saved PDF text, and opens again if it closed by
+ * mistake. Safe to repeat; runs before the expiry sweep.
+ */
+function correctReverseAuctionDates(): void {
+  withTransaction(db, () => {
+    for (const opportunity of opportunities.list()) {
+      if (!isGemPortal(getPortalDefinition(opportunity.portal_id)) || !/\/R\//.test(opportunity.tender_ref ?? '')) continue;
+      let latest: string | null = null;
+      let changed = false;
+      for (const tender of tenders.listForOpportunity(opportunity.id)) {
+        const corrected = correctedReverseAuction(tender);
+        if (corrected) tenders.correctClosingDate(tender.id, corrected.closingDate, corrected.detailText);
+        changed ||= corrected !== null;
+        latest = corrected?.closingDate ?? tender.closing_date ?? latest;
+      }
+      if (changed && latest) opportunities.correctClosingDate(opportunity.id, latest);
+    }
+  });
+}
 syncOpportunities('tender page catch-up', catchUpTenderPages);
+syncOpportunities('reverse auction dates', correctReverseAuctionDates);
 syncOpportunities('expiry sweep', () => opportunities.expireOverdue());
 syncOpportunities('retender links', () => linkAllPossibleRetenders(opportunitySync));
 const jobMachine = new JobStateMachine(db, jobs, transitions);
@@ -676,7 +713,7 @@ function requirementFields(row: { data_json: string } | undefined): Array<{ labe
   if (!row) return [];
   let data: Record<string, unknown> = {};
   try { data = JSON.parse(row.data_json) as Record<string, unknown>; } catch { return []; }
-  const names: Array<[string, string]> = [['scope', 'Scope'], ['eligibility', 'Eligibility'], ['emd', 'EMD'], ['tenderFee', 'Tender fee'], ['submissionDeadline', 'Submission deadline'], ['contact', 'Contact']];
+  const names: Array<[string, string]> = [['scope', 'Scope'], ['eligibility', 'Eligibility'], ['evaluation', 'How bids are evaluated'], ['emd', 'EMD'], ['tenderFee', 'Tender fee'], ['submissionDeadline', 'Submission deadline'], ['contact', 'Contact']];
   return names.flatMap(([key, label]) => {
     const value = typeof data[key] === 'string' ? cleanRequirement(key, data[key] as string) : null;
     return value ? [{ label, value }] : [];
@@ -728,6 +765,7 @@ ipcMain.handle('get-tender-file', (_event, opportunityId: unknown): TenderFileVi
     hasFolder: tenderFolderFor(opportunityId) !== null,
     detailsRead: Boolean(read?.detail_reviewed_at),
     fromDocuments: documentsRead && withDocuments ? requirementFields(workflow.getRequirements(withDocuments.id)) : [],
+    qualification: read || withDocuments ? qualificationFor(withDocuments ?? read!) : undefined,
   };
 });
 
@@ -1189,6 +1227,32 @@ function operatorDecisionReview(tender: TenderRow): TenderReviewRow | undefined 
   return undefined;
 }
 
+/**
+ * A tender's saved requirements, read again from its saved page and
+ * documents when an older version of the reader made them, so sheets made
+ * again gain what the reader now finds. Nothing is downloaded.
+ */
+function currentRequirements(tender: TenderRow) {
+  const saved = workflow.getRequirements(tender.id);
+  if (!saved || !isOutdatedReading(saved.data_json)) return saved;
+  const documents = workflow.listDocuments(tender.id);
+  const extraction = extractTenderRequirements([tender.detail_text ?? '', documentsTextFor(documents)].filter(Boolean).join('\n\n'), documents);
+  return workflow.saveRequirements(tender.id, extraction.requirements, extraction.confidence);
+}
+
+/**
+ * "Do we qualify?" for a tender: its criteria (from its saved page and
+ * documents, and GeM's own turnover and experience asks) checked against the
+ * company's facts in Settings → Your company.
+ */
+function qualificationFor(tender: TenderRow): QualifyReport {
+  const documents = workflow.listDocuments(tender.id);
+  const texts = [...documents.map((document) => ({ name: document.file_name, text: document.text_content })), { name: 'Tender page', text: tender.detail_text }];
+  const gemPdf = documents.find((document) => /^GeM bid /.test(document.file_name) && document.text_content)?.text_content;
+  const gem = isGemTender(tender) ? factsFromBidText(gemPdf ?? tender.detail_text ?? '') : null;
+  return checkQualification(findQualificationSections(texts), gem, companyProfile.get());
+}
+
 /** The tenders of one run that belong on its day's sheet. */
 function sheetItemsFor(jobId: string, plan: JobOutputPlan, portal: PortalDefinition): PublishableTender[] {
   const allItems = tenders.listForJob(jobId).filter((tender) => !isFiledElsewhere(tender) && !isReplacedByLaterSearch(tender)).map((tender) => ({
@@ -1196,7 +1260,8 @@ function sheetItemsFor(jobId: string, plan: JobOutputPlan, portal: PortalDefinit
     automaticDecision: classifications.getFinalForTender(tender.id),
     manualReview: workflow.getReview(tender.id) ?? operatorDecisionReview(tender),
     documents: workflow.listDocuments(tender.id),
-    requirements: workflow.getRequirements(tender.id),
+    requirements: currentRequirements(tender),
+    qualification: qualificationFor(tender),
   }));
   // Tenders the operator approved (even long after the run) are always on the day's sheet.
   const explicitlyProcessed = allItems.filter((item) => item.requirements || item.documents.length > 0
@@ -1315,6 +1380,83 @@ ipcMain.handle('portal-go-back', () => portalHost?.goBack());
 ipcMain.handle('portal-reload', () => portalHost?.reload());
 ipcMain.handle('get-text-size', () => displaySettings.getTextSize());
 ipcMain.handle('save-text-size', (_event, textSize: TextSize) => displaySettings.saveTextSize(textSize));
+ipcMain.handle('get-company-profile', (): CompanyProfile => companyProfile.get());
+
+/** The latest saved sighting of a tender that has its page read, or its latest sighting. */
+function readSighting(opportunityId: string): TenderRow | undefined {
+  const rows = [...tenders.listForOpportunity(opportunityId)].reverse();
+  return rows.find((tender) => workflow.listDocuments(tender.id).length > 0) ?? rows.find((tender) => tender.detail_text) ?? rows[0];
+}
+
+ipcMain.handle('get-bid-checklist', (_event, opportunityId: unknown): BidChecklistView => {
+  if (typeof opportunityId !== 'string') throw new Error('Tender not found.');
+  const opportunity = opportunities.getById(opportunityId);
+  const tender = readSighting(opportunityId);
+  if (!opportunity || !tender) throw new Error('Tender not found.');
+  const documents = workflow.listDocuments(tender.id);
+  const entries = checklistFor({
+    fields: parseDetailFields(tender.detail_text),
+    sections: findQualificationSections([...documents.map((document) => ({ name: document.file_name, text: document.text_content })), { name: 'Tender page', text: tender.detail_text }]),
+    gem: isGemTender(tender),
+    closingDate: opportunity.closing_date,
+    covers: coverDocuments(tender.detail_text),
+  });
+  const ticks = bidTracking.ticks(opportunityId);
+  return { lifecycle: opportunity.lifecycle, items: entries.map((entry) => ({ ...entry, done: ticks.has(entry.key) })) };
+});
+
+ipcMain.handle('set-checklist-tick', (_event, opportunityId: unknown, itemKey: unknown, done: unknown): void => {
+  if (typeof opportunityId !== 'string' || typeof itemKey !== 'string' || !opportunities.getById(opportunityId)) throw new Error('Tender not found.');
+  bidTracking.setTick(opportunityId, itemKey, done === true);
+});
+
+ipcMain.handle('get-bid-results', (): BidResults => bidResults(
+  opportunities.list({ lifecycles: ['APPROVED', 'DOCUMENTS_COLLECTED', 'ELIGIBILITY_REVIEWED', 'PREPARING', 'SUBMITTED', 'NOT_SUBMITTED', 'WON', 'LOST'] }).map((opportunity) => {
+    const tender = readSighting(opportunity.id);
+    const screened = opportunities.listEvents(opportunity.id).filter((event) => event.kind === 'SCREENED').at(-1);
+    const words = parseScreenedGates(screened?.data_json).flatMap((gate) => {
+      const evidence = gate.evidence as { matchedKeywords?: unknown; searchWords?: unknown };
+      return [...(Array.isArray(evidence.matchedKeywords) ? evidence.matchedKeywords : []), ...(Array.isArray(evidence.searchWords) ? evidence.searchWords : [])]
+        .filter((word): word is string => typeof word === 'string');
+    });
+    return { lifecycle: opportunity.lifecycle, category: tender?.detail_product_category || tender?.product_category || null, words };
+  }),
+));
+
+const BID_PROGRESS: readonly BidProgress[] = ['PREPARING', 'SUBMITTED', 'NOT_SUBMITTED', 'WON', 'LOST'];
+ipcMain.handle('mark-bid-progress', (_event, opportunityId: unknown, step: unknown, note?: unknown): OpportunityLifecycle => {
+  if (typeof opportunityId !== 'string' || !BID_PROGRESS.includes(step as BidProgress)) throw new Error('Unknown bid step.');
+  return opportunities.markProgress(opportunityId, step as BidProgress, { note: typeof note === 'string' ? note : null }).lifecycle;
+});
+
+// Tenders being bid for, whose dates a reminder can be about.
+const BIDDING_LIFECYCLES: readonly OpportunityLifecycle[] = ['APPROVED', 'DOCUMENTS_COLLECTED', 'ELIGIBILITY_REVIEWED', 'PREPARING'];
+
+/** "15-10-2026 10:00:00" (GeM) or "15-Oct-2026 11:00 AM" (GePNIC), Indian time, as UTC ISO. */
+function portalDateTime(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const gem = /^(d{2})-(d{2})-(d{4}) (d{2}):(d{2})/.exec(raw.trim());
+  const iso = gem ? `${gem[3]}-${gem[2]}-${gem[1]}T${gem[4]}:${gem[5]}:00+05:30` : parseTenderPortalDate(raw.trim());
+  const time = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+/** Shows the pre-bid and closing reminders now due for tenders being bid for, each once. */
+function showDueReminders(): void {
+  if (!Notification.isSupported()) return;
+  const bidding: ReminderTender[] = opportunities.list({ lifecycles: [...BIDDING_LIFECYCLES] }).map((opportunity) => {
+    const fields = parseDetailFields(readSighting(opportunity.id)?.detail_text);
+    const preBid = fields.find((field) => /^pre[s-]*bids*meetings*date$/i.test(field.label))?.value;
+    return { opportunityId: opportunity.id, title: opportunity.title, closingAt: opportunity.closing_at, preBidAt: portalDateTime(preBid) };
+  });
+  for (const reminder of dueReminders(bidding, bidTracking.sentReminders())) {
+    bidTracking.markReminderSent(reminder.opportunityId, reminder.key);
+    const shown = new Notification({ title: reminder.title, body: reminder.body });
+    shown.on('click', () => navigateApplication('tenders'));
+    shown.show();
+  }
+}
+ipcMain.handle('save-company-profile', (_event, profile: unknown): CompanyProfile => companyProfile.save(profile));
 ipcMain.handle('get-portal-zoom', (_event, portalId: string) => displaySettings.getPortalZoom(getPortalDefinition(portalId).id));
 ipcMain.handle('set-portal-zoom', (_event, portalId: string, percent: number) => {
   const id = getPortalDefinition(portalId).id;
@@ -2172,6 +2314,33 @@ let driveUploads: Promise<void> = Promise.resolve();
 
 interface DriveUploadSummary { tenders: number; files: number; problems: string[] }
 
+/** Rejected by the operator after its folder went to Drive (and not yet moved to Drive's bin). */
+function isRejectedByOperator(tender: TenderRow): boolean {
+  if (!tender.opportunity_id || opportunities.getById(tender.opportunity_id)?.lifecycle !== 'REJECTED') return false;
+  // The latest of the two notes says where the folder is now.
+  const latest = opportunities.listEvents(tender.opportunity_id).map((event) => event.note ?? '')
+    .filter((note) => note.startsWith('Uploaded to Google Drive') || note.startsWith('Rejected, so its folder on Google Drive')).at(-1);
+  return latest?.startsWith('Uploaded to Google Drive') ?? false;
+}
+
+/** Moves a tender's folder on Drive, if it is there, to Drive's bin. Looks up the path without making any folder. */
+async function binTenderOnDrive(drive: { client: GoogleDriveClient; folderId: string }, tender: TenderRow): Promise<void> {
+  const plan = jobOutputs.getPlan(tender.job_id);
+  const serialNumber = jobOutputs.findSerialNumber(tender.id);
+  if (!plan || serialNumber === undefined || !drive.folderId) return;
+  const segments = driveFolderPath(plan.outputRoot, tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate));
+  let id: string | null = drive.folderId;
+  for (const name of segments) {
+    id = id ? (await drive.client.child(id, name, true))?.id ?? null : null;
+    if (!id) return;
+  }
+  await drive.client.binFile(id!);
+  if (tender.opportunity_id) {
+    const opportunityId = tender.opportunity_id;
+    syncOpportunities('drive', () => opportunities.addNote(opportunityId, `Rejected, so its folder on Google Drive was moved to Drive’s bin: ${[googleDriveSettings.get().folderName, ...segments].join(' / ')}.`, 'automation', { jobId: tender.job_id }));
+  }
+}
+
 // Replaced tender folders already looked for on Drive this session (day folder id / name).
 const driveBinnedFolders = new Set<string>();
 
@@ -2200,7 +2369,15 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
     try {
       for (const tender of folderId ? tenderRows : []) {
         // A tender needing a look stays on this computer until approved
-        // (afterApproval); a rejected one never goes (belongsOnDrive).
+        // (afterApproval); a rejected one never goes (belongsOnDrive), and
+        // one the rules sent up that the operator then rejected leaves Drive
+        // for its bin (restorable there); its folder here is kept.
+        if (isRejectedByOperator(tender)) {
+          await binTenderOnDrive(drive, tender).catch((error: unknown) => {
+            summary.problems.push(`${tender.title} (moving it to Drive’s bin): ${error instanceof Error ? error.message : String(error)}`);
+          });
+          continue;
+        }
         if (!belongsOnDrive(tender) || isFiledElsewhere(tender)) continue;
         const plan = jobOutputs.getPlan(tender.job_id);
         const serialNumber = jobOutputs.findSerialNumber(tender.id);
@@ -2211,7 +2388,9 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
         try {
           const segments = driveFolderPath(plan.outputRoot, folder);
           const dayId = await drive.client.ensurePath(drive.folderId, segments.slice(0, -1));
-          const report = await drive.client.putFolder(await drive.client.ensureFolder(dayId, segments[segments.length - 1]), folder);
+          // The files a bidder needs: no GeM standard forms, one copy of a file attached under several names.
+          const sending = filesForDrive(folder);
+          const report = await drive.client.putFolder(await drive.client.ensureFolder(dayId, segments[segments.length - 1]), folder, undefined, (path) => sending.has(path));
           summary.tenders += 1;
           summary.files += report.uploaded;
           if (tender.opportunity_id && report.uploaded > 0) {
@@ -2229,8 +2408,19 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
           const dayId = await drive.client.ensurePath(drive.folderId, segments);
           const baseName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook;
           const sheets = readdirSync(plan.jobDirectory).filter((name) => isDaySheet(baseName, name));
+          // On Drive, "Open documents" opens the tender's folder on Drive, not the sheet again.
+          const folderLinks = new Map<string, Promise<string | null>>();
+          const driveLink = (target: string) => {
+            if (!folderLinks.has(target)) {
+              folderLinks.set(target, linkSegments(target).reduce<Promise<string | null>>(
+                async (parent, name) => { const id = await parent; return id ? (await drive.client.child(id, name, true))?.id ?? null : null; },
+                Promise.resolve(dayId)).then((id) => id ? driveFolderLink(id) : null));
+            }
+            return folderLinks.get(target)!;
+          };
           for (const name of sheets) {
-            if (await drive.client.putFile(dayId, join(plan.jobDirectory, name), name) === 'uploaded') summary.files += 1;
+            const upload = await driveCopyOfSheet(join(plan.jobDirectory, name), join(getAppDataDir(dataPathEnv, build.folderName), 'drive-sheets'), driveLink);
+            if (await drive.client.putFile(dayId, upload, name) === 'uploaded') summary.files += 1;
           }
           // Sheets under names no longer used on this computer ("(run 2)", the other split) go to Drive's bin.
           const kept = new Set(sheets.map((name) => name.toLocaleLowerCase()));
@@ -3028,7 +3218,8 @@ function readTenderDocuments(rows: TenderRow[], report: (message: string) => voi
           workflow.saveDocumentText(document.id, { text: '', method: 'NONE', pages: 0, ocrPages: 0 });
         }
       }
-      const extraction = extractTenderRequirements([tender.detail_text ?? '', documentsTextFor(workflow.listDocuments(tender.id))].filter(Boolean).join('\n\n'));
+      const documents = workflow.listDocuments(tender.id);
+      const extraction = extractTenderRequirements([tender.detail_text ?? '', documentsTextFor(documents)].filter(Boolean).join('\n\n'), documents);
       workflow.saveRequirements(tender.id, extraction.requirements, extraction.confidence);
     }
   });
@@ -3973,6 +4164,9 @@ ipcMain.handle('resume-job', async (_event, jobId: string) => {
     void licence.view().then(noteLicence).then(() => licence.check()).then(() => pullSharedCategories());
     // Category changes other offices saw: hourly, so they arrive the same day.
     setInterval(() => { void pullSharedCategories(); }, 60 * 60 * 1000);
+    // Pre-bid meetings and closing dates of tenders being bid for: checked every 15 minutes.
+    setTimeout(() => { try { showDueReminders(); } catch (error) { console.error('[TenderAssist] reminders:', error); } }, 60_000);
+    setInterval(() => { try { showDueReminders(); } catch (error) { console.error('[TenderAssist] reminders:', error); } }, 15 * 60 * 1000);
     setInterval(() => { void licence.check(); }, CHECK_EVERY_MS);
     setInterval(() => { void licence.view().then(noteLicence); }, 60 * 60 * 1000);
     if (app.isPackaged) {

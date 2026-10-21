@@ -224,7 +224,8 @@ export async function runPostProcessing(
     await deps.readDocuments?.(approved, (statusMessage) => onUpdate({ ...snapshot('EXTRACTION'), statusMessage })).catch(() => {});
     for (const tender of approved) {
       throwIfCancellationRequested(deps.signal);
-      const extraction = extractTenderRequirements([tender.detail_text ?? '', documentsTextFor(deps.workflow.listDocuments(tender.id))].filter(Boolean).join('\n\n'));
+      const documents = deps.workflow.listDocuments(tender.id);
+      const extraction = extractTenderRequirements([tender.detail_text ?? '', documentsTextFor(documents)].filter(Boolean).join('\n\n'), documents);
       deps.workflow.saveRequirements(tender.id, extraction.requirements, extraction.confidence);
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractTenderRequirements } from '../../src/extraction/requirementExtractor.js';
+import { extractTenderRequirements, REQUIREMENTS_VERSION } from '../../src/extraction/requirementExtractor.js';
 
 describe('extractTenderRequirements', () => {
   it('extracts traceable tender requirement fields', () => {
@@ -20,7 +20,49 @@ describe('extractTenderRequirements', () => {
   it('marks sparse text as low confidence instead of inventing fields', () => {
     const result = extractTenderRequirements('General procurement notice.');
     expect(result.confidence).toBe('LOW');
-    expect(Object.values(result.requirements).every((value) => value === null)).toBe(true);
+    const { version, ...fields } = result.requirements;
+    expect(version).toBe(REQUIREMENTS_VERSION);
+    expect(Object.values(fields).every((value) => value === null)).toBe(true);
+  });
+
+  it('never takes a heading or a blank form for a value', () => {
+    const { requirements } = extractTenderRequirements([
+      'Bid Number: GEM/2026/B/8118466',
+      'Work Description: Custom Bid for Services - Website Development',
+      '',
+      'EMD Detail ePBG Detail',
+      'Bid Participation fee / Tender fee, as the case may be',
+      'Name: ____________________',
+      'Contact the buyer at hod1.icpr.up@gembuyer.in for queries.',
+    ].join('\n'));
+    expect(requirements.emd).toBeNull();
+    expect(requirements.tenderFee).toBeNull();
+    expect(requirements.contact).toBe('hod1.icpr.up@gembuyer.in');
+    expect(requirements.submissionMethod).toBe('Online on GeM');
+    expect(requirements.scope).toBe('Custom Bid for Services - Website Development');
+  });
+
+  it('adds the criteria in the documents to a website field that only points at them', () => {
+    const documents = [{
+      file_name: 'NIT.pdf',
+      text_content: [
+        '[Page 3]',
+        '4. Eligibility Criteria',
+        '1. The bidder should have an average annual turnover of Rs. 50 lakh in the last three financial years.',
+        '2. The bidder should have completed two similar works of value not less than Rs. 20 lakh each in the last five years.',
+        '3. The bidder should not be blacklisted by any Government department.',
+        '5. Scope of Work',
+      ].join('\n'),
+    }];
+    const { requirements } = extractTenderRequirements('Pre Qualification: Please refer Tender documents.\nEMD Amount in ₹: 25,000\n\nPage text', documents);
+    expect(requirements.eligibility).toBe([
+      '1. The bidder should have an average annual turnover of Rs. 50 lakh in the last three financial years.',
+      '2. The bidder should have completed two similar works of value not less than Rs. 20 lakh each in the last five years.',
+      '3. The bidder should not be blacklisted by any Government department.',
+    ].join('\n'));
+    expect(requirements.sections).toHaveLength(1);
+    expect(requirements.sections![0]).toMatchObject({ kind: 'PRE_QUALIFICATION', heading: '4. Eligibility Criteria', document: 'NIT.pdf', page: 3 });
+    expect(requirements.sections![0].items).toHaveLength(3);
   });
 
   it('fills the sheet from the portal fields on the tender details page', () => {
@@ -49,6 +91,7 @@ describe('extractTenderRequirements', () => {
       submissionDeadline: '25-Sep-2026 03:00 PM',
       submissionMethod: 'Online on the portal, tender type Open Tender, contract Item Rate',
       contact: 'Deputy General Manager (Purchase), TNPL Unit II, Mondipatti, Trichy',
+      version: REQUIREMENTS_VERSION,
     });
     expect(confidence).toBe('HIGH');
   });

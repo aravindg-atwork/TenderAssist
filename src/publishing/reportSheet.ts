@@ -2,6 +2,8 @@
 // "Tenders Interested" workbook): one row per kept tender.
 
 import { bidDocumentUrl, bidPageUrl } from '../gem/gemBid.js';
+import { tenderPageFields } from '../review/portalPage.js';
+import type { QualifyReport } from '../review/qualifyCheck.js';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
 import { corrigendaSummary, tenderPageFacts } from '../review/watchedTenders.js';
 
@@ -67,10 +69,8 @@ export const REPORT_COLUMNS: readonly ReportColumn[] = [
 /** The "Label: value" lines at the top of a tender's saved details, by label. */
 export function detailFieldMap(detailText: string | null | undefined): Map<string, string> {
   const fields = new Map<string, string>();
-  for (const line of (detailText ?? '').split('\n')) {
-    if (!line.trim()) break;
-    const match = /^([^:\n]{2,80}):\s+(.+)$/.exec(line.trim());
-    if (match && !fields.has(match[1].trim().toLowerCase())) fields.set(match[1].trim().toLowerCase(), match[2].trim());
+  for (const field of tenderPageFields(detailText)) {
+    if (!fields.has(field.label.toLowerCase())) fields.set(field.label.toLowerCase(), field.value);
   }
   return fields;
 }
@@ -139,6 +139,8 @@ export interface ReportRowInput {
   portalName?: string;
   /** The tender's Documents folder, relative to the report sheet. */
   documentsFolder?: string;
+  /** "Do we qualify?" for the Eligibility column. */
+  qualification?: QualifyReport;
 }
 
 export function reportRow(input: ReportRowInput): ReportRow {
@@ -165,9 +167,17 @@ export function reportRow(input: ReportRowInput): ReportRow {
     bidEndDate: reportDate(field(fields, /^bid submission end date$/) || tender.closing_date),
     emd: field(fields, /^emd amount/) || input.emd || '',
     preBidMeetingDate: reportDate(field(fields, /^pre bid meeting date$/)),
-    // Whether the company qualifies is the operator's call; the notes give what the tender asks for.
-    eligibility: 'To check',
-    eligibilityNotes: field(fields, /^pre-?\s*qualification/) || input.eligibility || '',
+    // From "Do we qualify?" once the company's facts are filled in; the final call stays the operator's.
+    eligibility: !input.qualification?.profileFilled || input.qualification.checks.length === 0
+      ? 'To check'
+      : input.qualification.notMet > 0
+        ? `Not met (${input.qualification.notMet} of ${input.qualification.checks.length})`
+        : input.qualification.toCheck > 0 ? `Meets ${input.qualification.met}; ${input.qualification.toCheck} to check` : 'Meets',
+    // The website's own summary (GeM: turnover, experience, relaxations), then the criteria found in the documents.
+    eligibilityNotes: [field(fields, /^pre-?\s*qualification/), input.eligibility ?? '']
+      .flatMap((note) => note.split('\n'))
+      .filter((line, index, lines) => line.trim() !== '' && !/^(?:please\s+)?refer\b/i.test(line) && lines.indexOf(line) === index)
+      .join('\n') || field(fields, /^pre-?\s*qualification/) || '',
     // GeM has a public page per bid. The NIC websites' tender pages only open
     // inside a signed-in session, so those link to the website with the Tender ID.
     viewTenderLink: gem && bidId

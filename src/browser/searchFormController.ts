@@ -148,12 +148,20 @@ export async function searchCategory(
     );
     candidateTables.sort((a, b) => a.outerHTML.length - b.outerHTML.length);
     const table = candidateTables[0];
-    if (!table) return [] as string[][];
+    if (!table) return null;
     return Array.from(table.querySelectorAll('tr'))
       .slice(1) // skip the header row
       .map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent ?? ''))
       .filter((cells) => cells.length >= 6 && cells[1].trim() !== '');
   });
+  // No results table at all is not "no tenders": only the portal's own
+  // "No Open Tenders Found." is. Anything else (an error page, a changed
+  // layout) must stop the search, not pass as an empty day.
+  if (cellRows === null) {
+    const pageText = await page.locator('body').innerText().catch(() => '');
+    if (/no\s+(?:open\s+)?tenders?\s+found/i.test(pageText)) return [];
+    throw new Error(`The website did not show its results table for "${productCategory}" after searching. ${pageText.replace(/\s+/g, ' ').trim().slice(0, 160)}`);
+  }
 
   return cellRows.map(parseActiveTenderRow).filter((r): r is ParsedActiveTenderRow => r !== null);
 }

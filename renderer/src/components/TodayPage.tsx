@@ -654,6 +654,16 @@ export function TodayPage({
             <section className="rulecheck">
               <h2>Your rules rejected {rejects.length} {rejects.length === 1 ? 'tender' : 'tenders'}</h2>
               <p>A quick look keeps the rules honest. If these are right, clear them in one go.</p>
+              <ul className="rulecheck__why-list">
+                {([
+                  ['NO_INTENT', 'in your categories, but without any of your intent words'],
+                  ['EXCLUDED', 'with one of your excluded words'],
+                  ['OTHER', 'for other reasons (closed, or missing details)'],
+                ] as const).map(([kind, words]) => {
+                  const count = rejects.filter((item) => (item.rejectKind ?? 'OTHER') === kind).length;
+                  return count > 0 ? <li key={kind}><strong>{count}</strong> {words}</li> : null;
+                })}
+              </ul>
               <ul className="rulecheck__list">
                 {rejects.slice(0, 5).map((item) => (
                   <li key={item.id}><span className="rulecheck__title">{item.title}</span><span className="rulecheck__why">{item.matchedExclusions.length > 0 ? `Has “${item.matchedExclusions.join('”, “')}”` : item.explanation}</span></li>

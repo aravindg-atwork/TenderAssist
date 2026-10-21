@@ -91,6 +91,11 @@ export function describeTimeline(events: OpportunityEventRow[]): TimelineEntry[]
         };
       }
       case 'CHANGED':
+        if (data.corrected) {
+          const to = (data.corrected as { closingDate?: { to?: unknown } }).closingDate?.to;
+          const closing = typeof to === 'string' ? ` It closes ${to}.` : '';
+          return { ...base, title: 'Closing date corrected', detail: `TenderAssist had read the original bid’s end date for this reverse auction.${closing}${data.reopenedTo ? ' It is open again.' : ''}` };
+        }
         if (data.reopened) {
           const closing = typeof data.closingDate === 'string' ? ` It now closes ${data.closingDate}.` : '';
           return { ...base, title: 'Open again: closing date extended', detail: `It had closed; the website extended it.${closing}` };
@@ -109,6 +114,10 @@ export function describeTimeline(events: OpportunityEventRow[]): TimelineEntry[]
         return { ...base, title: 'You rejected it', detail: event.note };
       case 'DEFERRED':
         return { ...base, title: 'You deferred it', detail: event.note };
+      case 'PROGRESS': {
+        const words: Record<string, string> = { PREPARING: 'Preparing the bid', SUBMITTED: 'Bid submitted', NOT_SUBMITTED: 'Decided not to submit', WON: 'Won', LOST: 'Lost' };
+        return { ...base, title: words[String(data.to)] ?? 'Bid progress', detail: event.note };
+      }
       case 'REOPENED':
         return { ...base, title: 'You moved it back to review', detail: event.note };
       case 'DOCUMENTS_COLLECTED': {

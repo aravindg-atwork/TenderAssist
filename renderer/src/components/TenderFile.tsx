@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { QualifyPanel } from './QualifyPanel';
+import { BidPanel } from './BidPanel';
 import type { TenderFileView, TenderSummary, TimelineEntry } from '../../../src/electron/ipcTypes';
 import { absoluteDateTime, closingLabel, LIFECYCLE_LABELS, relativeTime } from '../format';
 import { plainError } from '../words';
@@ -24,7 +26,10 @@ export interface TenderFileProps {
   onSearchDate?: (date: string) => void;
 }
 
-type Tab = 'summary' | 'documents' | 'history';
+type Tab = 'summary' | 'bid' | 'documents' | 'history';
+
+// Tenders being bid for, or bid already: they get the Bid tab.
+const BID_LIFECYCLES = ['APPROVED', 'DOCUMENTS_COLLECTED', 'ELIGIBILITY_REVIEWED', 'PREPARING', 'SUBMITTED', 'NOT_SUBMITTED', 'WON', 'LOST'];
 
 const RECOMMENDATION_TAG: Record<string, { text: string; tone: string }> = {
   KEEP: { text: 'Kept by TenderAssist', tone: 'keep' },
@@ -139,7 +144,7 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
       </header>
 
       <div className="file__tabs" role="tablist" aria-label="File contents">
-        {([['summary', 'Summary'], ['documents', `Documents${file ? ` · ${savedDocuments}` : ''}`], ['history', 'History']] as const).map(([id, label]) => (
+        {([['summary', 'Summary'], ...(BID_LIFECYCLES.includes(tender.lifecycle) ? [['bid', 'Bid'] as const] : []), ['documents', `Documents${file ? ` · ${savedDocuments}` : ''}`], ['history', 'History']] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className="file__tab" onClick={() => setTab(id)}>
             {label}
           </button>
@@ -150,6 +155,7 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
         {tab === 'summary' && (
           <>
             {fileError && <p className="file-empty" role="alert">{fileError}</p>}
+            {file?.qualification && <QualifyPanel report={file.qualification} />}
             {file?.fromDocuments && file.fromDocuments.length > 0 && (
               <section className="from-docs" aria-label="Found in the tender page and its documents">
                 <h3 className="unread__title">Found in the page and its documents</h3>
@@ -206,6 +212,7 @@ export function TenderFile({ tender, actions, busy = false, waitingNote, onDismi
             <RelatedTenders related={tender.related} onDismiss={onDismissRelated} />
           </>
         )}
+        {tab === 'bid' && <BidPanel opportunityId={tender.id} />}
         {tab === 'documents' && (
           file && file.documents.length > 0 ? (
             <>

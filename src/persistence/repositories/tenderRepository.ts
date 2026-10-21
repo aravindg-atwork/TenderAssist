@@ -185,6 +185,11 @@ export class TenderRepository {
     this.db.prepare('UPDATE tenders SET closing_date = ?, updated_at = ? WHERE id = ?').run(closingDate, new Date().toISOString(), id);
   }
 
+  /** Puts right a closing date and the page text that showed it, read wrongly before. */
+  correctClosingDate(id: string, closingDate: string, detailText: string | null): void {
+    this.db.prepare('UPDATE tenders SET closing_date = ?, detail_text = ? WHERE id = ?').run(closingDate, detailText, id);
+  }
+
   /** Fills a closing date read from a page saved earlier; a date already known is kept. */
   fillClosingDate(id: string, closingDate: string): void {
     this.db.prepare('UPDATE tenders SET closing_date = ? WHERE id = ? AND closing_date IS NULL').run(closingDate, id);

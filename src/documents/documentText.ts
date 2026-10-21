@@ -19,8 +19,23 @@ export interface OcrEngine {
 
 /** A page with fewer characters than this is treated as a scan. */
 const SCANNED_PAGE_CHARS = 40;
-/** OCR stops after this many pages of one document, to keep runs short. */
+/** OCR reads a scanned document this many pages at a time, to keep runs short. */
 export const MAX_OCR_PAGES = 15;
+/** A long scanned notice is read further, batch by batch, only to reach its eligibility criteria. */
+export const MAX_OCR_PAGES_IN_ALL = 60;
+
+const CRITERIA_WORDS = /eligi?bi?li?ty|pre[\s-]*qualification|qualification\s+criteria|qualifying\s+criteria/i;
+
+/**
+ * Whether to OCR the next batch of a scanned document: its eligibility
+ * criteria have not been read yet, or they start on one of the last three
+ * pages read, so they may run on.
+ */
+export function readMoreForCriteria(ocrText: ReadonlyMap<number, string>, lastBatch: readonly number[]): boolean {
+  const withCriteria = [...ocrText].filter(([, text]) => CRITERIA_WORDS.test(text)).map(([page]) => page);
+  if (withCriteria.length === 0) return true;
+  return lastBatch.slice(-3).includes(Math.max(...withCriteria));
+}
 
 const IMAGE = /^\.(?:jpe?g|png|tiff?|bmp)$/i;
 
@@ -56,9 +71,16 @@ export async function readDocumentText(path: string, ocr: OcrEngine | null): Pro
     return { text, method: text ? 'OCR' : 'NONE', pages: 1, ocrPages: 1 };
   }
   const pages = await pdfPageTexts(path);
-  const scanned = pages.map((text, index) => (text.length < SCANNED_PAGE_CHARS ? index + 1 : 0)).filter(Boolean).slice(0, MAX_OCR_PAGES);
+  const allScanned = pages.map((text, index) => (text.length < SCANNED_PAGE_CHARS ? index + 1 : 0)).filter(Boolean);
   // OCR trouble keeps the PDF's own text; the scanned pages stay unread.
-  const ocrText = ocr && scanned.length > 0 ? await ocr.pdfPages(path, scanned).catch(() => new Map<number, string>()) : new Map<number, string>();
+  const ocrText = new Map<number, string>();
+  if (ocr) {
+    for (let from = 0; from < Math.min(allScanned.length, MAX_OCR_PAGES_IN_ALL); from += MAX_OCR_PAGES) {
+      const batch = allScanned.slice(from, from + MAX_OCR_PAGES);
+      for (const [page, text] of await ocr.pdfPages(path, batch).catch(() => new Map<number, string>())) ocrText.set(page, text);
+      if (!readMoreForCriteria(ocrText, batch)) break;
+    }
+  }
   const merged = pages.map((text, index) => (ocrText.get(index + 1)?.trim() || text));
   const text = merged.map((page, index) => (page ? `[Page ${index + 1}]\n${page}` : '')).filter(Boolean).join('\n\n');
   const usedOcr = [...ocrText.values()].filter((page) => page.trim()).length;

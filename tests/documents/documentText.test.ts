@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type OcrEngine } from '../../src/documents/documentText.js';
+import { canReadDocument, documentsTextFor, MAX_OCR_PAGES_IN_ALL, readDocumentText, readMoreForCriteria, wordsFoundIn, type OcrEngine } from '../../src/documents/documentText.js';
 
 /** A small PDF: page 1 has text, page 2 has none (as a scanned page would). */
 function twoPagePdf(text: string): Buffer {
@@ -40,6 +40,18 @@ describe('readDocumentText', () => {
     expect(read).toMatchObject({ method: 'MIXED', pages: 2, ocrPages: 1 });
     expect(read.text).toContain('[Page 1]\nEligibility: average turnover 50 lakh');
     expect(read.text).toContain('[Page 2]\nEMD Rs. 25,000');
+  });
+
+  it('reads a long scanned notice further only to reach its eligibility criteria', () => {
+    const batch = Array.from({ length: 15 }, (_, index) => index + 1);
+    const pages = (hits: Record<number, string>) => new Map(batch.map((page) => [page, hits[page] ?? 'General conditions of contract']));
+    // Not reached yet: read the next batch.
+    expect(readMoreForCriteria(pages({}), batch)).toBe(true);
+    // Read on page 6, well inside the batch: stop.
+    expect(readMoreForCriteria(pages({ 6: '4. Eligibility Criteria' }), batch)).toBe(false);
+    // Starts on page 14 of 15: it may run on, so read the next batch too.
+    expect(readMoreForCriteria(pages({ 14: 'Pre-Qualification Criteria' }), batch)).toBe(true);
+    expect(MAX_OCR_PAGES_IN_ALL).toBe(60);
   });
 
   it('keeps the PDF text when OCR fails', async () => {

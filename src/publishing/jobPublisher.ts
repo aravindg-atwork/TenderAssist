@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { coverDocuments, tenderPageFields } from '../review/portalPage.js';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { TenderRow } from '../persistence/repositories/tenderRepository.js';
@@ -6,6 +7,8 @@ import type { FinalClassification } from '../persistence/repositories/classifica
 import type { TenderDocumentRow, TenderRequirementRow, TenderReviewRow } from '../persistence/repositories/tenderWorkflowRepository.js';
 import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from './outputStructure.js';
 import { REPORT_COLUMNS, reportDate, reportRow } from './reportSheet.js';
+import { QUALIFICATION_KIND_LABELS, type QualificationSection } from '../extraction/qualificationSections.js';
+import type { QualifyReport } from '../review/qualifyCheck.js';
 
 export interface PublishableTender {
   tender: TenderRow;
@@ -17,6 +20,8 @@ export interface PublishableTender {
   serialNumber?: number;
   /** The website this tender came from, when one sheet holds several websites. */
   portal?: { url: string; name: string };
+  /** "Do we qualify?": its criteria checked against the company's facts, when they are filled in. */
+  qualification?: QualifyReport;
 }
 
 /**
@@ -46,6 +51,15 @@ function requirementData(row?: TenderRequirementRow): Record<string, string | nu
   if (!row) return {};
   try { return JSON.parse(row.data_json) as Record<string, string | null>; }
   catch { return {}; }
+}
+
+/** The qualification sections the requirement reader found, if any. */
+function requirementSections(row?: TenderRequirementRow): QualificationSection[] {
+  if (!row) return [];
+  try {
+    const sections = (JSON.parse(row.data_json) as { sections?: unknown }).sections;
+    return Array.isArray(sections) ? sections as QualificationSection[] : [];
+  } catch { return []; }
 }
 
 export function localDateFromTimestamp(timestamp: string | Date): string {
@@ -111,6 +125,22 @@ export function tenderDocumentsDirectory(
   return join(jobDirectory, tenderFolderName(jobDirectory, tender, serialNumber, structure, outputDate), resolved.documentsFolder);
 }
 
+/** The "Label: value" lines TenderAssist saved from the website or the GeM bid PDF, in their order and wording. */
+function websiteFields(detailText: string | null | undefined): Array<[string, string]> {
+  return tenderPageFields(detailText).map((field) => [field.label, field.value]);
+}
+
+const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
+const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF263B93' } } as const;
+const GROUP_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCE6F5' } } as const;
+
+/**
+ * One tender's eligibility workbook. "Eligibility" holds the facts a bidder
+ * checks first, then every detail the website or bid PDF gave, so nothing
+ * read is lost. "Qualifications" lists, point by point, the criteria found in
+ * the documents (pre-qualification, the buyer's terms, technical evaluation,
+ * documents to submit), each with the file and page it came from.
+ */
 async function publishTenderEligibilityWorkbook(
   tenderDirectory: string,
   item: PublishableTender,
@@ -120,45 +150,134 @@ async function publishTenderEligibilityWorkbook(
 ): Promise<void> {
   mkdirSync(tenderDirectory, { recursive: true });
   const req = requirementData(item.requirements);
+  const text = (key: string) => (typeof req[key] === 'string' ? req[key]! : '');
+  const sections = requirementSections(item.requirements);
   const decision = item.manualReview?.decision ?? item.automaticDecision;
+  const row = reportRow({ tender: item.tender, serialNumber, eligibility: text('eligibility'), emd: text('emd') });
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'TenderAssist';
   workbook.created = new Date();
   const sheet = workbook.addWorksheet('Eligibility', { views: [{ state: 'frozen', ySplit: 1 }] });
   sheet.columns = [
-    { header: 'Field', key: 'field', width: 28 },
-    { header: 'Value', key: 'value', width: 82 },
+    { header: 'Field', key: 'field', width: 30 },
+    { header: 'Value', key: 'value', width: 100 },
   ];
-  const rows: Array<[string, string | number]> = [
+  const group = (title: string) => {
+    const added = sheet.addRow({ field: title, value: '' });
+    added.font = { bold: true };
+    added.eachCell({ includeEmpty: true }, (cell) => { cell.fill = GROUP_FILL; });
+  };
+  const add = (rows: Array<[string, string | number | null | undefined]>) => {
+    for (const [field, value] of rows) if (value !== null && value !== undefined && value !== '') sheet.addRow({ field, value });
+  };
+  group('The tender');
+  add([
     ['S.No', serialNumber],
     ['Tender ID', item.tender.tender_portal_id ?? item.tender.tender_ref],
     ['Reference', item.tender.tender_ref],
     ['Tender title', item.tender.title],
+    ['Department', row.department],
+    ['Organisation', (item.tender.organisation_chain ?? '').replace(/\|\|/g, ' › ')],
+    ['Location', row.location],
+    ['State', item.tender.state_name],
+    ['Category', item.tender.detail_product_category ?? item.tender.product_category],
+    ['Published / bid start', row.bidStartDate],
+    ['Closing / bid end', row.bidEndDate],
+    ['Pre-bid meeting', row.preBidMeetingDate],
+    ['Tender value', row.tenderValue],
+    ['EMD', row.emd],
+    ['Tender fee', text('tenderFee')],
+    ['Submission method', text('submissionMethod')],
+    ['How bids are evaluated', text('evaluation')],
+    ['Contact', text('contact')],
+  ]);
+  group('What the bidder must meet');
+  const pointCount = sections.reduce((count, section) => count + Math.max(1, section.items.length), 0);
+  const qualify = item.qualification?.profileFilled && item.qualification.checks.length > 0 ? item.qualification : undefined;
+  add([
+    ['Do we qualify?', qualify
+      ? `${qualify.notMet > 0 ? `Does not meet ${qualify.notMet}` : 'Meets all it could check'}: ${qualify.met} met, ${qualify.notMet} not met, ${qualify.toCheck} to check (see the Do we qualify sheet)`
+      : ''],
+    ['Eligibility (summary)', row.eligibilityNotes || 'Not found in the documents: read the tender documents'],
+    ['Scope', text('scope')],
+    ['Qualification points found', sections.length > 0
+      ? `${pointCount}, listed on the Qualifications sheet`
+      : 'None found: the documents may be scanned images, or name them differently'],
+  ]);
+  const covers = coverDocuments(item.tender.detail_text);
+  if (covers.length > 0) {
+    group('Documents to upload (the website’s cover list)');
+    add(covers.flatMap((cover, index) => cover.documents.map((document, at): [string, string] => [
+      at === 0 ? `Cover ${index + 1}: ${cover.cover}` : '', `${document.description} (${document.type})`,
+    ])));
+  }
+  group('Your decision');
+  add([
     ['Approved decision', decision],
     ['Approval source', item.manualReview ? 'Manual review' : 'Automation'],
-    ['Review reason', item.manualReview?.reason ?? ''],
-    ['Category', item.tender.detail_product_category ?? item.tender.product_category ?? ''],
-    ['Organisation', item.tender.organisation_chain ?? ''],
-    ['Department', item.tender.department ?? ''],
-    ['State', item.tender.state_name ?? ''],
-    ['Published date', item.tender.published_date ?? ''],
-    ['Closing date', item.tender.closing_date ?? ''],
-    ['Estimated value', item.tender.value_in_rupees === 'NA' ? '' : item.tender.value_in_rupees ?? ''],
-    ['Scope', req.scope ?? ''],
-    ['Eligibility', req.eligibility ?? ''],
-    ['EMD', req.emd ?? ''],
-    ['Tender fee', req.tenderFee ?? ''],
-    ['Submission deadline', req.submissionDeadline ?? ''],
-    ['Submission method', req.submissionMethod ?? ''],
-    ['Contact', req.contact ?? ''],
-    ['Extraction confidence', item.requirements?.confidence ?? ''],
+    ['Review reason', item.manualReview?.reason],
     ['Documents downloaded', item.documents.filter((document) => document.state === 'DOWNLOADED').length],
-  ];
-  for (const [field, value] of rows) sheet.addRow({ field, value });
+    ['Extraction confidence', item.requirements?.confidence],
+  ]);
+  const shown = new Set(['bid number', 'work description']);
+  const details = websiteFields(item.tender.detail_text).filter(([label]) => !shown.has(label.toLowerCase()));
+  if (details.length > 0) {
+    group('Everything the website or bid PDF gave');
+    add(details);
+  }
   sheet.getRow(1).height = 28;
-  sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF263B93' } };
+  sheet.getRow(1).font = HEADER_FONT;
+  sheet.getRow(1).fill = HEADER_FILL;
+  sheet.getColumn(1).alignment = { vertical: 'top' };
   sheet.getColumn(2).alignment = { vertical: 'top', wrapText: true };
+
+  const points = workbook.addWorksheet('Qualifications', { views: [{ state: 'frozen', ySplit: 1 }] });
+  points.columns = [
+    { header: 'Section', key: 'kind', width: 26 },
+    { header: '#', key: 'point', width: 5 },
+    { header: 'Requirement (as the document says)', key: 'requirement', width: 100 },
+    { header: 'Meets it? (fill in)', key: 'meets', width: 16 },
+    { header: 'From', key: 'source', width: 40 },
+  ];
+  if (sections.length === 0) {
+    points.addRow({ kind: 'None found', requirement: 'No eligibility or qualification section was found in the downloaded documents. Scanned documents are read with OCR when Windows has it; check the documents themselves.' });
+  }
+  for (const section of sections) {
+    const source = `${section.document}${section.page ? `, page ${section.page}` : ''} (“${section.heading}”)`;
+    const kind = QUALIFICATION_KIND_LABELS[section.kind] ?? section.kind;
+    const entries = section.items.length > 0 ? section.items : [section.text];
+    for (const entry of entries) {
+      // The point's own number ("B. Bidder Experience" groups have none); Excel holds at most 32,767 characters in a cell.
+      const number = section.items.length > 0 ? /^(\d{1,2})[.)]?\s/.exec(entry)?.[1] : undefined;
+      points.addRow({ kind, point: number ? Number(number) : '', requirement: entry.length > 32_000 ? `${entry.slice(0, 31_990)}…` : entry, source });
+    }
+  }
+  points.getRow(1).height = 28;
+  points.getRow(1).font = HEADER_FONT;
+  points.getRow(1).fill = HEADER_FILL;
+  for (const key of ['kind', 'requirement', 'source']) points.getColumn(key).alignment = { vertical: 'top', wrapText: true };
+  points.autoFilter = { from: 'A1', to: 'E1' };
+
+  if (qualify) {
+    const checks = workbook.addWorksheet('Do we qualify', { views: [{ state: 'frozen', ySplit: 1 }] });
+    checks.columns = [
+      { header: 'Result', key: 'status', width: 12 },
+      { header: 'Why', key: 'reason', width: 60 },
+      { header: 'Criterion', key: 'requirement', width: 80 },
+      { header: 'From', key: 'source', width: 36 },
+    ];
+    const label = { MET: 'Met', NOT_MET: 'Not met', CHECK: 'Check' } as const;
+    const fill = { MET: 'FFDDF4E9', NOT_MET: 'FFFDE8E6', CHECK: 'FFFFF3D4' } as const;
+    for (const check of [...qualify.checks].sort((a, b) => ['NOT_MET', 'CHECK', 'MET'].indexOf(a.status) - ['NOT_MET', 'CHECK', 'MET'].indexOf(b.status))) {
+      const added = checks.addRow({ status: label[check.status], reason: check.reason, requirement: check.requirement, source: check.source });
+      added.getCell('status').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill[check.status] } };
+    }
+    checks.getRow(1).height = 28;
+    checks.getRow(1).font = HEADER_FONT;
+    checks.getRow(1).fill = HEADER_FILL;
+    for (const key of ['reason', 'requirement', 'source']) checks.getColumn(key).alignment = { vertical: 'top', wrapText: true };
+  }
+
   const fileName = resolveOutputStructure(structure, outputDate, folderTitle(item.tender.title), serialNumber).eligibilityWorkbook;
   await workbook.xlsx.writeFile(join(tenderDirectory, fileName));
 }
@@ -226,6 +345,7 @@ export async function publishJobWorkbook(
       serialNumber,
       eligibility: req.eligibility,
       emd: req.emd,
+      qualification: item.qualification,
       portalUrl: website?.url,
       portalName: website?.name,
       // Relative, so the link also works in the copy on Drive.

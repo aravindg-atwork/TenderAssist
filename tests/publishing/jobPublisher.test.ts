@@ -55,7 +55,14 @@ describe('publishJobWorkbook', () => {
     expect(existsSync(join(tenderDirectory, 'Eligibility.xlsx'))).toBe(true);
     const eligibility = new ExcelJS.Workbook();
     await eligibility.xlsx.readFile(join(tenderDirectory, 'Eligibility.xlsx'));
-    expect(eligibility.getWorksheet('Eligibility')?.getCell('B4').value).toBe(tender.tender_ref);
+    const valueOf = (label: string) => {
+      let found: unknown;
+      eligibility.getWorksheet('Eligibility')!.eachRow((row) => { if (row.getCell(1).value === label) found = row.getCell(2).value; });
+      return found;
+    };
+    expect(valueOf('Reference')).toBe(tender.tender_ref);
+    expect(valueOf('Closing / bid end')).toBe('01-10-2026');
+    expect(eligibility.getWorksheet('Qualifications')?.getCell('A2').value).toBe('None found');
   });
 
   it('keeps a stable date hierarchy without using the job id', () => {

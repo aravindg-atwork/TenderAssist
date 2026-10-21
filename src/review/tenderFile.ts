@@ -1,3 +1,5 @@
+import type { QualifyReport } from './qualifyCheck.js';
+import { tenderPageFields } from './portalPage.js';
 // What a tender's "file" shows: the portal's own fields read from its
 // details page, the key ones first in plain names, and its documents.
 
@@ -43,26 +45,13 @@ export interface TenderFileView {
   fromGem?: boolean;
   /** Requirements found in the tender page and the text inside its documents, once documents were read. */
   fromDocuments?: TenderField[];
+  /** "Do we qualify?": its criteria checked against the company's facts. */
+  qualification?: QualifyReport;
 }
 
 /** The "Label: value" lines TenderAssist stores at the top of a tender's text. */
 export function parseDetailFields(detailText: string | null | undefined): TenderField[] {
-  if (!detailText) return [];
-  const fields: TenderField[] = [];
-  const seen = new Set<string>();
-  for (const line of detailText.split('\n')) {
-    if (!line.trim()) break; // the fields end at the first blank line; page text follows
-    const match = /^([^:\n]{2,80}):\s+(.+)$/.exec(line.trim());
-    if (!match) continue;
-    const label = match[1].trim();
-    const value = match[2].trim();
-    if (/^(welcome|last login|server time)$/i.test(label) || /^:?$/.test(value)) continue;
-    const key = `${label.toLowerCase()}|${value}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    fields.push({ label, value });
-  }
-  return fields;
+  return tenderPageFields(detailText);
 }
 
 // Plain names for the portal's labels, in the order the file shows them.

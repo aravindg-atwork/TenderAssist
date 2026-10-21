@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
+import { BidResultsSection } from './BidResultsSection';
 import type { DailyReportView, OperatorDecision, ReportTenderItem, TenderSummary } from '../../../src/electron/ipcTypes';
 import { TenderFile, type FileAction } from './TenderFile';
 import { getPortalDefinition } from '../../../src/config/portalRegistry';
@@ -224,6 +225,8 @@ export function ReportsPage({ portalId, onPortalChange }: ReportsPageProps) {
               </div>
             </section>
           )}
+
+          <BidResultsSection />
 
           <p className="hint">
             {report.gem
