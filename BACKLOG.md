@@ -2,7 +2,7 @@
 
 Last updated: 21 Oct 2026. Pick up from **Next up**.
 
-## On dev, 21 Oct 2026 (not released; unit-tested, not yet seen running in the app)
+## 0.7.6, 21 Oct 2026 (unit-tested; Tamil Nadu sign-in and search seen running from source, the rest not yet seen running)
 
 - **Fast start:** retender linking at start compared every tender with every other (57 s on 2,154 GeM bids, minutes in offices). Now only tenders sharing a reference or buyer are compared, written in one transaction: ~0.35 s, same 1,816 links (checked on the dev database).
 - **GeM reverse auctions closed by mistake:** an RA's PDF says "RA End Date/Time", which was not read, so the original bid's end date (days earlier) became its closing date and the decide screen said "Closed … ago". Read now; the original bid's end, opening and pre-bid dates never stand in for the RA's. RAs saved wrongly are corrected at start (and opened again if they closed only for that), noted as "Closing date corrected".
