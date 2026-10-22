@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { daySheetFileName, folderTitle, isDaySheet, jobOutputDirectory, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
+import { daySheetFileName, daySheetsOfWebsite, folderTitle,isDaySheet, jobOutputDirectory, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderOutputDirectory } from '../../src/publishing/jobPublisher.js';
 import type { TenderRow } from '../../src/persistence/repositories/tenderRepository.js';
 import { DEFAULT_OUTPUT_STRUCTURE } from '../../src/publishing/outputStructure.js';
 
@@ -189,6 +189,15 @@ describe('day report sheet names', () => {
     for (const name of ['Eligibility.xlsx', '~$Approved-Tenders-12-10-2026.xlsx', 'Approved-Tenders-11-10-2026.xlsx', 'Approved-Tenders-12-10-2026.pdf']) {
       expect(isDaySheet(base, name)).toBe(false);
     }
+  });
+
+  it('sends each website’s Drive folder only its own sheet, or the one sheet for the day', () => {
+    const names = ['Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx', 'Approved-Tenders-12-10-2026 - GeM.xlsx', 'Approved-Tenders-12-10-2026 (run 2).xlsx', 'Eligibility.xlsx'];
+    expect(daySheetsOfWebsite(names, base, 'PER_WEBSITE', 'Tamil Nadu')).toEqual(['Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx']);
+    expect(daySheetsOfWebsite(names, base, 'PER_WEBSITE', 'GeM (Government e-Marketplace)')).toEqual(['Approved-Tenders-12-10-2026 - GeM.xlsx']);
+    expect(daySheetsOfWebsite(names, base, 'PER_WEBSITE', 'Kerala')).toEqual([]);
+    expect(daySheetsOfWebsite([...names, base], base, 'ONE_PER_DAY', 'Tamil Nadu')).toEqual([base]);
+    expect(daySheetsOfWebsite([...names, base], base, 'ONE_PER_DAY', 'GeM (Government e-Marketplace)')).toEqual([base]);
   });
 
   it('removes sheets under old names from the Drive for desktop copy', () => {

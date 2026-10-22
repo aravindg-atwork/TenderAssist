@@ -423,7 +423,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
             <button className="btn btn--quiet" type="button" onClick={() => choosePublishingFolder('local')}>Choose…</button>
           </div>
           <ReportSheetsSetting />
-          <GoogleDriveSetting />
+          <GoogleDriveSetting portalId={selectedPortalId} onPortalChange={onPortalChange} />
           <details className="disclosure" ref={folderCustomizerRef}>
             <summary>More folder options: names, and a Google Drive for desktop copy</summary>
             <label className="field field--wide" htmlFor="drive-output-root"><span>Also copy approved tenders to a Google Drive for desktop folder <small>optional; not needed when the Drive folder above is named</small></span></label>

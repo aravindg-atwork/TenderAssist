@@ -64,10 +64,11 @@ The API key only opens the chooser. Every choice is still made by the signed-in 
 ## 6. In TenderAssist (the operator)
 
 1. **Activate the key** on first start: paste the key, then sign in with Google in the browser and leave the Google Drive box ticked. This one sign-in is also Drive's: nothing to sign in to again in Settings.
-2. Open **Settings → Folders → Upload to Google Drive** and either:
+2. Open **Settings → Folders → Upload to Google Drive**. **Each website has its own Drive folder** (since 0.7.7): Tamil Nadu tenders go to one, GeM bids to another. Choose the **Website**, then either:
    - choose **Choose a folder in Drive**, pick a folder in My Drive, **Shared with me**, or **Shared drives** in the browser, and choose **Select**. You need to be able to add files to it: an Editor of a shared folder, or a Content manager of a shared drive. Or:
    - type a **folder name** (for example `Tenders 2026-27`, or `Office/Tenders` for a folder inside a folder) and choose **Save the folder name**. TenderAssist makes the folder in **My Drive** (or finds the one it made before).
-3. **Open in Drive** shows the folder.
+3. Do the same for every website you search. A search (or documents run) of a website with no Drive folder does not start: Today and the error say to choose its folder first. Not asked while Drive is signed out.
+4. **Open in Drive** shows the chosen website's folder.
 
 If the Google Drive box was unticked, or the sign-in was removed in the Google account, Settings says so and has **Sign in to Google**. **Use another Google account** uploads somewhere else; the folder is then made in that account's Drive.
 
@@ -78,11 +79,14 @@ A typed name always means a folder TenderAssist makes: if you already have one w
 - **Drive keeps the same files as this computer**, month by month and day by day:
 
   ```
-  My Drive / <folder name> / October-2026 / 12-10-2026 / Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx
-                                                       / Approved-Tenders-12-10-2026 - GeM.xlsx
-                                                       / 12-10-2026_1_<short title> / Documents / …
-                                                                                  / Eligibility.xlsx
+  <Tamil Nadu folder> / October-2026 / 12-10-2026 / Approved-Tenders-12-10-2026 - Tamil Nadu.xlsx
+                                                  / 12-10-2026_1_<short title> / Documents / …
+                                                                             / Eligibility.xlsx
+  <GeM folder>        / October-2026 / 12-10-2026 / Approved-Tenders-12-10-2026 - GeM.xlsx
+                                                  / 12-10-2026_2_<short title> / …
   ```
+
+  With **One sheet for the day**, that sheet lists every website, so each website's day folder gets a copy; its "Open documents" links reach only that website's tender folders on Drive.
 
 - **Report sheets**: one per website each day by default; every search of that website that day is on it. Settings → Folders → Report sheets → **One sheet for the day** puts every website on one sheet, with a Website column. Changing it rewrites saved days, on this computer and on Drive (old sheets go to Drive's bin).
 - Tenders kept on the day sheet go to Drive with their documents and Eligibility.xlsx: ones TenderAssist shortlisted and ones you approved. Tenders needing a look stay on this computer until you approve them; rejected ones never go.
@@ -95,6 +99,8 @@ A typed name always means a folder TenderAssist makes: if you already have one w
   - if an upload fails, a message names what failed. The files stay safe on the computer, and "Upload everything saved so far" retries.
 - **The sign-in is stored on this computer,** encrypted for the Windows account. It is never in backups or support bundles. **Sign out of Drive** stops all uploads.
 
-## PCs set up with a folder link
+## PCs set up before 0.7.7
 
-Earlier versions asked for a Drive folder link and full Drive access. A PC set up that way keeps uploading to its old folder until the folder name is changed or Google is signed in again; after that, TenderAssist makes its own folder by the name.
+Before 0.7.7 every website went to one folder. That folder is not used for new uploads and nothing in it is moved; Settings names it under the website folders. Choose (or name) a folder for each website. A re-upload of an earlier day (an approval, "Upload everything saved so far") goes to the website's new folder.
+
+Earlier still, versions asked for a Drive folder link and full Drive access; such a PC also needs a folder chosen or named for each website.

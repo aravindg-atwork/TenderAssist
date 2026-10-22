@@ -128,6 +128,8 @@ export function TodayPage({
   const [drawer, setDrawer] = useState<'queue' | 'details' | null>(null);
   const [documentsWaiting, setDocumentsWaiting] = useState<DocumentsWaiting | null>(null);
   const [driveSet, setDriveSet] = useState(false);
+  // Signed in to Drive, but this website has no Drive folder yet: its searches wait for one.
+  const [driveFolderMissing, setDriveFolderMissing] = useState(false);
   const portal = getPortalDefinition(selectedPortalId);
   const gem = isGemPortal(portal);
   const closing = gem && dateMeaning === 'CLOSING_AFTER';
@@ -197,9 +199,12 @@ export function TodayPage({
   };
 
   useEffect(() => {
-    Promise.all([window.tenderAssist.getPublishingSettings(selectedPortalId), window.tenderAssist.getGoogleDrive()])
-      .then(([publishing, drive]) => setDriveSet(Boolean(publishing.driveOutputRoot.trim()) || drive.signedIn))
-      .catch(() => setDriveSet(false));
+    Promise.all([window.tenderAssist.getPublishingSettings(selectedPortalId), window.tenderAssist.getGoogleDrive(selectedPortalId)])
+      .then(([publishing, drive]) => {
+        setDriveSet(Boolean(publishing.driveOutputRoot.trim()) || (drive.signedIn && Boolean(drive.folderName)));
+        setDriveFolderMissing(drive.signedIn && !drive.folderName);
+      })
+      .catch(() => { setDriveSet(false); setDriveFolderMissing(false); });
   }, [selectedPortalId]);
 
   const loadDocumentsWaiting = useCallback(() => {
@@ -555,6 +560,12 @@ export function TodayPage({
                 ) : blocker.helpUrl && (
                   <button type="button" className="btn btn--line btn--sm" onClick={() => void window.tenderAssist.openHelpLink(blocker.helpUrl!)}>Get help</button>
                 )}
+              </div>
+            )}
+            {driveFolderMissing && (
+              <div className="alert alert--look">
+                <AlertIcon /><p><strong>Choose the Google Drive folder for {portal.name} tenders.</strong> Each website’s tenders go to their own Drive folder; searches start once this one is set.</p>
+                <button type="button" className="btn btn--line btn--sm" onClick={() => onOpenSettings('folders')}>Choose the folder</button>
               </div>
             )}
             {startError && <div className="alert alert--stop" role="alert"><AlertIcon /><p>{startError}</p></div>}

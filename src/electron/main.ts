@@ -87,7 +87,7 @@ import { canReadDocument, documentsTextFor, readDocumentText, wordsFoundIn, type
 import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windowsOcr.js';
 import { extractTenderRequirements, isOutdatedReading } from '../extraction/requirementExtractor.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
-import { daySheetFileName, isDaySheet, mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory, type PublishableTender, type ReportSheetMode } from '../publishing/jobPublisher.js';
+import { daySheetFileName, daySheetsOfWebsite, isDaySheet,mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory, type PublishableTender, type ReportSheetMode } from '../publishing/jobPublisher.js';
 import { supersededRuns } from '../publishing/supersededRuns.js';
 import { driveCopyOfSheet, linkSegments } from '../publishing/driveSheetLinks.js';
 import { filesForDrive } from '../publishing/driveSelection.js';
@@ -103,7 +103,7 @@ import { factsFromBidText } from '../gem/gemBidDocument.js';
 import { chooseDriveFolder, projectNumberOf } from '../publishing/drivePicker.js';
 import { resolveOutputStructure } from '../publishing/outputStructure.js';
 import { driveFolderLink, driveFolderNameParts, driveFolderPath, GoogleDriveClient, GoogleDriveError, parseGoogleClientFile, signInWithGoogle, type DriveCredentials, type GoogleSignIn } from '../publishing/googleDrive.js';
-import { GoogleDriveSettingsRepository } from '../persistence/repositories/googleDriveSettingsRepository.js';
+import { driveFolderOf, GoogleDriveSettingsRepository, hasDriveFolder } from '../persistence/repositories/googleDriveSettingsRepository.js';
 import { ReportSheetSettingsRepository } from '../persistence/repositories/reportSheetSettingsRepository.js';
 import { SetupChecklistRepository } from '../persistence/repositories/setupChecklistRepository.js';
 import type { JobOutputPlan } from '../persistence/repositories/jobOutputRepository.js';
@@ -1072,37 +1072,43 @@ ipcMain.handle('get-portal-credential-settings',async (_event, portalId: string)
 
 ipcMain.handle('get-publishing-settings', (_event, portalId: string) => publishingSettings.get(getPortalDefinition(portalId).id));
 ipcMain.handle('save-publishing-settings', (_event, portalId: string, settings) => publishingSettings.save(settings, getPortalDefinition(portalId).id));
-ipcMain.handle('get-google-drive', () => googleDriveStatus());
+/** The website a Drive request is about: each website has its own Drive folder. */
+function drivePortalId(portalId: unknown): string {
+  return getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID).id;
+}
 
-ipcMain.handle('save-google-drive', async (_event, input: unknown): Promise<GoogleDriveStatus> => {
+ipcMain.handle('get-google-drive', (_event, portalId: unknown) => googleDriveStatus(drivePortalId(portalId)));
+
+ipcMain.handle('save-google-drive', async (_event, portalId: unknown, input: unknown): Promise<GoogleDriveStatus> => {
+  const portal = drivePortalId(portalId);
   const value = (input ?? {}) as { folderName?: unknown; uploadMode?: unknown };
-  const current = googleDriveSettings.get();
   if (value.uploadMode === 'SAVED' || value.uploadMode === 'APPROVED') {
-    googleDriveSettings.save({ ...current, uploadMode: value.uploadMode });
-    if (typeof value.folderName !== 'string') return googleDriveStatus();
+    googleDriveSettings.save({ ...googleDriveSettings.get(), uploadMode: value.uploadMode });
+    if (typeof value.folderName !== 'string') return googleDriveStatus(portal);
   }
   const folderName = driveFolderNameParts(typeof value.folderName === 'string' ? value.folderName : '').join('/');
-  if (folderName === current.folderName) return googleDriveStatus();
+  if (folderName === driveFolderOf(googleDriveSettings.get(), portal).folderName) return googleDriveStatus(portal);
   // A new name means a new folder: found (or made) in My Drive when signed in, otherwise at the first upload.
-  googleDriveSettings.save({ ...googleDriveSettings.get(), folderName, folderId: '', folderPicked: false });
+  googleDriveSettings.saveFolder(portal, { folderName, folderId: '', folderPicked: false });
   const client = await googleDriveClient();
-  if (client && folderName) await driveFolderFor(client);
-  return googleDriveStatus();
+  if (client && folderName) await driveFolderFor(client, portal);
+  return googleDriveStatus(portal);
 });
 
 /** Signs in to Google again from Settings (when the licence sign-in was not kept, ended, or was removed). */
-ipcMain.handle('connect-google-drive', async (): Promise<GoogleDriveStatus> => {
+ipcMain.handle('connect-google-drive', async (_event, portalId: unknown): Promise<GoogleDriveStatus> => {
   await keepGoogleSignIn(await googleSignIn());
-  return googleDriveStatus();
+  return googleDriveStatus(drivePortalId(portalId));
 });
 
-ipcMain.handle('check-google-drive', async (): Promise<GoogleDriveStatus> => {
+ipcMain.handle('check-google-drive', async (_event, portalId: unknown): Promise<GoogleDriveStatus> => {
+  const portal = drivePortalId(portalId);
   const client = await googleDriveClient();
   if (!client) throw new Error('Google Drive is not signed in yet.');
   const account = await client.account();
   googleDriveSettings.save({ ...googleDriveSettings.get(), accountEmail: account.email });
-  if (googleDriveSettings.get().folderName) await driveFolderFor(client);
-  return googleDriveStatus();
+  if (hasDriveFolder(driveFolderOf(googleDriveSettings.get(), portal))) await driveFolderFor(client, portal);
+  return googleDriveStatus(portal);
 });
 
 /**
@@ -1110,7 +1116,8 @@ ipcMain.handle('check-google-drive', async (): Promise<GoogleDriveStatus> => {
  * can edit in My Drive, shared with them, or in a shared drive, and uploads
  * go there. Picking it is what lets TenderAssist (drive.file) use it.
  */
-ipcMain.handle('choose-google-drive-folder', async (): Promise<GoogleDriveStatus> => {
+ipcMain.handle('choose-google-drive-folder', async (_event, portalId: unknown): Promise<GoogleDriveStatus> => {
+  const portal = drivePortalId(portalId);
   const credentials = builtInGoogleClient();
   if (!credentials?.pickerApiKey) throw new Error('This copy of TenderAssist cannot open Google Drive’s folder chooser. Type a folder name instead.');
   const client = await googleDriveClient();
@@ -1118,11 +1125,11 @@ ipcMain.handle('choose-google-drive-folder', async (): Promise<GoogleDriveStatus
   const picked = await chooseDriveFolder(
     { apiKey: credentials.pickerApiKey, appId: projectNumberOf(credentials.clientId), accessToken: await client.pickerToken() },
     async (url) => { await shell.openExternal(url); });
-  if (!picked) return googleDriveStatus();
+  if (!picked) return googleDriveStatus(portal);
   // Checks it is a folder TenderAssist may now add files to (an Editor's, or a shared drive's Content manager's).
   const folder = await client.folder(picked.id);
-  googleDriveSettings.save({ ...googleDriveSettings.get(), folderId: folder.id, folderName: folder.name || picked.name, folderPicked: true });
-  return googleDriveStatus();
+  googleDriveSettings.saveFolder(portal, { folderId: folder.id, folderName: folder.name || picked.name, folderPicked: true });
+  return googleDriveStatus(portal);
 });
 
 ipcMain.handle('get-report-sheets', (): ReportSheetMode => reportSheetSettings.get());
@@ -1149,21 +1156,21 @@ async function rewriteAllDaySheets(): Promise<void> {
   if (runsUploadToDrive() && jobIds.length > 0) void uploadToGoogleDrive([], jobIds.map((jobId) => ({ jobId })), 'report sheets upload');
 }
 
-ipcMain.handle('open-google-drive-folder', async (): Promise<void> => {
-  const { folderId } = googleDriveSettings.get();
+ipcMain.handle('open-google-drive-folder', async (_event, portalId: unknown): Promise<void> => {
+  const { folderId } = driveFolderOf(googleDriveSettings.get(), drivePortalId(portalId));
   if (!folderId) throw new Error('The Drive folder is made at the first upload. Run a search, or choose “Upload everything saved so far”.');
   await shell.openExternal(driveFolderLink(folderId));
 });
 
-ipcMain.handle('upload-everything-to-google-drive', async (): Promise<GoogleDriveStatus> => {
+ipcMain.handle('upload-everything-to-google-drive', async (_event, portalId: unknown): Promise<GoogleDriveStatus> => {
   if (!(await googleDriveClient())) throw new Error('Sign in to Google first.');
   await uploadEverythingToGoogleDrive();
-  return googleDriveStatus();
+  return googleDriveStatus(drivePortalId(portalId));
 });
 
-ipcMain.handle('disconnect-google-drive', async (): Promise<GoogleDriveStatus> => {
+ipcMain.handle('disconnect-google-drive', async (_event, portalId: unknown): Promise<GoogleDriveStatus> => {
   googleDriveSettings.save({ ...googleDriveSettings.get(), refreshTokenEncrypted: null, accountEmail: '', connectedAt: null });
-  return googleDriveStatus();
+  return googleDriveStatus(drivePortalId(portalId));
 });
 
 ipcMain.handle('get-automation-pacing', () => automationSettings.get());
@@ -1624,7 +1631,7 @@ async function setupChecklist(): Promise<SetupChecklist> {
   const intentAreExamples = sameList(defaults.keywords, STARTING_INTENT_WORDS);
   const excludedAreExamples = sameList(defaults.excludedKeywords, STARTING_EXCLUDED_WORDS);
   const outputRoot = publishingSettings.get(portal?.id ?? DEFAULT_PORTAL_ID).localOutputRoot;
-  const drive = googleDriveSettings.get();
+  const driveFolder = driveFolderOf(googleDriveSettings.get(), portal?.id ?? DEFAULT_PORTAL_ID);
   const steps: SetupStep[] = [
     { id: 'activate', automatic: true, done: !licenceView.enforced || licenceView.usable,
       detail: licenceView.account ? `Activated for ${licenceView.account}` : licenceView.enforced ? 'Not activated yet' : 'Activated' },
@@ -1649,8 +1656,9 @@ async function setupChecklist(): Promise<SetupChecklist> {
         ? `${defaults.excludedKeywords.length} starting examples: add the work you never bid for`
         : `${defaults.excludedKeywords.length} excluded ${defaults.excludedKeywords.length === 1 ? 'word' : 'words'}` },
     { id: 'folder', automatic: true, done: Boolean(outputRoot), detail: outputRoot || 'Not set' },
-    { id: 'drive', automatic: true, done: Boolean(drive.folderName) && driveSignInUsable(),
-      detail: drive.folderName && driveSignInUsable() ? `My Drive / ${drive.folderName}` : !driveSignInUsable() ? 'Not signed in to Google' : 'No folder name yet' },
+    { id: 'drive', automatic: true, done: Boolean(driveFolder.folderName) && driveSignInUsable(),
+      detail: driveFolder.folderName && driveSignInUsable() ? (driveFolder.folderPicked ? driveFolder.folderName : `My Drive / ${driveFolder.folderName}`)
+        : !driveSignInUsable() ? 'Not signed in to Google' : `No folder for ${portal?.name ?? 'this website'} yet` },
   ];
   const allDone = steps.every((step) => step.done);
   if (allDone && !state.completedAt) state = setupState.save({ ...state, completedAt: new Date().toISOString() });
@@ -2234,7 +2242,7 @@ async function googleSignIn(): Promise<GoogleSignIn> {
   }
 }
 
-/** Keeps a Google sign-in for Drive uploads, and makes the Drive folder when its name is already set. */
+/** Keeps a Google sign-in for Drive uploads, and makes each website's Drive folder whose name is already set. */
 async function keepGoogleSignIn(signIn: GoogleSignIn): Promise<void> {
   const previous = googleDriveSettings.get();
   const sameAccount = previous.accountEmail.toLowerCase() === signIn.email.toLowerCase();
@@ -2244,13 +2252,16 @@ async function keepGoogleSignIn(signIn: GoogleSignIn): Promise<void> {
     refreshTokenEncrypted: await encryptText(signIn.refreshToken),
     accountEmail: signIn.email,
     connectedAt: new Date().toISOString(),
-    // Another account cannot see the old account's folder: make it again there.
+    // Another account cannot see the old account's folders: make them again there.
+    portalFolders: sameAccount ? previous.portalFolders
+      : Object.fromEntries(Object.entries(previous.portalFolders).map(([portalId, folder]) => [portalId, { ...folder, folderId: '' }])),
     folderId: sameAccount ? previous.folderId : '',
   });
   const client = await googleDriveClient();
-  if (client && googleDriveSettings.get().folderName) {
+  for (const [portalId, folder] of Object.entries(googleDriveSettings.get().portalFolders)) {
+    if (!client || !folder.folderName) continue;
     // A missing folder is made at the next upload; the sign-in itself has worked.
-    await driveFolderFor(client).catch((error) => console.error('[TenderAssist] Could not make the Drive folder after sign-in:', error));
+    await driveFolderFor(client, portalId).catch((error) => console.error(`[TenderAssist] Could not make the Drive folder of ${portalId} after sign-in:`, error));
   }
 }
 
@@ -2262,12 +2273,14 @@ async function googleDriveClient(): Promise<GoogleDriveClient | null> {
 }
 
 /**
- * The Drive folder uploads go into, by the name typed in Settings. Found in
- * My Drive among the folders TenderAssist made, or made there; made again if
- * it was deleted or binned. Inside it: month folders, then day folders.
+ * A website's Drive folder, the one its tenders are uploaded to, by the name
+ * typed in Settings or as chosen in Drive. A named one is found in My Drive
+ * among the folders TenderAssist made, or made there; made again if it was
+ * deleted or binned. Inside it: month folders, then day folders.
  */
-async function driveFolderFor(client: GoogleDriveClient): Promise<string> {
-  const settings = googleDriveSettings.get();
+async function driveFolderFor(client: GoogleDriveClient, portalId: string): Promise<string> {
+  const settings = driveFolderOf(googleDriveSettings.get(), portalId);
+  const website = getPortalDefinition(portalId).name;
   if (settings.folderId) {
     try {
       await client.folder(settings.folderId);
@@ -2275,28 +2288,51 @@ async function driveFolderFor(client: GoogleDriveClient): Promise<string> {
     } catch (error) {
       if (!(error instanceof GoogleDriveError && error.status === 404)) throw error;
       if (settings.folderPicked) {
-        throw new Error(`The Drive folder you chose, “${settings.folderName}”, is in the bin, deleted, or no longer shared with you. Choose a folder again in Settings → Upload to Google Drive.`);
+        throw new Error(`The Drive folder you chose for ${website}, “${settings.folderName}”, is in the bin, deleted, or no longer shared with you. Choose a folder again in Settings → Folders → Upload to Google Drive.`);
       }
     }
   }
   const parts = driveFolderNameParts(settings.folderName);
-  if (parts.length === 0) throw new Error('Type a Drive folder name in Settings → Upload to Google Drive.');
+  if (parts.length === 0) throw new Error(`Choose or name the Drive folder for ${website} in Settings → Folders → Upload to Google Drive.`);
   const folderId = await client.ensurePath('root', parts);
-  googleDriveSettings.save({ ...googleDriveSettings.get(), folderId });
+  googleDriveSettings.saveFolder(portalId, { ...settings, folderId });
   return folderId;
+}
+
+/** The website a run searched, or null for a run with no saved configuration. */
+function portalIdOfJob(jobId: string): string | null {
+  const portalId = runConfigurations.getForJob(jobId)?.portalId;
+  return portalId ? getPortalDefinition(portalId).id : null;
+}
+
+/**
+ * A search or documents run of a website waits until the website has its own
+ * Drive folder (owner, 22 Oct 2026), so its tenders never land in another
+ * website's folder. Not asked while Drive is not signed in.
+ */
+function requireDriveFolder(portal: PortalDefinition): void {
+  if (!driveSignInUsable() || hasDriveFolder(driveFolderOf(googleDriveSettings.get(), portal.id))) return;
+  throw new Error(`Choose the Google Drive folder for ${portal.name} tenders first: Settings → Folders → Upload to Google Drive. Choose a folder in Drive, or type a name and TenderAssist makes it. Each website's tenders go to their own folder.`);
 }
 
 // The Google sign-in address while a sign-in waits, for opening it in another browser.
 let googleSignInLink: string | null = null;
 
-async function googleDriveStatus(): Promise<GoogleDriveStatus> {
+async function googleDriveStatus(portalId: string): Promise<GoogleDriveStatus> {
   const settings = googleDriveSettings.get();
+  const folder = driveFolderOf(settings, portalId);
   return {
     available: builtInGoogleClient() !== null,
     signInLink: googleSignInLink,
-    folderId: settings.folderId,
-    folderName: settings.folderName,
-    folderPicked: settings.folderPicked,
+    portalId,
+    portalName: getPortalDefinition(portalId).name,
+    folderId: folder.folderId,
+    folderName: folder.folderName,
+    folderPicked: folder.folderPicked,
+    portalFolders: Object.entries(settings.portalFolders)
+      .map(([id, saved]) => ({ portalId: id, portalName: getPortalDefinition(id).name, folderName: saved.folderName, folderPicked: saved.folderPicked }))
+      .sort((a, b) => a.portalName.localeCompare(b.portalName)),
+    earlierFolderName: settings.folderName,
     pickerAvailable: Boolean(builtInGoogleClient()?.pickerApiKey),
     accountEmail: settings.accountEmail,
     signedIn: driveSignInUsable(),
@@ -2324,7 +2360,7 @@ function isRejectedByOperator(tender: TenderRow): boolean {
 }
 
 /** Moves a tender's folder on Drive, if it is there, to Drive's bin. Looks up the path without making any folder. */
-async function binTenderOnDrive(drive: { client: GoogleDriveClient; folderId: string }, tender: TenderRow): Promise<void> {
+async function binTenderOnDrive(drive: { client: GoogleDriveClient; folderId: string; folderName: string }, tender: TenderRow): Promise<void> {
   const plan = jobOutputs.getPlan(tender.job_id);
   const serialNumber = jobOutputs.findSerialNumber(tender.id);
   if (!plan || serialNumber === undefined || !drive.folderId) return;
@@ -2337,7 +2373,7 @@ async function binTenderOnDrive(drive: { client: GoogleDriveClient; folderId: st
   await drive.client.binFile(id!);
   if (tender.opportunity_id) {
     const opportunityId = tender.opportunity_id;
-    syncOpportunities('drive', () => opportunities.addNote(opportunityId, `Rejected, so its folder on Google Drive was moved to Drive’s bin: ${[googleDriveSettings.get().folderName, ...segments].join(' / ')}.`, 'automation', { jobId: tender.job_id }));
+    syncOpportunities('drive', () => opportunities.addNote(opportunityId, `Rejected, so its folder on Google Drive was moved to Drive’s bin: ${[drive.folderName, ...segments].join(' / ')}.`, 'automation', { jobId: tender.job_id }));
   }
 }
 
@@ -2346,28 +2382,48 @@ const driveBinnedFolders = new Set<string>();
 
 /**
  * Uploads tenders' saved folders, and the report sheets of their day folders,
- * to the Google Drive folder in the same layout as the local output folder.
+ * to their website's Google Drive folder (Tamil Nadu's to the Tamil Nadu
+ * folder, GeM's to the GeM folder) in the same layout as the local output
+ * folder. A website with no Drive folder uploads nothing.
  * Queued one batch after another in the background; nothing waits on Drive.
  */
 function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array<{ jobId: string }> = [], label = 'Google Drive upload'): Promise<DriveUploadSummary | null> {
   const run = driveUploads.then(async (): Promise<DriveUploadSummary | null> => {
     const client = await googleDriveClient();
     const settings = googleDriveSettings.get();
-    if (!client || (!settings.folderName && !settings.folderId)) return null;
+    if (!client || Object.keys(settings.portalFolders).length === 0) return null;
     driveUploading = true;
     const summary: DriveUploadSummary = { tenders: 0, files: 0, problems: [] };
-    const folderId = await driveFolderFor(client).catch((error: unknown) => {
-      summary.problems.push(`The Drive folder “${settings.folderName}”: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    });
-    const drive = { client, folderId: folderId ?? '' };
-    const days = new Map<string, { plan: NonNullable<ReturnType<typeof jobOutputs.getPlan>> }>();
+    // Each website's folder, found (or made) once per upload; null when the website has none.
+    const folders = new Map<string, Promise<{ client: GoogleDriveClient; folderId: string; folderName: string } | null>>();
+    const usedFolders = new Set<string>();
+    const driveOf = (portalId: string | null) => {
+      if (!portalId) return Promise.resolve(null);
+      if (!folders.has(portalId)) {
+        const saved = driveFolderOf(settings, portalId);
+        folders.set(portalId, !hasDriveFolder(saved) ? Promise.resolve(null) : driveFolderFor(client, portalId).then(
+          (folderId) => ({ client, folderId, folderName: driveFolderOf(googleDriveSettings.get(), portalId).folderName }),
+          (error: unknown) => {
+            summary.problems.push(`The Drive folder for ${getPortalDefinition(portalId).name} (“${saved.folderName}”): ${error instanceof Error ? error.message : String(error)}`);
+            return null;
+          }));
+      }
+      return folders.get(portalId)!;
+    };
+    // Day folders by website: the same day folder on this computer goes to each website's own folder on Drive.
+    const days = new Map<string, { plan: NonNullable<ReturnType<typeof jobOutputs.getPlan>>; portalId: string }>();
+    const addDay = (jobId: string, plan: NonNullable<ReturnType<typeof jobOutputs.getPlan>>) => {
+      const portalId = portalIdOfJob(jobId);
+      if (portalId && existsSync(plan.jobDirectory)) days.set(`${portalId}|${plan.jobDirectory}`, { plan, portalId });
+    };
     for (const { jobId } of extraDayDirectories) {
       const plan = jobOutputs.getPlan(jobId);
-      if (plan && existsSync(plan.jobDirectory)) days.set(plan.jobDirectory, { plan });
+      if (plan) addDay(jobId, plan);
     }
     try {
-      for (const tender of folderId ? tenderRows : []) {
+      for (const tender of tenderRows) {
+        const drive = await driveOf(portalIdOfJob(tender.job_id));
+        if (!drive) continue;
         // A tender needing a look stays on this computer until approved
         // (afterApproval); a rejected one never goes (belongsOnDrive), and
         // one the rules sent up that the operator then rejected leaves Drive
@@ -2384,7 +2440,7 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
         if (!plan || serialNumber === undefined) continue;
         const folder = tenderOutputDirectory(plan.jobDirectory, tender, serialNumber, plan.structure, plan.outputDate);
         if (!existsSync(folder)) continue;
-        days.set(plan.jobDirectory, { plan });
+        addDay(tender.job_id, plan);
         try {
           const segments = driveFolderPath(plan.outputRoot, folder);
           const dayId = await drive.client.ensurePath(drive.folderId, segments.slice(0, -1));
@@ -2393,21 +2449,25 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
           const report = await drive.client.putFolder(await drive.client.ensureFolder(dayId, segments[segments.length - 1]), folder, undefined, (path) => sending.has(path));
           summary.tenders += 1;
           summary.files += report.uploaded;
+          usedFolders.add(drive.folderName);
           if (tender.opportunity_id && report.uploaded > 0) {
             const id = tender.opportunity_id;
-            syncOpportunities('drive', () => opportunities.addNote(id, `Uploaded to Google Drive: ${[googleDriveSettings.get().folderName, ...segments].join(' / ')} (${report.uploaded} new or changed ${report.uploaded === 1 ? 'file' : 'files'}).`, 'automation', { jobId: tender.job_id }));
+            syncOpportunities('drive', () => opportunities.addNote(id, `Uploaded to Google Drive: ${[drive.folderName, ...segments].join(' / ')} (${report.uploaded} new or changed ${report.uploaded === 1 ? 'file' : 'files'}).`, 'automation', { jobId: tender.job_id }));
           }
         } catch (error) {
           summary.problems.push(`${tender.title}: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      // Each day's report sheet(s), next to its tender folders.
-      for (const { plan } of folderId ? days.values() : []) {
+      // Each day's report sheet for the website, next to its tender folders.
+      for (const { plan, portalId } of days.values()) {
+        const drive = await driveOf(portalId);
+        if (!drive) continue;
         try {
           const segments = driveFolderPath(plan.outputRoot, plan.jobDirectory);
           const dayId = await drive.client.ensurePath(drive.folderId, segments);
           const baseName = resolveOutputStructure(plan.structure, plan.outputDate).approvedWorkbook;
-          const sheets = readdirSync(plan.jobDirectory).filter((name) => isDaySheet(baseName, name));
+          const sheets = daySheetsOfWebsite(readdirSync(plan.jobDirectory), baseName, reportSheetSettings.get(), getPortalDefinition(portalId).name);
+          usedFolders.add(drive.folderName);
           // On Drive, "Open documents" opens the tender's folder on Drive, not the sheet again.
           const folderLinks = new Map<string, Promise<string | null>>();
           const driveLink = (target: string) => {
@@ -2422,7 +2482,7 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
             const upload = await driveCopyOfSheet(join(plan.jobDirectory, name), join(getAppDataDir(dataPathEnv, build.folderName), 'drive-sheets'), driveLink);
             if (await drive.client.putFile(dayId, upload, name) === 'uploaded') summary.files += 1;
           }
-          // Sheets under names no longer used on this computer ("(run 2)", the other split) go to Drive's bin.
+          // Sheets under names no longer used on this computer ("(run 2)", the other split), or another website's, go to Drive's bin.
           const kept = new Set(sheets.map((name) => name.toLocaleLowerCase()));
           for (const file of await drive.client.files(dayId)) {
             if (isDaySheet(baseName, file.name) && !kept.has(file.name.toLocaleLowerCase())) await drive.client.binFile(file.id);
@@ -2447,7 +2507,7 @@ function uploadToGoogleDrive(tenderRows: TenderRow[], extraDayDirectories: Array
       dialog.showErrorBox('Not uploaded to Google Drive',
         `The files are safe in the local output folder, but these could not be uploaded to Google Drive:\n\n${summary.problems.join('\n')}\n\nCheck the internet connection, then use Settings → Upload to Google Drive → "Upload everything saved so far" (files already on Drive are not sent again).`);
     } else if (summary.files > 0 && Notification.isSupported()) {
-      new Notification({ title: 'Uploaded to Google Drive', body: `${summary.tenders} ${summary.tenders === 1 ? 'tender' : 'tenders'} and report sheets are in “${googleDriveSettings.get().folderName}”.` }).show();
+      new Notification({ title: 'Uploaded to Google Drive', body: `${summary.tenders} ${summary.tenders === 1 ? 'tender' : 'tenders'} and report sheets are in ${[...usedFolders].map((name) => `“${name}”`).join(' and ')}.` }).show();
     }
     return summary;
   });
@@ -2548,8 +2608,7 @@ function countFound(jobId: string): CollectedCounts {
 
 /** Whether runs copy what they save to Google Drive. */
 function runsUploadToDrive(): boolean {
-  const settings = googleDriveSettings.get();
-  return driveSignInUsable() && Boolean(settings.folderName || settings.folderId);
+  return driveSignInUsable() && Object.keys(googleDriveSettings.get().portalFolders).length > 0;
 }
 
 function runFinishedMessage(counts: CollectedCounts, dateCount = 1, inSession = false): string {
@@ -3596,6 +3655,7 @@ async function startGemDocumentRun(portal: PortalDefinition): Promise<{ jobId: s
 
 ipcMain.handle('start-document-run', async (_event, portalId: unknown) => {
   const requested = getPortalDefinition(typeof portalId === 'string' ? portalId : DEFAULT_PORTAL_ID);
+  requireDriveFolder(requested);
   if (isGemPortal(requested)) return startGemDocumentRun(requested);
   const { abortController, paceAction } = claimRun();
   let ctx: RunContext;
@@ -3877,6 +3937,7 @@ ipcMain.handle('start-job', (_event, requestedConfig: RunConfiguration, untilDat
 
 /** Sign in (or not, for GeM) and search the planned dates; resolves once the run has its job id. */
 async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknown, options?: { runAgain?: unknown }) {
+  requireDriveFolder(getPortalDefinition(requestedConfig?.portalId));
   const { abortController, paceAction } = claimRun();
   let ctx: RunContext;
   let plan: DateBatchPlan;

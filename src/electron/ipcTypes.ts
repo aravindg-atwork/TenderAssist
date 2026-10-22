@@ -236,12 +236,19 @@ export interface GoogleDriveStatus {
   available: boolean;
   /** The Google sign-in address while a sign-in waits, to open it in another browser. */
   signInLink: string | null;
-  /** Empty until the folder is found or made in My Drive. */
+  /** The website this status is for: each website uploads to its own folder. */
+  portalId: string;
+  portalName: string;
+  /** This website's folder. Empty until the folder is found or made in My Drive. */
   folderId: string;
   /** The folder name typed in Settings ("Tenders" or "Office/Tenders"), or the chosen folder's name. */
   folderName: string;
   /** The folder was chosen in Google's folder chooser (My Drive, shared with me, or a shared drive), not made by name. */
   folderPicked: boolean;
+  /** Every website with a Drive folder, this one included. */
+  portalFolders: Array<{ portalId: string; portalName: string; folderName: string; folderPicked: boolean }>;
+  /** The one folder all websites shared before 0.7.7, if there was one. */
+  earlierFolderName: string;
   /** This build can open Google's folder chooser (it has a Picker API key). */
   pickerAvailable: boolean;
   /** The Google account uploads are made as, once signed in. */
@@ -373,11 +380,12 @@ export interface TenderAssistApi {
   getTenderSummary(opportunityId: string): Promise<TenderSummary>;
   /** Answers the run's "Keep or skip?" question about an unsure tender. */
   answerRunQuestion(questionId: string, answer: RunQuestionAnswer): Promise<void>;
-  getGoogleDrive(): Promise<GoogleDriveStatus>;
-  /** Saves the Drive folder name; the folder is found or made in My Drive straight away when signed in. */
-  saveGoogleDrive(input: { folderName?: string; uploadMode?: 'SAVED' | 'APPROVED' }): Promise<GoogleDriveStatus>;
-  /** Opens the Drive folder in the browser. */
-  openGoogleDriveFolder(): Promise<void>;
+  /** The Drive sign-in, and the website's own Drive folder. */
+  getGoogleDrive(portalId: string): Promise<GoogleDriveStatus>;
+  /** Saves the website's Drive folder name; the folder is found or made in My Drive straight away when signed in. */
+  saveGoogleDrive(portalId: string, input: { folderName?: string; uploadMode?: 'SAVED' | 'APPROVED' }): Promise<GoogleDriveStatus>;
+  /** Opens the website's Drive folder in the browser. */
+  openGoogleDriveFolder(portalId: string): Promise<void>;
   /** Whether OpenWebStart and Java (for the DSC signer) are installed. */
   getSignerStatus(): Promise<SignerStatus>;
   /** The first-time setup checklist, worked out from the app's state. */
@@ -393,13 +401,13 @@ export interface TenderAssistApi {
   /** Saves the split; saved days are rewritten the new way in the background. */
   saveReportSheets(mode: 'PER_WEBSITE' | 'ONE_PER_DAY'): Promise<'PER_WEBSITE' | 'ONE_PER_DAY'>;
   /** Uploads every tender folder and report sheet saved on this computer; unchanged files are skipped. Resolves when done. */
-  uploadEverythingToGoogleDrive(): Promise<GoogleDriveStatus>;
+  uploadEverythingToGoogleDrive(portalId: string): Promise<GoogleDriveStatus>;
   /** Opens Google sign-in in the browser and waits for it to finish. */
-  connectGoogleDrive(): Promise<GoogleDriveStatus>;
-  checkGoogleDrive(): Promise<GoogleDriveStatus>;
+  connectGoogleDrive(portalId: string): Promise<GoogleDriveStatus>;
+  checkGoogleDrive(portalId: string): Promise<GoogleDriveStatus>;
   /** Opens Google's folder chooser in the browser; uploads go to the folder picked there. */
-  chooseGoogleDriveFolder(): Promise<GoogleDriveStatus>;
-  disconnectGoogleDrive(): Promise<GoogleDriveStatus>;
+  chooseGoogleDriveFolder(portalId: string): Promise<GoogleDriveStatus>;
+  disconnectGoogleDrive(portalId: string): Promise<GoogleDriveStatus>;
   /** Opens the open question's own document (a GeM bid PDF) in the browser. */
   openQuestionDocument(questionId: string): Promise<void>;
   /** While the run waits after its last date: sign out and finish. */

@@ -47,6 +47,16 @@ export function isDaySheet(fileName: string, name: string): boolean {
   return /\.xlsx$/i.test(name) && name.toLocaleLowerCase().startsWith(stem) && !name.startsWith('~$');
 }
 
+/**
+ * Of a day folder's files, the report sheet that goes to one website's Drive
+ * folder: its own sheet ("… - GeM.xlsx"), or with one sheet for the day, that
+ * sheet (it lists every website, so each website's folder gets it).
+ */
+export function daySheetsOfWebsite(names: string[], fileName: string, mode: ReportSheetMode, portalName: string): string[] {
+  const own = daySheetFileName(fileName, mode, portalName).toLocaleLowerCase();
+  return names.filter((name) => isDaySheet(fileName, name) && name.toLocaleLowerCase() === own);
+}
+
 function requirementData(row?: TenderRequirementRow): Record<string, string | null> {
   if (!row) return {};
   try { return JSON.parse(row.data_json) as Record<string, string | null>; }
