@@ -2,7 +2,7 @@
 
 Last updated: 22 Oct 2026. Pick up from **Next up**.
 
-## 0.7.7 (not released), 22 Oct 2026: a Drive folder for each website (unit-tested, not seen running)
+## 0.7.7, 22 Oct 2026: a Drive folder for each website (unit-tested, not seen running)
 
 - **Each website uploads to its own Drive folder** (owner, 22 Oct: two main folders on Drive, Tamil Nadu tenders to the TN folder, GeM bids to the GeM folder; before, both landed in the same day folder). Settings → Folders → Upload to Google Drive has a **Website** choice; each website's folder is chosen in Drive or named (made in My Drive) as before. Stored as `portalFolders` by website id (`googleDriveSettingsRepository.ts`, tested); the website comes from the run's configuration (`portalIdOfJob`).
 - **A search or documents run waits for its website's folder** while Drive is signed in (`requireDriveFolder` in `main.ts`); Today shows "Choose the Google Drive folder for <website> tenders" with a button to Settings → Folders.
