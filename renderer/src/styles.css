@@ -980,6 +980,29 @@ textarea {
 .suggest__item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; }
 .suggest__phrase { font-weight: 650; overflow-wrap: anywhere; }
 .suggest__reason { font-size: 0.75rem; color: var(--ink-3); }
+/* Missed tenders: the fix and its reason stacked, the buttons beside them. */
+.suggest__item--wide { grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: 6px 0; border-top: 1px solid var(--line); }
+.suggest__item--wide:first-child { border-top: 0; }
+.suggest__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.suggest__note { font-size: 0.75rem; color: var(--amber-ink); }
+.suggest__actions { display: inline-flex; gap: 6px; }
+
+/* Word families: one collapsible group per family, inside the intent words. */
+.family { border-radius: 12px; background: var(--sheet-2); }
+.family > summary { display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; border-radius: 12px; }
+.family > summary:hover { background: var(--blue-soft); }
+.family__name { font-weight: 700; }
+.family__preview { overflow: hidden; min-width: 0; color: var(--ink-3); font-size: 0.8125rem; text-overflow: ellipsis; white-space: nowrap; }
+.family__body { display: flex; flex-direction: column; gap: 10px; padding: 4px 14px 14px; }
+.family__body .chip-list { background: var(--sheet); box-shadow: inset 0 0 0 1px var(--line); }
+.family__label { display: block; margin-bottom: 6px; color: var(--ink-2); font-size: 0.8125rem; font-weight: 650; }
+.family__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.family__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.family__actions .chip-entry input { height: 32px; }
+.chip--add { gap: 6px; padding: 5px 12px; border: 1px dashed var(--line-strong); background: var(--sheet); box-shadow: none; color: var(--blue-ink); font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer; }
+.chip--add:hover { border-color: var(--blue); background: var(--blue-soft); }
+.chip__move { max-width: 120px; height: 24px; margin-left: 4px; padding: 0 4px; border: 0; border-radius: 6px; background: var(--sheet-2); color: var(--ink-3); font: inherit; font-size: 0.75rem; cursor: pointer; }
+.chip__move:hover { color: var(--ink); }
 .savebar { position: sticky; bottom: 0; z-index: 4; grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin: 0 -40px; padding: 14px 40px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--ground) 92%, transparent); backdrop-filter: blur(10px); }
 .savebar__ok { color: var(--green-ink); font-weight: 650; }
 .savebar__error { color: var(--red-ink); font-weight: 650; }

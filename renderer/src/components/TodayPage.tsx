@@ -89,6 +89,15 @@ const CHANGED_ALTERNATIVES: Record<string, OperatorDecision[]> = {
 };
 
 const skipKey = (portalId: string) => `tenderassist.categorySkip.${portalId}`;
+// The run whose "missed tenders you added" note was dismissed; a later run's shows again.
+const MISSED_DISMISSED_KEY = 'tenderassist.missedNoteDismissed';
+function readDismissedMissed(): string | null {
+  try { return window.localStorage.getItem(MISSED_DISMISSED_KEY); } catch { return null; }
+}
+function writeDismissedMissed(jobId: string): void {
+  try { window.localStorage.setItem(MISSED_DISMISSED_KEY, jobId); } catch { /* the note simply shows again */ }
+}
+
 function readSkippedMissing(portalId: string): string | null {
   try { return window.localStorage.getItem(skipKey(portalId)); } catch { return null; }
 }
@@ -155,6 +164,23 @@ export function TodayPage({
     setCustomDates(false);
   }, [gem, dateMeaning]);
   const [followed, setFollowed] = useState(0);
+
+  // After a run that read tenders the operator added by hand: how many of those the rules missed.
+  const [missedRun, setMissedRun] = useState<{ jobId: string; missed: number } | null>(null);
+  useEffect(() => {
+    let current = true;
+    window.tenderAssist.getMissedTenders()
+      .then((view) => {
+        const run = view.latestRun;
+        if (current) setMissedRun(run && run.missed > 0 && readDismissedMissed() !== run.jobId ? { jobId: run.jobId, missed: run.missed } : null);
+      })
+      .catch(() => { if (current) setMissedRun(null); });
+    return () => { current = false; };
+  }, [finishedRun, settings]);
+  const dismissMissed = () => {
+    if (missedRun) writeDismissedMissed(missedRun.jobId);
+    setMissedRun(null);
+  };
 
   useEffect(() => {
     let current = true;
@@ -639,6 +665,15 @@ export function TodayPage({
                 {searchAgainDates.length > 0 && (
                   <button type="button" className="btn btn--line btn--sm" onClick={() => { setFrom(searchAgainDates[0]); setTo(searchAgainDates[searchAgainDates.length - 1]); setRunAgain(true); setCustomDates(true); }}>Use these days</button>
                 )}
+              </div>
+            )}
+            {missedRun && (
+              <div className="alert">
+                <p>TenderAssist missed {missedRun.missed === 1 ? '1 tender' : `${missedRun.missed} tenders`} you added yourself. See why in Settings.</p>
+                <div className="alert__actions">
+                  <button type="button" className="btn btn--line btn--sm" onClick={() => onOpenSettings('missed')}>See why</button>
+                  <button type="button" className="btn btn--text btn--sm" onClick={dismissMissed}>Dismiss</button>
+                </div>
               </div>
             )}
             {finishedRun && (

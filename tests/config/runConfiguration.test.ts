@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chosenOrganisationOf, DEFAULT_RUN_DEFAULTS, normalizeFromTime, normalizeRunConfiguration, normalizeRunDefaults, organisationsForPortal, publishedBeforeFromTime } from '../../src/config/runConfiguration.js';
+import { chosenOrganisationOf, DEFAULT_RUN_DEFAULTS, familyOfWord, normalizeIntentFamilies,normalizeFromTime, normalizeRunConfiguration, normalizeRunDefaults, organisationsForPortal, publishedBeforeFromTime } from '../../src/config/runConfiguration.js';
 
 const base = { searchDate: '2026-10-27', portalId: 'tamil-nadu', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] };
 
@@ -46,5 +46,47 @@ describe('organisations to search', () => {
     expect(organisationsForPortal(defaults, { id: 'gem' })).toEqual([]);
     expect(normalizeRunConfiguration({ ...base, organisations: ['TNEB'] }).organisations).toEqual(['TNEB']);
     expect('organisations' in normalizeRunConfiguration(base)).toBe(false);
+  });
+});
+
+describe('word families', () => {
+  it('adds every family phrase to the intent words, so runs match them with no change', () => {
+    const defaults = normalizeRunDefaults({
+      ...DEFAULT_RUN_DEFAULTS,
+      keywords: ['software development'],
+      intentFamilies: [{ name: ' Websites ', phrases: ['web portal', 'Web Portal', 'website development'] }],
+    });
+    expect(defaults.intentFamilies).toEqual([{ name: 'Websites', phrases: ['web portal', 'website development'] }]);
+    expect(defaults.keywords).toEqual(['software development', 'web portal', 'website development']);
+  });
+
+  it('keeps each name and each phrase once, and an empty family until it is filled', () => {
+    const families = normalizeIntentFamilies([
+      { name: 'Mobile apps', phrases: ['mobile app'] },
+      { name: 'mobile apps', phrases: ['android app'] },
+      { name: 'Apps', phrases: ['mobile app', 'ios application'] },
+      { name: '', phrases: ['lost'] },
+      { name: 'E-learning', phrases: [] },
+      'junk',
+    ]);
+    expect(families).toEqual([
+      { name: 'Mobile apps', phrases: ['mobile app'] },
+      { name: 'Apps', phrases: ['ios application'] },
+      { name: 'E-learning', phrases: [] },
+    ]);
+  });
+
+  it('leaves settings saved before families as they were', () => {
+    const defaults = normalizeRunDefaults({ ...DEFAULT_RUN_DEFAULTS, keywords: ['website development'] });
+    expect('intentFamilies' in defaults).toBe(false);
+    expect(defaults.keywords).toEqual(['website development']);
+    expect(normalizeIntentFamilies(undefined)).toEqual([]);
+  });
+
+  it('names the family of an intent word', () => {
+    const families = [{ name: 'Websites', phrases: ['Web Portal'] }];
+    expect(familyOfWord('web  portal', families)).toBe('Websites');
+    expect(familyOfWord('mobile app', families)).toBeNull();
+    expect(familyOfWord('web portal', undefined)).toBeNull();
   });
 });

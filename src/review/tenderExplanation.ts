@@ -1,4 +1,5 @@
 import type { ClassificationGateRow } from '../persistence/repositories/classificationRepository.js';
+import { familyOfWord, type IntentFamily } from '../config/runConfiguration.js';
 
 // One plain sentence explaining why automation kept, rejected, or doubted a
 // tender, built from the gate results stored on its SCREENED event.
@@ -114,7 +115,15 @@ function uncertainSentence(gate: ScreenedGate | undefined): string {
   return 'Needs your judgement.';
 }
 
-export function explainScreening(recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN' | null, gates: ScreenedGate[]): TenderExplanation {
+/** “web portal” (Websites): an intent word with its family, when it has one. */
+function withFamilies(words: string[], families: readonly IntentFamily[] | undefined): string {
+  return words.map((word) => {
+    const family = familyOfWord(word, families);
+    return family ? `“${word}” (${family})` : `“${word}”`;
+  }).join(', ');
+}
+
+export function explainScreening(recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN' | null, gates: ScreenedGate[], families?: readonly IntentFamily[]): TenderExplanation {
   const byGate = (id: ScreenedGate['gate']) => gates.find((gate) => gate.gate === id);
   const matchedIntent = list(byGate('G3')?.evidence.matchedKeywords);
   const matchedExclusions = gates.flatMap((gate) => (gate.result === 'REJECT' || gate.result === 'UNCERTAIN') ? list(gate.evidence.matchedExcludedKeywords) : []);
@@ -141,7 +150,7 @@ export function explainScreening(recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN'
   const organisation = byGate('G2')?.evidence.organisation;
   const parts = [
     category.length ? `category ${quoted(category)}` : typeof organisation === 'string' ? `from your organisation ${quoted([organisation])}` : null,
-    matchedIntent.length ? `matched ${quoted(matchedIntent)}` : null,
+    matchedIntent.length ? `matched ${withFamilies(matchedIntent, families)}` : null,
   ].filter(Boolean);
   return { sentence: parts.length ? `Recommended: ${parts.join('; ')}.` : 'Recommended: passed every check.', matchedExclusions, matchedIntent };
 }

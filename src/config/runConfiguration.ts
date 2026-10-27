@@ -56,6 +56,19 @@ export interface RunDefaults {
    * items is read, whatever its day or category (src/gem/gemWordSearch.ts).
    */
   gemSearchWords?: string[];
+  /**
+   * Intent words grouped by the work they mean ("Websites": web portal,
+   * website development, ...). Only a grouping: every phrase in a family is
+   * also in `keywords`, which is the one list runs match with, so settings
+   * saved before families and runs saved with their own keywords never change.
+   */
+  intentFamilies?: IntentFamily[];
+}
+
+/** A named group of intent phrases for one kind of work. */
+export interface IntentFamily {
+  name: string;
+  phrases: string[];
 }
 
 /** The most GeM search words: each one costs a few requests to GeM on every run. */
@@ -146,7 +159,47 @@ export function normalizeRunDefaults(input: RunDefaults): RunDefaults {
     if (organisations.length > MAX_ORGANISATIONS) throw new Error(`Keep to ${MAX_ORGANISATIONS} organisations or fewer for each website.`);
     if (organisations.length > 0) organisationsByPortal[portalId] = organisations;
   }
-  return { ...normalizeLists(input), categoriesByPortal, organisationsByPortal, gemIncludeProducts: input.gemIncludeProducts === true, gemSearchWords };
+  const intentFamilies = normalizeIntentFamilies(input.intentFamilies);
+  // A family phrase is always an intent word: one missing from the list is added to it.
+  const keywords = [...(Array.isArray(input.keywords) ? input.keywords : []), ...intentFamilies.flatMap((family) => family.phrases)];
+  return {
+    ...normalizeLists({ ...input, keywords }), categoriesByPortal, organisationsByPortal, gemIncludeProducts: input.gemIncludeProducts === true, gemSearchWords,
+    ...(intentFamilies.length > 0 ? { intentFamilies } : {}),
+  };
+}
+
+/** The most word families. */
+export const MAX_INTENT_FAMILIES = 20;
+
+/**
+ * Families with a name, each name once, and each phrase in one family only
+ * (the first that has it). A family with no phrases yet is kept, so one can
+ * be named before it is filled.
+ */
+export function normalizeIntentFamilies(input: unknown): IntentFamily[] {
+  if (!Array.isArray(input)) return [];
+  const names = new Set<string>();
+  const phrases = new Set<string>();
+  const families: IntentFamily[] = [];
+  for (const raw of input) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const { name: rawName, phrases: rawPhrases } = raw as Partial<IntentFamily>;
+    const name = typeof rawName === 'string' ? rawName.trim().replace(/\s+/g, ' ') : '';
+    if (!name || names.has(name.toLocaleLowerCase())) continue;
+    names.add(name.toLocaleLowerCase());
+    const own = normalizeList(Array.isArray(rawPhrases) ? rawPhrases.filter((phrase) => typeof phrase === 'string') : [], 'Family words')
+      .filter((phrase) => !phrases.has(phrase.toLocaleLowerCase()));
+    for (const phrase of own) phrases.add(phrase.toLocaleLowerCase());
+    families.push({ name, phrases: own });
+  }
+  if (families.length > MAX_INTENT_FAMILIES) throw new Error(`Keep to ${MAX_INTENT_FAMILIES} word families or fewer.`);
+  return families;
+}
+
+/** The family an intent word belongs to, or null. */
+export function familyOfWord(word: string, families: readonly IntentFamily[] | undefined): string | null {
+  const key = word.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  return families?.find((family) => family.phrases.some((phrase) => phrase.toLocaleLowerCase() === key))?.name ?? null;
 }
 
 /** The most organisations per website: each is one more search on Tamil Nadu. */
