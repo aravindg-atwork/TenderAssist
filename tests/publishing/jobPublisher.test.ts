@@ -24,7 +24,7 @@ describe('publishJobWorkbook', () => {
       created_at: '2026-09-22', updated_at: '2026-09-22',
     } satisfies TenderRow;
     const output = await publishJobWorkbook(root, '2026-09-22', 'job-12345678', [{
-      tender, automaticDecision: 'KEEP', documents: [],
+      tender, automaticDecision: 'KEEP', documents: [], fit: 'High (82)',
     }], DEFAULT_OUTPUT_STRUCTURE, 1, { url: 'https://tntenders.gov.in/nicgep/app', name: 'Tamil Nadu' });
     expect(output.jobDirectory).toBe(join(root, 'September-2026', '22-09-2026'));
     expect(output.workbookPath).toBe(join(output.jobDirectory, 'Approved-Tenders-22-09-2026.xlsx'));
@@ -36,12 +36,14 @@ describe('publishJobWorkbook', () => {
       'Project Nature', 'Tender Value', 'Bid Start Date', 'Bid End Date', 'EMD', 'Pre-bid Meeting Date', 'Eligibility',
       'Eligibility Notes', 'View Tender Link', 'Tender Document Link', 'GeM PDF Link', 'Original Bid Link (for RA)', 'Original Bid PDF (for RA)', 'Corrigenda',
       // The earlier columns follow, without the ones the office's set already has.
-      'Website', 'Reference', 'Full title', 'Decision', 'Decision source', 'Review reason', 'Category', 'Organisation', 'State',
+      'Website', 'Reference', 'Full title', 'Decision', 'Decision source', 'Review reason', 'Fit', 'Category', 'Organisation', 'State',
       'Published date', 'Scope', 'Tender fee', 'Submission method', 'Contact', 'Extraction confidence', 'Documents downloaded', 'Tender folder']);
     expect(sheet.getCell('T2').value).toBe('Tamil Nadu');
     expect(sheet.getCell('U2').value).toBe('REF-1');
     expect(sheet.getCell('V2').value).toBe(tender.title);
     expect(sheet.getCell('A2').value).toBe(1);
+    // The fit only ranks; it is shown among the later columns.
+    expect(sheet.getRow(2).getCell((sheet.getRow(1).values as unknown[]).indexOf('Fit')).value).toBe('High (82)');
     expect(sheet.getCell('B2').value).toBe('PORTAL-1');
     expect(sheet.getCell('C2').value).toBe('Information Technology Department');
     expect(sheet.getCell('D2').value).toBe('Tamil Nadu');

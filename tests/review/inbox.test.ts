@@ -6,6 +6,7 @@ import { JobRepository } from '../../src/persistence/repositories/jobRepository.
 import { TenderRepository } from '../../src/persistence/repositories/tenderRepository.js';
 import { OpportunityRepository } from '../../src/persistence/repositories/opportunityRepository.js';
 import { buildInbox } from '../../src/review/inbox.js';
+import { buildInterestHistory } from '../../src/review/interestScore.js';
 import { explainScreening, type ScreenedGate } from '../../src/review/tenderExplanation.js';
 
 const gate = (id: ScreenedGate['gate'], result: ScreenedGate['result'], reasonCode: string, evidence: Record<string, unknown> = {}): ScreenedGate =>
@@ -67,6 +68,8 @@ describe('explainScreening', () => {
   });
 });
 
+const EARLY = new Date('2026-09-01T10:00:00+05:30');
+
 describe('buildInbox', () => {
   let db: DatabaseSync;
   let jobs: JobRepository;
@@ -101,7 +104,8 @@ describe('buildInbox', () => {
     const decided = screened(job.id, 'DONE', 'KEEP');
     opportunities.decide([decided.id], 'APPROVE');
 
-    const inbox = buildInbox(opportunities);
+    // Weeks before either closes, both fit alike, so the closing order stands.
+    const inbox = buildInbox(opportunities, undefined, { now: EARLY });
     expect(inbox.recommended.map((item) => item.tenderId)).toEqual(['SOON', 'LATE']);
     expect(inbox.uncertain.map((item) => item.tenderId)).toEqual(['DOUBT']);
     expect(inbox.autoRejected[0]).toMatchObject({ tenderId: 'NO', matchedExclusions: ['hardware'], screeningJobId: job.id });
@@ -118,10 +122,38 @@ describe('buildInbox', () => {
     const opportunity = opportunities.recordSighting(late, 'tamil-nadu', { jobId: job.id });
     opportunities.recordScreening(opportunity.id, 'KEEP', { jobId: job.id }, { gates: [] });
 
-    const inbox = buildInbox(opportunities, (portalId) => (portalId === 'tamil-nadu' ? ['Tamil Nadu Electricity Board'] : []));
+    const inbox = buildInbox(opportunities, (portalId) => (portalId === 'tamil-nadu' ? ['Tamil Nadu Electricity Board'] : []), { now: EARLY });
     expect(inbox.recommended.map((item) => [item.tenderId, item.favouredOrganisation])).toEqual([['ORG', 'Tamil Nadu Electricity Board'], ['SOON', undefined]]);
     // Without chosen organisations, the closing order stands.
-    expect(buildInbox(opportunities).recommended.map((item) => item.tenderId)).toEqual(['SOON', 'ORG']);
+    expect(buildInbox(opportunities, undefined, { now: EARLY }).recommended.map((item) => item.tenderId)).toEqual(['SOON', 'ORG']);
+  });
+
+  it('lists the best fit first in each group, after a chosen organisation, and says why', () => {
+    const job = jobs.create();
+    const kept = (id: string, title: string, gates: ScreenedGate[], organisationChain: string | null = null) => {
+      const tender = tenders.upsert({
+        jobId: job.id, tenderRef: `REF-${id}`, tenderPortalId: id, title, organisationChain,
+        publishedDate: null, closingDate: '30-Oct-2026 05:00 PM', openingDate: null, productCategory: 'IT', valueInRupees: 'NA',
+      });
+      const opportunity = opportunities.recordSighting(tender, 'tamil-nadu', { jobId: job.id });
+      opportunities.recordScreening(opportunity.id, 'KEEP', { jobId: job.id }, { gates });
+    };
+    const category = gate('G2', 'PASS', 'PRODUCT_CATEGORY_MATCH', { matched: ['Information Technology'] });
+    // Listed in closing order (all the same); the fit reorders them.
+    kept('DETAILS', 'Hiring of Consultant for Fisheries Department', [category, gate('G3', 'PASS', 'INTENT_KEYWORD_MATCH', { matchedKeywords: ['mobile application'] })]);
+    kept('TITLE', 'Development of Mobile Application for Ration Card Services', [category, gate('G3', 'PASS', 'INTENT_KEYWORD_MATCH', { matchedKeywords: ['mobile application'] })]);
+    kept('ORG', 'Annual Maintenance of Computers', [category], 'Tamil Nadu Electricity Board||IT Wing');
+    const approvedBefore = buildInterestHistory([{
+      id: 'old', title: 'Development of Mobile Application for Public Distribution System', lifecycle: 'WON', organisation: null, department: null, value: null,
+    }]);
+
+    const inbox = buildInbox(opportunities, () => ['Tamil Nadu Electricity Board'], { now: EARLY, history: approvedBefore });
+    expect(inbox.recommended.map((item) => [item.tenderId, item.scoreBand])).toEqual([['ORG', 'MEDIUM'], ['TITLE', 'HIGH'], ['DETAILS', 'MEDIUM']]);
+    const best = inbox.recommended[1];
+    expect(best.similarTo?.[0]).toMatchObject({ id: 'old' });
+    expect(best.scoreReasons?.[0]).toEqual({ text: 'Your words in the title: “mobile application”', points: 35 });
+    // The decision is untouched.
+    expect(inbox.recommended.every((item) => item.recommendation === 'KEEP')).toBe(true);
   });
 
   it('never brings tenders outside your categories to Today, and says why each rule reject was rejected', () => {

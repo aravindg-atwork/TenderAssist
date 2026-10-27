@@ -4,6 +4,9 @@ import { explainScreening, parseScreenedGates } from './tenderExplanation.js';
 import { RETENDER_REASON_TEXT, retenderReason } from './relatedTenders.js';
 import { describeChangesSinceDecision } from './timeline.js';
 import { chosenOrganisationOf } from '../config/runConfiguration.js';
+import type { QualifyReport } from './qualifyCheck.js';
+import { tenderInterest, type InterestHistory, type InterestScore, type ScoreBand, type ScoreReason } from './interestScore.js';
+import type { SimilarTender } from './tenderSimilarity.js';
 
 export type InboxGroup = 'UNCERTAIN' | 'RECOMMENDED' | 'CHANGED' | 'AUTO_REJECTED';
 
@@ -45,6 +48,12 @@ export interface TenderSummary {
   screeningJobId: string | null;
   changedSinceDecision: boolean;
   related: RelatedTender[];
+  /** How well it fits the office's interest, 0 to 100 (Today only); ranks and explains, never decides. */
+  score?: number;
+  scoreBand?: ScoreBand;
+  scoreReasons?: ScoreReason[];
+  /** Approved or won tenders it looks like. */
+  similarTo?: SimilarTender[];
 }
 
 /**
@@ -163,10 +172,37 @@ function toItem(row: InboxRow, group: InboxGroup, related: RelatedTender[], chan
   };
 }
 
+/** What the interest score reads besides the tender's own screening. */
+export interface InboxInterest {
+  /** What the office approved and won before. */
+  history?: InterestHistory | null;
+  /** The tender's work description and "Do we qualify?", when known. */
+  detailsOf?: (row: InboxRow, group: InboxGroup | null) => { description?: string | null; qualify?: QualifyReport | null };
+  now?: Date;
+}
+
+/** A tender's interest score, from its latest screening and the office's history. */
+export function interestOfRow(row: InboxRow, interest: InboxInterest = {}, favouredOrganisation: string | null = null, group: InboxGroup | null = null): InterestScore {
+  const details = interest.detailsOf?.(row, group) ?? {};
+  return tenderInterest({
+    id: row.id,
+    title: row.title,
+    description: details.description,
+    gates: parseScreenedGates(row.screening_json),
+    favouredOrganisation,
+    organisation: row.organisation_chain,
+    department: row.department,
+    closingAt: row.closing_at,
+    value: row.value_in_rupees,
+    qualify: details.qualify,
+  }, interest.history ?? null, interest.now);
+}
+
 export function buildInbox(
   opportunities: Pick<OpportunityRepository, 'listInboxRows' | 'listEvents'> & RelatedSource,
   /** Each website's chosen organisations: their tenders are of more interest (owner, 27 Oct 2026). */
   organisationsFor?: (portalId: string) => readonly string[],
+  interest: InboxInterest = {},
 ): InboxView {
   const view: InboxView = { uncertain: [], recommended: [], changed: [], autoRejected: [], attentionCount: 0 };
   const related = relatedTenders(opportunities);
@@ -176,14 +212,16 @@ export function buildInbox(
     const item = toItem(row, group, related.get(row.id) ?? [], () => describeChangesSinceDecision(opportunities.listEvents(row.id)));
     const favoured = chosenOrganisationOf([row.organisation_chain, row.department], organisationsFor?.(row.portal_id));
     if (favoured) item.favouredOrganisation = favoured;
+    const fit = interestOfRow(row, interest, favoured, group);
+    Object.assign(item, { score: fit.score, scoreBand: fit.band, scoreReasons: fit.reasons, similarTo: fit.similarTo });
     if (group === 'UNCERTAIN') view.uncertain.push(item);
     else if (group === 'RECOMMENDED') view.recommended.push(item);
     else if (group === 'CHANGED') view.changed.push(item);
     else view.autoRejected.push(item);
   }
-  // A chosen organisation's tenders first, each group otherwise in its own order.
+  // A chosen organisation's tenders first, then the best fit; equal ones keep their closing order.
   for (const items of [view.uncertain, view.recommended, view.changed, view.autoRejected]) {
-    items.sort((a, b) => Number(Boolean(b.favouredOrganisation)) - Number(Boolean(a.favouredOrganisation)));
+    items.sort((a, b) => Number(Boolean(b.favouredOrganisation)) - Number(Boolean(a.favouredOrganisation)) || (b.score ?? 0) - (a.score ?? 0));
   }
   view.attentionCount = view.uncertain.length + view.recommended.length + view.changed.length;
   return view;

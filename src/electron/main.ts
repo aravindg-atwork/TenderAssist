@@ -25,7 +25,7 @@ import { OpportunityRepository, type OpportunityRow } from '../persistence/repos
 import { applyTenderDecision, linkAllPossibleRetenders, recordCollectedDocuments, recordPageCorrigenda, syncJobOpportunities, syncTenderSighting } from '../orchestration/opportunitySync.js';
 import { automaticDownloadSelection } from '../orchestration/automaticSelection.js';
 import { describeSkipped, planDateBatch, type DateBatchPlan } from '../orchestration/dateBatch.js';
-import { buildInbox, summarizeTender, type InboxView, type TenderSummary } from '../review/inbox.js';
+import { buildInbox, interestOfRow, summarizeTender, type InboxInterest, type InboxView, type TenderSummary } from '../review/inbox.js';
 import { cleanRequirement, keyFactsFrom, parseDetailFields, type TenderFileView } from '../review/tenderFile.js';
 import { buildTenders, type TendersView } from '../review/tenders.js';
 import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
@@ -79,7 +79,7 @@ import type {
   GemSearchWordPreview,
 } from './ipcTypes.js';
 import {
-  categoriesForPortal, organisationsForPortal, DEFAULT_GEM_CATEGORIES, normalizeFromTime, normalizeRunConfiguration, publishedBeforeFromTime, STARTING_EXCLUDED_WORDS, STARTING_INTENT_WORDS, STARTING_PORTAL_CATEGORIES,
+  categoriesForPortal, chosenOrganisationOf, organisationsForPortal, DEFAULT_GEM_CATEGORIES, normalizeFromTime, normalizeRunConfiguration, publishedBeforeFromTime, STARTING_EXCLUDED_WORDS, STARTING_INTENT_WORDS, STARTING_PORTAL_CATEGORIES,
   type RunConfiguration, type RunDateMeaning,
 } from '../config/runConfiguration.js';
 import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
@@ -98,7 +98,8 @@ import { checklistFor, dueReminders, type ReminderTender } from '../review/bidCh
 import { coverDocuments } from '../review/portalPage.js';
 import { bidResults, type BidResults } from '../review/bidResults.js';
 import type { BidProgress } from '../persistence/repositories/opportunityRepository.js';
-import { checkQualification, type CompanyProfile, type QualifyReport } from '../review/qualifyCheck.js';
+import { checkQualification, isProfileFilled, type CompanyProfile, type QualifyReport } from '../review/qualifyCheck.js';
+import { APPROVED_BEFORE_LIFECYCLES, fitLabel, InterestHistoryCache } from '../review/interestScore.js';
 import { findQualificationSections } from '../extraction/qualificationSections.js';
 import { factsFromBidText } from '../gem/gemBidDocument.js';
 import { chooseDriveFolder, projectNumberOf } from '../publishing/drivePicker.js';
@@ -663,7 +664,52 @@ const OPERATOR_DECISIONS: readonly OperatorDecision[] = ['APPROVE', 'REJECT', 'D
 /** A website's chosen organisations (Settings), whose tenders Today lists first. */
 const chosenOrganisationsOf = (portalId: string): string[] => organisationsForPortal(runConfigurations.getDefaults(), { id: portalId });
 
-ipcMain.handle('get-inbox', (): InboxView => buildInbox(opportunities, chosenOrganisationsOf));
+// Each tender's fit (interestScore.ts): what the office approved before is
+// built again only when the approved tenders change, and "Do we qualify?" is
+// kept per tender until it, its documents or the company's facts change.
+const interestHistory = new InterestHistoryCache();
+const qualifyForFit = new Map<string, { key: string; report: QualifyReport }>();
+
+function inboxInterest(): InboxInterest {
+  const approved = opportunities.list({ lifecycles: [...APPROVED_BEFORE_LIFECYCLES] });
+  const profile = companyProfile.get();
+  const profileKey = isProfileFilled(profile) ? JSON.stringify(profile) : null;
+  const latestOf = (opportunityId: string) => {
+    const sightings = tenders.listForOpportunity(opportunityId);
+    return sightings.filter((tender) => tender.detail_text).at(-1) ?? sightings.at(-1);
+  };
+  return {
+    history: interestHistory.get(approved, () => approved.map((row) => ({
+      id: row.id, title: row.title, description: workDescriptionFrom(latestOf(row.id)?.detail_text ?? null), lifecycle: row.lifecycle,
+      organisation: row.organisation_chain, department: row.department, value: row.value_in_rupees,
+    }))),
+    detailsOf: (row, group) => {
+      const latest = latestOf(row.id);
+      const description = workDescriptionFrom(latest?.detail_text ?? null);
+      // Rule rejects are many and only ranked among themselves: their documents are not read for this.
+      if (!latest || !profileKey || group === 'AUTO_REJECTED') return { description };
+      const key = `${latest.updated_at}|${workflow.listDocuments(latest.id).length}|${profileKey}`;
+      let cached = qualifyForFit.get(latest.id);
+      if (cached?.key !== key) {
+        cached = { key, report: qualificationFor(latest) };
+        qualifyForFit.set(latest.id, cached);
+      }
+      return { description, qualify: cached.report };
+    },
+  };
+}
+
+/** Today's queue, each group best fit first. */
+const inboxView = (): InboxView => buildInbox(opportunities, chosenOrganisationsOf, inboxInterest());
+
+/** A tender's fit for the day sheet, "High (82)". */
+function fitOnSheet(tender: TenderRow, interest: InboxInterest): string | undefined {
+  const row = tender.opportunity_id ? opportunities.getWithScreening(tender.opportunity_id) : undefined;
+  if (!row) return undefined;
+  return fitLabel(interestOfRow(row, interest, chosenOrganisationOf([row.organisation_chain, row.department], chosenOrganisationsOf(row.portal_id))));
+}
+
+ipcMain.handle('get-inbox', (): InboxView => inboxView());
 
 ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unknown, note?: unknown): InboxView => {
   if (!Array.isArray(opportunityIds) || opportunityIds.length === 0 || !opportunityIds.every((id) => typeof id === 'string')) {
@@ -679,13 +725,13 @@ ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unk
     const rows = opportunityIds.flatMap((id) => tenders.listForOpportunity(id));
     void refreshDaySheets(rows).then(() => { if (runsUploadToDrive()) uploadSavedTendersToGoogleDrive(rows); });
   }
-  return buildInbox(opportunities, chosenOrganisationsOf);
+  return inboxView();
 });
 
 ipcMain.handle('acknowledge-tender-changes', (_event, opportunityIds: unknown): InboxView => {
   if (!Array.isArray(opportunityIds) || !opportunityIds.every((id) => typeof id === 'string')) throw new Error('Invalid tenders.');
   opportunities.acknowledgeChanges(opportunityIds);
-  return buildInbox(opportunities, chosenOrganisationsOf);
+  return inboxView();
 });
 
 ipcMain.handle('dismiss-related-tender', (_event, opportunityId: unknown, otherId: unknown): void => {
@@ -696,7 +742,7 @@ ipcMain.handle('dismiss-related-tender', (_event, opportunityId: unknown, otherI
 ipcMain.handle('acknowledge-runs', (_event, jobIds: unknown): InboxView => {
   if (!Array.isArray(jobIds) || !jobIds.every((id) => typeof id === 'string')) throw new Error('Invalid runs.');
   jobs.markReviewed(jobIds.filter((id) => id !== activeJobId));
-  return buildInbox(opportunities, chosenOrganisationsOf);
+  return inboxView();
 });
 
 ipcMain.handle('get-tenders', (): TendersView => buildTenders(opportunities));
@@ -1310,7 +1356,10 @@ function sheetItemsFor(jobId: string, plan: JobOutputPlan, portal: PortalDefinit
   const items = explicitlyProcessed.length > 0
     ? explicitlyProcessed
     : allItems.filter((item) => (item.manualReview?.decision ?? item.automaticDecision) === 'KEEP');
-  return items.map((item) => ({ ...item, serialNumber: jobOutputs.serialNumberFor(plan, item.tender.id), portal: { url: portal.url, name: portal.name } }));
+  const interest = inboxInterest();
+  return items.map((item) => ({
+    ...item, serialNumber: jobOutputs.serialNumberFor(plan, item.tender.id), portal: { url: portal.url, name: portal.name }, fit: fitOnSheet(item.tender, interest),
+  }));
 }
 
 // Day folders whose sheets are being written, so two writes never cross.

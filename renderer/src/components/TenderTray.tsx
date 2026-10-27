@@ -26,6 +26,8 @@ const RECOMMENDATION_STATE: Record<string, { tone: string; words: string }> = {
   UNCERTAIN: { tone: 'look', words: 'Needs a look' },
   REJECT: { tone: 'reject', words: 'Rejected by TenderAssist' },
 };
+const BAND_WORDS: Record<string, string> = { HIGH: 'High fit', MEDIUM: 'Medium fit', LOW: 'Low fit' };
+
 const LIFECYCLE_TONE: Record<string, string> = {
   APPROVED: 'keep', DOCUMENTS_COLLECTED: 'keep', ELIGIBILITY_REVIEWED: 'keep', PREPARING: 'keep', DEFERRED: 'later', REJECTED: 'reject',
 };
@@ -61,6 +63,9 @@ export function TenderTray({ label, groups, selectedId, onSelect, emptyText }: T
                     <span className={`edge__tag edge__tag--${state.tone}`} aria-hidden="true" />
                     <span className="edge__title">
                       {favoured && <span className="edge__org" title={favoured}>Your organisation</span>}
+                      {item.scoreBand && (
+                        <span className={`edge__fit edge__fit--${item.scoreBand.toLowerCase()}`} title={`Fit ${item.score ?? ''} of 100`}>{BAND_WORDS[item.scoreBand]}</span>
+                      )}
                       {item.title}
                     </span>
                     <span className={`edge__closing closing closing--${group.quietClosing ? 'normal' : closing.urgency}`}>{closing.urgency === 'unknown' ? '' : closing.text}</span>

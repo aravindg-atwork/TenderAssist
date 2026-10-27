@@ -785,6 +785,7 @@ function Consignment({ item, busy, stamp, actions, driveSet, onDetails }: {
       </dl>
 
       <p className="consignment__why"><span>Why</span>{item.explanation}</p>
+      {item.scoreBand && <FitLine item={item} />}
 
       <div className="consignment__more">
         <button type="button" className="btn btn--text btn--sm" onClick={onDetails}>Read the full tender</button>
@@ -816,6 +817,40 @@ function Consignment({ item, busy, stamp, actions, driveSet, onDetails }: {
 
       {stamp && <Postmark text={stamp.text} tone={stamp.tone} />}
     </article>
+  );
+}
+
+const FIT_WORDS: Record<string, string> = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
+
+/** "+35", "−8": a reason's points, signed. */
+function signedPoints(points: number): string {
+  return points > 0 ? `+${points}` : points < 0 ? `−${-points}` : '0';
+}
+
+/**
+ * How well the tender fits the office: its band and score, the reasons that
+ * weigh most, and the approved tender it looks like. It only ranks Today;
+ * the checks above still decide.
+ */
+function FitLine({ item }: { item: InboxItem }) {
+  const reasons = item.scoreReasons ?? [];
+  const like = item.similarTo?.[0];
+  // The "looks like" reason has a line of its own.
+  const likeReason = like ? reasons.find((reason) => reason.text.startsWith('Looks like')) : undefined;
+  const rest = reasons.filter((reason) => reason !== likeReason);
+  const weighed = rest.filter((reason) => reason.points !== 0);
+  const shown = (weighed.length ? weighed : rest).slice().sort((a, b) => Math.abs(b.points) - Math.abs(a.points)).slice(0, 4);
+  return (
+    <div className="consignment__fit">
+      <p>
+        <span className="consignment__fitlabel">Fit</span>
+        <strong className={`fit fit--${(item.scoreBand ?? 'LOW').toLowerCase()}`}>{FIT_WORDS[item.scoreBand ?? 'LOW']} ({item.score})</strong>
+        <span className="consignment__fitwhy" title={reasons.map((reason) => `${reason.text} (${signedPoints(reason.points)})`).join('\n')}>
+          {shown.map((reason) => `${reason.text} (${signedPoints(reason.points)})`).join('; ')}
+        </span>
+      </p>
+      {like && <p className="consignment__like">Looks like: <span title={item.similarTo?.map((tender) => tender.title).join('\n')}>{like.title}</span>{likeReason && ` (${signedPoints(likeReason.points)})`}</p>}
+    </div>
   );
 }
 

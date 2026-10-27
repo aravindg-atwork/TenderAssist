@@ -184,8 +184,13 @@ export class OpportunityRepository {
     return this.listWithScreening('1 = 1', 'o.updated_at DESC, o.rowid DESC');
   }
 
+  /** One tender with its latest screening (for its fit on the day sheet). */
+  getWithScreening(id: string): InboxRow | undefined {
+    return this.listWithScreening('o.id = ?', 'o.rowid', [id])[0];
+  }
+
   // `where` and `orderBy` are fixed SQL fragments from this class, never user input.
-  private listWithScreening(where: string, orderBy: string): InboxRow[] {
+  private listWithScreening(where: string, orderBy: string, params: string[] = []): InboxRow[] {
     return this.db.prepare(
       `SELECT o.*, e.data_json AS screening_json, e.job_id AS screening_job_id, j.reviewed_at AS screening_job_reviewed_at,
               e.created_at AS screening_at,
@@ -198,7 +203,7 @@ export class OpportunityRepository {
        LEFT JOIN jobs j ON j.id = e.job_id
        WHERE o.workspace_id = ? AND ${where}
        ORDER BY ${orderBy}`
-    ).all(this.workspaceId) as unknown as InboxRow[];
+    ).all(this.workspaceId, ...params) as unknown as InboxRow[];
   }
 
   listEvents(opportunityId: string): OpportunityEventRow[] {

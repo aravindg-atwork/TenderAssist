@@ -396,6 +396,14 @@ textarea {
 .consignment__dept { margin-top: -8px; font-size: 1rem; color: var(--ink-3); font-weight: 550; }
 .consignment__why { display: flex; gap: 14px; max-width: 75ch; padding: 14px 16px; border-radius: 12px; background: var(--sheet-2); color: var(--ink-2); }
 .consignment__why span { flex: none; font: 600 0.875rem/1.55 var(--font-post); letter-spacing: 0.06em; text-transform: uppercase; color: var(--blue-ink); }
+.consignment__fit { display: grid; gap: 2px; max-width: 75ch; padding: 0 16px; color: var(--ink-3); font-size: 0.875rem; }
+.consignment__fit p { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.consignment__fitlabel { font: 600 0.8125rem/1.55 var(--font-post); letter-spacing: 0.06em; text-transform: uppercase; color: var(--blue-ink); }
+.consignment__fitwhy { flex: 1 1 30ch; min-width: 0; }
+.consignment__like span { color: var(--ink-2); font-weight: 600; }
+.fit { font-weight: 700; color: var(--ink-2); }
+.fit--high { color: var(--green-ink); }
+.fit--low { color: var(--slate); }
 .consignment__more { display: flex; flex-wrap: wrap; gap: 4px; margin: -6px 0 -4px -10px; }
 .consignment__note { min-height: 64px; }
 .consignment__act { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 6px; }
@@ -564,6 +572,10 @@ textarea {
 .edge__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .edge__closing { font-size: 0.8125rem; white-space: nowrap; }
 .edge__org { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: transparent; border: 1px solid var(--blue); color: var(--blue-ink); font-size: 0.6875rem; font-weight: 700; line-height: 1.5; vertical-align: 1px; }
+/* Fit band: how well a tender fits the office (it only ranks Today). Green is a good fit, plain and slate the rest. */
+.edge__fit { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-3); font-size: 0.6875rem; font-weight: 700; line-height: 1.5; vertical-align: 1px; }
+.edge__fit--high { border-color: var(--green); color: var(--green-ink); }
+.edge__fit--low { border-style: dashed; color: var(--slate); }
 .edge__tag { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
 .edge__tag--keep { background: var(--green); }
 .edge__tag--look { background: var(--amber); }
@@ -1020,6 +1032,9 @@ textarea {
   .consignment__dept { margin-top: -6px; }
   .facts3 > div { padding-top: 10px; padding-bottom: 10px; }
   .consignment__why { padding: 10px 14px; }
+  .consignment__fit { padding: 0 14px; font-size: 0.8125rem; }
+  .consignment__fitwhy { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .consignment__like { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .consignment__more { margin: -4px 0 -6px -10px; }
   .consignment__act { padding-top: 0; }
   .btn--xl { min-height: 50px; }

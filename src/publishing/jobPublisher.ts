@@ -26,6 +26,8 @@ export interface PublishableTender {
   portal?: { url: string; name: string };
   /** "Do we qualify?": its criteria checked against the company's facts, when they are filled in. */
   qualification?: QualifyReport;
+  /** How well it fits the office's interest, as "High (82)" (interestScore.ts); only shown, never decides. */
+  fit?: string;
 }
 
 /**
@@ -316,6 +318,7 @@ const EARLIER_COLUMNS = [
   { header: 'Decision', key: 'decision', width: 15 },
   { header: 'Decision source', key: 'decisionSource', width: 17 },
   { header: 'Review reason', key: 'reviewReason', width: 30 },
+  { header: 'Fit', key: 'fit', width: 13 },
   { header: 'Category', key: 'category', width: 28 },
   { header: 'Organisation', key: 'organisation', width: 35 },
   { header: 'State', key: 'state', width: 20 },
@@ -386,6 +389,7 @@ export async function publishJobWorkbook(
       decision: item.manualReview?.decision ?? item.automaticDecision,
       decisionSource: item.manualReview ? 'Manual review' : 'Automation',
       reviewReason: item.manualReview?.reason ?? '',
+      fit: item.fit ?? '',
       category: item.tender.detail_product_category ?? item.tender.product_category,
       organisation: (item.tender.organisation_chain ?? '').replace(/\|\|/g, ' › '),
       state: item.tender.state_name ?? '',
