@@ -10,6 +10,7 @@ const api: TenderAssistApi = {
   saveRunSettings: (defaults) => ipcRenderer.invoke('save-run-settings', defaults),
   getPortalCategories: (portalId) => ipcRenderer.invoke('get-portal-categories', portalId),
   getGemCategoryCounts: (portalId, names) => ipcRenderer.invoke('get-gem-category-counts', portalId, names),
+  getPortalOrganisations: (portalId) => ipcRenderer.invoke('get-portal-organisations', portalId),
   previewGemSearchWord: (word) => ipcRenderer.invoke('preview-gem-search-word', word),
   getWordSuggestions: () => ipcRenderer.invoke('get-word-suggestions'),
   getCategoryHealth: (portalId) => ipcRenderer.invoke('get-category-health', portalId),

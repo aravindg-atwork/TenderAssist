@@ -108,6 +108,22 @@ describe('buildInbox', () => {
     expect(inbox.attentionCount).toBe(3);
   });
 
+  it('lists a chosen organisation’s tenders first, and marks them', () => {
+    const job = jobs.create();
+    screened(job.id, 'SOON', 'KEEP', '02-Oct-2026 05:00 PM');
+    const late = tenders.upsert({
+      jobId: job.id, tenderRef: 'REF-ORG', tenderPortalId: 'ORG', title: 'Tender ORG', organisationChain: 'Tamil Nadu Electricity Board||IT Wing',
+      publishedDate: null, closingDate: '30-Oct-2026 05:00 PM', openingDate: null, productCategory: 'IT', valueInRupees: 'NA',
+    });
+    const opportunity = opportunities.recordSighting(late, 'tamil-nadu', { jobId: job.id });
+    opportunities.recordScreening(opportunity.id, 'KEEP', { jobId: job.id }, { gates: [] });
+
+    const inbox = buildInbox(opportunities, (portalId) => (portalId === 'tamil-nadu' ? ['Tamil Nadu Electricity Board'] : []));
+    expect(inbox.recommended.map((item) => [item.tenderId, item.favouredOrganisation])).toEqual([['ORG', 'Tamil Nadu Electricity Board'], ['SOON', undefined]]);
+    // Without chosen organisations, the closing order stands.
+    expect(buildInbox(opportunities).recommended.map((item) => item.tenderId)).toEqual(['SOON', 'ORG']);
+  });
+
   it('never brings tenders outside your categories to Today, and says why each rule reject was rejected', () => {
     const job = jobs.create();
     const reject = (id: string, gates: ScreenedGate[]) => {

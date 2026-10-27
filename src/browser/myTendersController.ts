@@ -357,6 +357,120 @@ export async function reviewTendersFromMyTenders(
   return { reviewed, errors, pagesScanned };
 }
 
+/** A GePNIC Tender ID, such as 2026_TNPL_708123_1. */
+const TENDER_ID_PATTERN = /\b\d{4}_[A-Za-z0-9]+_\d+_\d+\b/;
+
+const PORTAL_DATE_PATTERN = /\b(\d{2})-([A-Za-z]{3})-(\d{4})\s+\d{1,2}:\d{2}\s*[AP]M\b/gi;
+const MONTH_NUMBERS: Record<string, string> = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+
+export interface MyTendersRow {
+  tenderPortalId: string;
+  /**
+   * The e-Published day (YYYY-MM-DD) when the row shows its three dates
+   * (published, closing, opening, in that order, as GePNIC lists do); null
+   * when it cannot be told from the row.
+   */
+  publishedDay: string | null;
+}
+
+/** A My Tenders row's Tender ID and, when the row shows it, its published day. */
+export function parseMyTendersRow(text: string): MyTendersRow | null {
+  const id = TENDER_ID_PATTERN.exec(text)?.[0];
+  if (!id) return null;
+  const dates = [...text.matchAll(PORTAL_DATE_PATTERN)];
+  const first = dates.length >= 3 ? dates[0] : null;
+  const month = first ? MONTH_NUMBERS[first[2].toLowerCase()] : undefined;
+  return { tenderPortalId: id, publishedDay: first && month ? `${first[3]}-${month}-${first[1]}` : null };
+}
+
+/** The tenders in the innermost rows of the page open now, in page order. */
+async function tenderRowsOnPage(page: Page): Promise<MyTendersRow[]> {
+  const texts = await page.evaluate(() => Array.from(document.querySelectorAll('tr'))
+    .filter((tr) => !tr.querySelector('tr') && tr.querySelectorAll('td').length > 1)
+    // Cell by cell: a row's own text runs the cells together ("2026_X_1_1Title").
+    .map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent ?? '').join(' '))).catch((): string[] => []);
+  const rows: MyTendersRow[] = [];
+  for (const text of texts) {
+    const row = parseMyTendersRow(text);
+    if (row && !rows.some((seen) => seen.tenderPortalId === row.tenderPortalId)) rows.push(row);
+  }
+  return rows;
+}
+
+export interface OwnFavouritesResult {
+  /** Tender IDs whose details were read. */
+  reviewed: string[];
+  /** Tender IDs whose details could not be read, and why. */
+  failed: Map<string, Error>;
+  /** Tender IDs left alone because the list shows another published day. */
+  otherDays: string[];
+}
+
+/**
+ * Reads the tenders in My Tenders that TenderAssist did not put there: the
+ * operator favourited them on the website by hand (owner, 27 Oct 2026: such
+ * a tender was never found by a search, so it never reached Tenders or the
+ * sheet). `isKnown` tells TenderAssist's own favourites apart. After each
+ * tender the list is opened again from its first page, as the portal's own
+ * My Tenders link does, so the scan starts over and skips what it read.
+ */
+export async function reviewOwnFavouritesInMyTenders(
+  page: Page,
+  isKnown: (tenderPortalId: string) => boolean,
+  whileOpen: WhileDetailOpen,
+  options: {
+    maxPages?: number;
+    maxTenders?: number;
+    paceAction?: PaceAction;
+    portalHomeUrl?: string;
+    /** Only tenders published on this day (YYYY-MM-DD) are opened, when the list shows the day. */
+    publishedOn?: string;
+  } = {}
+): Promise<OwnFavouritesResult> {
+  const { maxPages = 100, maxTenders = 500, paceAction = noPacing, portalHomeUrl, publishedOn } = options;
+  const reviewed: string[] = [];
+  const failed = new Map<string, Error>();
+  const otherDays: string[] = [];
+  const done = new Set<string>();
+  const reopen = () => navigateToMyTenders(page, paceAction, portalHomeUrl);
+  let pageIndex = 0;
+  while (reviewed.length + failed.size < maxTenders && pageIndex < maxPages) {
+    let next: string | undefined;
+    for (const row of await tenderRowsOnPage(page)) {
+      const id = row.tenderPortalId;
+      if (done.has(id) || isKnown(id)) continue;
+      if (publishedOn && row.publishedDay && row.publishedDay !== publishedOn) {
+        done.add(id);
+        otherDays.push(id);
+        continue;
+      }
+      next = id;
+      break;
+    }
+    if (!next) {
+      if (!(await goToNextPage(page, paceAction))) break;
+      pageIndex += 1;
+      continue;
+    }
+    done.add(next);
+    const stub = { id: `my-tenders:${next}`, tender_portal_id: next, tender_ref: next, title: next } as TenderRow;
+    try {
+      const row = await findTenderRow(page, stub);
+      if (!row) throw new Error(`Tender ${next} is not visible in My Tenders.`);
+      await reviewTenderAtRow(page, stub, row, paceAction, whileOpen, reopen);
+      reviewed.push(next);
+    } catch (error) {
+      failed.set(next, error instanceof Error ? error : new Error(String(error)));
+    }
+    // Back on the first page: walk to the page this tender was on.
+    if (!(await reopen().then(() => true, () => false))) break;
+    for (let index = 0; index < pageIndex; index += 1) {
+      if (!(await goToNextPage(page, paceAction))) break;
+    }
+  }
+  return { reviewed, failed, otherDays };
+}
+
 /**
  * Opens the selected current-job row's View Tender Information link. The
  * real portal uses an untracked popup; the same-page fallback makes fixture

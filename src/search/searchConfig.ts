@@ -1,6 +1,8 @@
 export interface ConfiguredSearch {
   searchKey: string;
   productCategory: string;
+  /** Instead of a category: this organisation's tenders, in every category. */
+  organisation?: string;
 }
 
 // Verified live 2026-09-21 against the real, authenticated TN Tenders

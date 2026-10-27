@@ -32,7 +32,8 @@ import { describeTimeline, type TimelineEntry } from '../review/timeline.js';
 import { explainScreening, parseScreenedGates } from '../review/tenderExplanation.js';
 import { buildDailyReport, type ReportRun, type ReportTender } from '../review/dailyReport.js';
 import { DailyCountRepository } from '../persistence/repositories/dailyCountRepository.js';
-import { countPublishedTenders } from '../portal/publicTenderCounts.js';
+import { countPublishedTenders, listPublicOrganisations } from '../portal/publicTenderCounts.js';
+import { OrganisationListRepository, type OrganisationList } from '../persistence/repositories/organisationListRepository.js';
 import { collectAuditHistory, writeAuditWorkbook } from '../review/auditHistory.js';
 import type { OperatorDecision, OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import { canTransition } from '../state/opportunityLifecycle.js';
@@ -78,7 +79,7 @@ import type {
   GemSearchWordPreview,
 } from './ipcTypes.js';
 import {
-  categoriesForPortal, DEFAULT_GEM_CATEGORIES, normalizeRunConfiguration, STARTING_EXCLUDED_WORDS, STARTING_INTENT_WORDS, STARTING_PORTAL_CATEGORIES,
+  categoriesForPortal, organisationsForPortal, DEFAULT_GEM_CATEGORIES, normalizeFromTime, normalizeRunConfiguration, publishedBeforeFromTime, STARTING_EXCLUDED_WORDS, STARTING_INTENT_WORDS, STARTING_PORTAL_CATEGORIES,
   type RunConfiguration, type RunDateMeaning,
 } from '../config/runConfiguration.js';
 import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
@@ -88,7 +89,7 @@ import { ocrImage, ocrPdfPages, windowsOcrAvailable } from '../documents/windows
 import { extractTenderRequirements, isOutdatedReading } from '../extraction/requirementExtractor.js';
 import { isValidJnlpFile, type DscJnlpArtifact } from '../browser/dscDownloadSecurity.js';
 import { daySheetFileName, daySheetsOfWebsite, isDaySheet,mirrorReportSheetsToDrive, mirrorTenderFolderToDrive, publishJobWorkbook, tenderDocumentsDirectory, tenderOutputDirectory, type PublishableTender, type ReportSheetMode } from '../publishing/jobPublisher.js';
-import { supersededRuns } from '../publishing/supersededRuns.js';
+import { laterSearches, supersededRuns, type DayFolderRun } from '../publishing/supersededRuns.js';
 import { driveCopyOfSheet, linkSegments } from '../publishing/driveSheetLinks.js';
 import { filesForDrive } from '../publishing/driveSelection.js';
 import { CompanyProfileRepository } from '../persistence/repositories/companyProfileRepository.js';
@@ -193,6 +194,7 @@ const workflow = new TenderWorkflowRepository(db);
 const publishingSettings = new PublishingSettingsRepository(db, join(homedir(), 'Documents', build.folderName));
 const automationSettings = new AutomationSettingsRepository(db);
 const portalCategories = new PortalCategoryRepository(db);
+const organisationLists = new OrganisationListRepository(db);
 const displaySettings = new DisplaySettingsRepository(db);
 const jobOutputs = new JobOutputRepository(db);
 const opportunities = new OpportunityRepository(db);
@@ -658,7 +660,10 @@ function configureApplicationMenu(): void {
 
 const OPERATOR_DECISIONS: readonly OperatorDecision[] = ['APPROVE', 'REJECT', 'DEFER', 'REOPEN'];
 
-ipcMain.handle('get-inbox', (): InboxView => buildInbox(opportunities));
+/** A website's chosen organisations (Settings), whose tenders Today lists first. */
+const chosenOrganisationsOf = (portalId: string): string[] => organisationsForPortal(runConfigurations.getDefaults(), { id: portalId });
+
+ipcMain.handle('get-inbox', (): InboxView => buildInbox(opportunities, chosenOrganisationsOf));
 
 ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unknown, note?: unknown): InboxView => {
   if (!Array.isArray(opportunityIds) || opportunityIds.length === 0 || !opportunityIds.every((id) => typeof id === 'string')) {
@@ -674,13 +679,13 @@ ipcMain.handle('decide-tenders', (_event, opportunityIds: unknown, decision: unk
     const rows = opportunityIds.flatMap((id) => tenders.listForOpportunity(id));
     void refreshDaySheets(rows).then(() => { if (runsUploadToDrive()) uploadSavedTendersToGoogleDrive(rows); });
   }
-  return buildInbox(opportunities);
+  return buildInbox(opportunities, chosenOrganisationsOf);
 });
 
 ipcMain.handle('acknowledge-tender-changes', (_event, opportunityIds: unknown): InboxView => {
   if (!Array.isArray(opportunityIds) || !opportunityIds.every((id) => typeof id === 'string')) throw new Error('Invalid tenders.');
   opportunities.acknowledgeChanges(opportunityIds);
-  return buildInbox(opportunities);
+  return buildInbox(opportunities, chosenOrganisationsOf);
 });
 
 ipcMain.handle('dismiss-related-tender', (_event, opportunityId: unknown, otherId: unknown): void => {
@@ -691,7 +696,7 @@ ipcMain.handle('dismiss-related-tender', (_event, opportunityId: unknown, otherI
 ipcMain.handle('acknowledge-runs', (_event, jobIds: unknown): InboxView => {
   if (!Array.isArray(jobIds) || !jobIds.every((id) => typeof id === 'string')) throw new Error('Invalid runs.');
   jobs.markReviewed(jobIds.filter((id) => id !== activeJobId));
-  return buildInbox(opportunities);
+  return buildInbox(opportunities, chosenOrganisationsOf);
 });
 
 ipcMain.handle('get-tenders', (): TendersView => buildTenders(opportunities));
@@ -973,6 +978,35 @@ function recentGemCategoryCounts(portalId: string): { counts: Record<string, num
   }
   return { counts, days: rows.length };
 }
+
+/** Tamil Nadu's public organisation list is read again when older than this. */
+const ORGANISATION_LIST_MAX_AGE_MS = 24 * 3_600_000;
+
+/**
+ * The organisations Settings offers for a website. GePNIC websites: their
+ * public "Tenders by Organisation" list (organisations with open tenders),
+ * read once a day. GeM: the ministries and departments of the bids its
+ * searches listed, plus those of saved bids.
+ */
+ipcMain.handle('get-portal-organisations', async (_event, portalId: unknown): Promise<OrganisationList> => {
+  const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : '');
+  const saved = organisationLists.get(portal.id);
+  if (isGemPortal(portal)) {
+    const rows = db.prepare(
+      `SELECT DISTINCT t.organisation_chain AS chain FROM tenders t JOIN job_run_configs c ON c.job_id = t.job_id
+       WHERE c.portal_id = ? AND t.organisation_chain IS NOT NULL`
+    ).all(portal.id) as Array<{ chain: string }>;
+    const fromTenders = rows.flatMap((row) => row.chain.split('||'));
+    return { names: [...new Set([...saved.names, ...fromTenders.map((name) => name.trim()).filter(Boolean)])].sort((a, b) => a.localeCompare(b)), readAt: saved.readAt };
+  }
+  if (saved.readAt && Date.now() - Date.parse(saved.readAt) < ORGANISATION_LIST_MAX_AGE_MS && saved.names.length > 0) return saved;
+  try {
+    return organisationLists.save(portal.id, await listPublicOrganisations(portal.url), { replace: true });
+  } catch (error) {
+    console.error(`[TenderAssist] Could not read ${portal.name}'s organisation list:`, error);
+    return saved;
+  }
+});
 
 ipcMain.handle('get-gem-category-counts', async (_event, portalId: unknown, names: unknown): Promise<GemCategoryCounts> => {
   const portal = getPortalDefinition(typeof portalId === 'string' ? portalId : '');
@@ -1368,12 +1402,17 @@ ipcMain.handle('get-run-history', (_event, portalId: string) => {
   const earliest = new Date(`${recentRunDates[recentRunDates.length - 1]}T00:00:00`);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const todayIso = today.toLocaleDateString('en-CA');
   const missedDates: string[] = [];
+  const searchedUntil: Record<string, string> = {};
   for (const cursor = new Date(earliest); cursor <= today && missedDates.length < 31; cursor.setDate(cursor.getDate() + 1)) {
     const value = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
-    if (!completed.has(value)) missedDates.push(value);
+    const until = completed.has(value) ? runConfigurations.searchedUntil(portal.id, value) : null;
+    if (until && until !== 'DAY') searchedUntil[value] = until;
+    // A past day searched only part-way still has tenders to find.
+    if (!completed.has(value) || (value < todayIso && until !== 'DAY')) missedDates.push(value);
   }
-  return { recentRunDates, missedDates };
+  return { recentRunDates, missedDates, searchedUntil };
 });
 ipcMain.handle('get-portal-lock', (): PortalLockState => currentPortalLock());
 ipcMain.handle('set-portal-control', (_event, take: unknown): PortalLockState => {
@@ -1855,6 +1894,31 @@ interface RunContext {
   /** GeM runs: no portal page; files come straight from GeM. */
   gem?: GemClient;
   downloader?: DocumentDownloader;
+  /** The time the operator chose on Today for the first date (null: the whole day). */
+  fromTime?: { date: string; time: string | null };
+  /** "Also search days already searched": whole days, not from where the last search stopped. */
+  runAgain?: boolean;
+}
+
+/**
+ * The time a published date is searched from: the operator's own choice for
+ * the first date, or else the time the date was last searched on that same
+ * day (a search at 10:04 saw nothing published after 10:04, so the next one
+ * goes on from there, today or later). Unset is the whole day.
+ */
+function fromTimeFor(ctx: RunContext, searchDate: string): string | undefined {
+  if ((ctx.config.dateMeaning ?? 'PUBLISHED') !== 'PUBLISHED') return undefined;
+  if (ctx.fromTime?.date === searchDate) return ctx.fromTime.time ?? undefined;
+  if (ctx.runAgain) return undefined;
+  const until = runConfigurations.searchedUntil(ctx.portal.id, searchDate);
+  return until && until !== 'DAY' ? until : undefined;
+}
+
+/** One date's run configuration in this sign-in, with the time it is searched from. */
+function configForDate(ctx: RunContext, searchDate: string): RunConfiguration {
+  const { fromTime: _earlierDate, ...config } = ctx.config;
+  const fromTime = fromTimeFor(ctx, searchDate);
+  return { ...config, searchDate, ...(fromTime ? { fromTime } : {}) };
 }
 
 /** Claim the single active-run slot synchronously, before any await. */
@@ -2087,13 +2151,9 @@ const SEARCH_SAVED_STATES: readonly string[] = ['UPLOADING', 'REPORTING', 'COMPL
 // Asked for every tender during an upload or sheet write: read again at most every 2 seconds.
 let supersededCache: { at: number; byDirectory: Map<string, Set<string>> } = { at: 0, byDirectory: new Map() };
 
-/** The runs in a day folder that a later search of the same date replaced (supersededRuns). */
-function supersededInDayFolder(jobDirectory: string): Set<string> {
-  if (Date.now() - supersededCache.at > 2_000) supersededCache = { at: Date.now(), byDirectory: new Map() };
-  const key = resolve(jobDirectory).toLocaleLowerCase();
-  const cached = supersededCache.byDirectory.get(key);
-  if (cached) return cached;
-  const superseded = supersededRuns(jobOutputs.jobsInDirectory(jobDirectory).flatMap((jobId) => {
+/** The search runs of a day folder, for supersededRuns and laterSearches. */
+function dayFolderRuns(jobDirectory: string): DayFolderRun[] {
+  return jobOutputs.jobsInDirectory(jobDirectory).flatMap((jobId) => {
     const config = runConfigurations.getForJob(jobId);
     const plan = jobOutputs.getPlan(jobId);
     const job = jobs.getById(jobId);
@@ -2106,26 +2166,34 @@ function supersededInDayFolder(jobDirectory: string): Set<string> {
       finished: SEARCH_SAVED_STATES.includes(job.state),
       isSearch: (job.purpose ?? 'SEARCH') === 'SEARCH',
     }];
-  }));
+  });
+}
+
+/** The runs in a day folder that a later search of the same date may have replaced tenders of (supersededRuns). */
+function supersededInDayFolder(jobDirectory: string): Set<string> {
+  if (Date.now() - supersededCache.at > 2_000) supersededCache = { at: Date.now(), byDirectory: new Map() };
+  const key = resolve(jobDirectory).toLocaleLowerCase();
+  const cached = supersededCache.byDirectory.get(key);
+  if (cached) return cached;
+  const superseded = supersededRuns(dayFolderRuns(jobDirectory));
   supersededCache.byDirectory.set(key, superseded);
   return superseded;
 }
 
 /**
- * A tender of a search the same date's later search replaced: off the sheet,
- * its folder binned here and on Drive. One the operator approved stays,
- * unless the later search found the bid again (its row carries the approval).
+ * A tender a later search of the same date found again: that search's row
+ * decides it, so this one is off the sheet and its folder binned here and on
+ * Drive (an S.No it had passes to the later row). A tender no later search
+ * saw (closed since, or published before its "from" time) stays, with its
+ * S.No (owner, 27 Oct 2026: closed tenders left the sheet, which then
+ * started at 3).
  */
 function isReplacedByLaterSearch(tender: TenderRow): boolean {
   const plan = jobOutputs.getPlan(tender.job_id);
   if (!plan) return false;
-  const superseded = supersededInDayFolder(plan.jobDirectory);
-  if (!superseded.has(tender.job_id)) return false;
-  if (!isApprovedTender(tender)) return true;
-  const portalId = runConfigurations.getForJob(tender.job_id)?.portalId;
-  return jobOutputs.jobsInDirectory(plan.jobDirectory).some((jobId) => !superseded.has(jobId)
-    && runConfigurations.getForJob(jobId)?.portalId === portalId
-    && db.prepare(`SELECT 1 FROM tenders WHERE job_id = ? AND tender_ref = ? AND COALESCE(tender_portal_id, '') = ?`)
+  if (!supersededInDayFolder(plan.jobDirectory).has(tender.job_id)) return false;
+  return laterSearches(dayFolderRuns(plan.jobDirectory), tender.job_id).some((jobId) =>
+    db.prepare(`SELECT 1 FROM tenders WHERE job_id = ? AND tender_ref = ? AND COALESCE(tender_portal_id, '') = ?`)
       .get(jobId, tender.tender_ref, tender.tender_portal_id ?? '') !== undefined);
 }
 
@@ -2628,7 +2696,7 @@ function startDateJob(ctx: RunContext, searchDate: string): string {
   jobMachine.transition(job.id, 'AUTH_REQUIRED', `next published date ${searchDate} in the same portal session`);
   jobMachine.transition(job.id, 'AUTH_PENDING', 'reusing the signed-in portal session');
   jobMachine.transition(job.id, 'AUTHENTICATED', 'portal session already signed in');
-  runConfigurations.saveForJob(job.id, { ...ctx.config, searchDate });
+  runConfigurations.saveForJob(job.id, configForDate(ctx, searchDate));
   ctx.jobId = job.id;
   activeJobId = job.id;
   return job.id;
@@ -2761,6 +2829,35 @@ async function askOperatorDuringRun(ctx: RunContext, jobId: string, tender: Tend
   return answer;
 }
 
+const OWN_FAVOURITE_NOTE = 'You added it to My Tenders on the website.';
+
+/**
+ * Whether a tender in My Tenders is one TenderAssist knows already: it put
+ * it there, read it, or read it before as one the operator added. Any other
+ * tender there the operator favourited by hand.
+ */
+function isTenderAssistFavourite(portalId: string, tenderPortalId: string): boolean {
+  return db.prepare(
+    `SELECT 1 FROM tenders t JOIN job_run_configs c ON c.job_id = t.job_id
+     WHERE c.portal_id = ? AND (t.tender_portal_id = ? OR t.tender_ref = ?)
+       AND (t.favorited_at IS NOT NULL OR t.detail_reviewed_at IS NOT NULL)
+     LIMIT 1`
+  ).get(portalId, tenderPortalId, tenderPortalId) !== undefined;
+}
+
+/** Whether an earlier search of this run's published date, on the same website, already saw the tender. */
+function seenByEarlierSearch(jobId: string, tenderRef: string, tenderPortalId?: string | null): boolean {
+  return db.prepare(
+    `SELECT 1 FROM tenders t
+     JOIN job_run_configs other ON other.job_id = t.job_id
+     JOIN job_run_configs self ON self.job_id = ?
+     WHERE t.job_id <> self.job_id AND other.portal_id = self.portal_id
+       AND other.search_date = self.search_date AND other.date_meaning = 'PUBLISHED'
+       AND (t.tender_ref = ? OR (? <> '' AND t.tender_portal_id = ?))
+     LIMIT 1`
+  ).get(jobId, tenderRef, tenderPortalId ?? '', tenderPortalId ?? '') !== undefined;
+}
+
 /** Search, screen, and collect documents for one published date. */
 async function runDate(ctx: RunContext, jobId: string, authSessionId: string): Promise<{ result: AuthJobUpdate; selected: CollectedCounts }> {
   const config = runConfigurations.getForJob(jobId)!;
@@ -2770,14 +2867,22 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
   const deps = { jobs, sessions, jobMachine, tenders, classifications, signal: abortController.signal, paceAction, portalHomeUrl: portal.url };
   const page = ctx.page!;
   const searchResult = await runSearchPhase(
-    { ...deps, searches, onCategoryList: (categories) => rememberCategoryList(portal.id, categories) },
+    {
+      ...deps, searches, onCategoryList: (categories) => rememberCategoryList(portal.id, categories),
+      // Searched from a time of day: what an earlier search of the day saw is not read again.
+      seenBefore: config.fromTime ? (row) => seenByEarlierSearch(jobId, row.referenceNumber, row.tenderId) : undefined,
+    },
     page,
     jobId,
     authSessionId,
     emitJobUpdate,
     // Local midnight, so "YYYY-MM-DD" is the calendar day picked, not UTC.
     new Date(`${config.searchDate}T00:00:00`),
-    config.productCategories.map((productCategory, index) => ({ searchKey: `search_${index + 1}`, productCategory })),
+    [
+      ...config.productCategories.map((productCategory, index) => ({ searchKey: `search_${index + 1}`, productCategory })),
+      // Each chosen organisation is one more search, in every category.
+      ...(config.organisations ?? []).map((organisation, index) => ({ searchKey: `organisation_${index + 1}`, productCategory: '', organisation })),
+    ],
     { keywords: config.keywords, excludedKeywords: config.excludedKeywords }
   );
   // Record what the run saw even if the search stopped part-way.
@@ -2796,6 +2901,15 @@ async function runDate(ctx: RunContext, jobId: string, authSessionId: string): P
       askOperator: (tender, _detail, reason) => askOperatorDuringRun(ctx, jobId, tender, reason),
       // The same rule that picks the tenders this run collects.
       wantsDocuments: (tenderId) => selectionFor(jobId).includes(tenderId),
+      ownFavourites: {
+        isKnown: (tenderPortalId) => isTenderAssistFavourite(portal.id, tenderPortalId),
+        added: (tender) => {
+          const note = OWN_FAVOURITE_NOTE;
+          workflow.saveReview(tender.id, 'KEEP', note);
+          const opportunityId = syncedOpportunityId(tender, ctx, jobId);
+          syncOpportunities('question', () => applyTenderDecision(opportunitySync, opportunityId, 'APPROVE', { jobId, note }));
+        },
+      },
     },
     page, jobId, authSessionId, config, emitJobUpdate, portal.stateName
   );
@@ -2836,7 +2950,7 @@ async function signInAgainForDate(ctx: RunContext, date: string): Promise<{ jobI
       captured = true;
       ctx.jobId = update.jobId;
       activeJobId = update.jobId;
-      runConfigurations.saveForJob(update.jobId, { ...ctx.config, searchDate: date });
+      runConfigurations.saveForJob(update.jobId, configForDate(ctx, date));
     }
     emitJobUpdate({ ...update, statusMessage: 'The portal page stopped working, so TenderAssist reopened it. Your saved login is filled in; enter the CAPTCHA (and DSC if asked) to continue.' });
   });
@@ -3056,7 +3170,7 @@ function startGemDateJob(ctx: RunContext, searchDate: string): string {
   jobMachine.transition(job.id, 'AUTH_REQUIRED', `GeM search for ${searchDate}`);
   jobMachine.transition(job.id, 'AUTH_PENDING', 'GeM needs no sign-in');
   jobMachine.transition(job.id, 'AUTHENTICATED', 'GeM bid list is public');
-  runConfigurations.saveForJob(job.id, { ...ctx.config, searchDate });
+  runConfigurations.saveForJob(job.id, configForDate(ctx, searchDate));
   ctx.jobId = job.id;
   activeJobId = job.id;
   return job.id;
@@ -3102,6 +3216,8 @@ async function runGemDates(ctx: RunContext, plan: DateBatchPlan, onStarted: (job
       searchWords: index === 0 ? searchWords : undefined,
       skipWordHit,
       skipKnown: skipWordHit,
+      seenBefore: (bid) => seenByEarlierSearch(jobId, bid.bidNumber, bid.id),
+      onOrganisations: (names) => { organisationLists.save(ctx.portal.id, names); },
     }, jobId, config, emitJobUpdate);
     syncOpportunities('classification', () => syncJobOpportunities(opportunitySync, jobId, ctx.portal.id, { screening: decided.outcome === 'SUCCESS' }));
     let result = decided;
@@ -3960,7 +4076,12 @@ async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknow
       : planDatesToRun(portal.id, config.searchDate, until, options?.runAgain === true, config.dateMeaning);
     config.searchDate = plan.toRun[0];
     const outputSettings = publishingSettings.get(portal.id);
-    ctx = { portal, config, outputSettings, abortController, paceAction };
+    // A time chosen on Today is for the first date; '' asks for the whole day.
+    const chosenTime = typeof requestedConfig.fromTime === 'string' ? (normalizeFromTime(requestedConfig.fromTime) ?? null) : undefined;
+    ctx = {
+      portal, config, outputSettings, abortController, paceAction, runAgain: options?.runAgain === true,
+      ...(chosenTime !== undefined && config.dateMeaning === 'PUBLISHED' ? { fromTime: { date: config.searchDate, time: chosenTime } } : {}),
+    };
     activeRunContext = ctx;
     activeRunPortalId = portal.id;
     activeSearchDate = config.searchDate;
@@ -3969,7 +4090,9 @@ async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknow
       throw new Error('Save your product categories and intent in Settings before starting a job.');
     }
     // Each website searches its own chosen categories.
-    ctx.config = { ...config, productCategories: categoriesForPortal(runConfigurations.getDefaults(), portal) };
+    const defaults = runConfigurations.getDefaults();
+    const organisations = organisationsForPortal(defaults, portal);
+    ctx.config = { ...config, productCategories: categoriesForPortal(defaults, portal), ...(organisations.length > 0 ? { organisations } : {}) };
     if (isGemPortal(portal)) {
       // No portal window or sign-in for GeM.
       ctx.gem = gemClientFor(abortController.signal);
@@ -4004,7 +4127,7 @@ async function startSearch(requestedConfig: RunConfiguration, untilDate?: unknow
       jobIdCaptured = true;
       activeJobId = update.jobId;
       ctx.jobId = update.jobId;
-      runConfigurations.saveForJob(update.jobId, ctx.config);
+      runConfigurations.saveForJob(update.jobId, configForDate(ctx, ctx.config.searchDate));
       resolveStarted(update.jobId);
     }
     emitJobUpdate(update);
@@ -4055,6 +4178,7 @@ ipcMain.handle('run-more-dates', (_event, from: unknown, to: unknown, options?: 
   if (meaning === 'CLOSING') checkDateMeaning(getPortalDefinition(activeRunPortalId), meaning, from, to);
   const earlier = options?.runAgain === true ? [] : runConfigurations.listCompletedRunDates(activeRunPortalId, meaning);
   const plan = planDateBatch(from, to, [...earlier, ...queued]);
+  if (activeRunContext) activeRunContext.runAgain = options?.runAgain === true;
   if (plan.toRun.length === 0) {
     throw new Error(options?.runAgain === true
       ? 'Every date in that range already ran in this sign-in.'

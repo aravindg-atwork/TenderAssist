@@ -52,12 +52,17 @@ export function TenderTray({ label, groups, selectedId, onSelect, emptyText }: T
               const closing = closingLabel(item.closingAt, item.closingDate);
               const state = stateOf(item);
               const selected = item.id === selectedId;
+              // From one of the operator's chosen organisations: listed first, and marked.
+              const favoured = (item as { favouredOrganisation?: string }).favouredOrganisation;
               return (
                 <li key={item.id}>
                   <button type="button" className={selected ? 'edge is-open' : 'edge'} aria-current={selected ? 'true' : undefined}
                     onClick={() => onSelect(item.id)} title={item.title}>
                     <span className={`edge__tag edge__tag--${state.tone}`} aria-hidden="true" />
-                    <span className="edge__title">{item.title}</span>
+                    <span className="edge__title">
+                      {favoured && <span className="edge__org" title={favoured}>Your organisation</span>}
+                      {item.title}
+                    </span>
                     <span className={`edge__closing closing closing--${group.quietClosing ? 'normal' : closing.urgency}`}>{closing.urgency === 'unknown' ? '' : closing.text}</span>
                     <span className="visually-hidden">{state.words}. {closing.text}.</span>
                   </button>

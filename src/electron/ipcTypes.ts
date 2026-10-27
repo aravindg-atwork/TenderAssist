@@ -95,6 +95,12 @@ export interface PortalCredentialSettings {
 export interface RunHistorySummary {
   recentRunDates: string[];
   missedDates: string[];
+  /**
+   * Days searched only part-way, by the Indian time ("HH:MM") the last
+   * search of each started on the day itself: the next search goes on from
+   * there.
+   */
+  searchedUntil?: Record<string, string>;
 }
 
 export interface SavePortalCredentialInput {
@@ -295,6 +301,8 @@ export interface TenderAssistApi {
   getPortalCategories(portalId: string): Promise<PortalCategoryList>;
   /** GeM: bids open now in each named category (null when unknown), and their bids in recent runs. */
   getGemCategoryCounts(portalId: string, names: string[]): Promise<GemCategoryCounts>;
+  /** The organisations Settings offers for a website (see get-portal-organisations in main.ts). */
+  getPortalOrganisations(portalId: string): Promise<{ names: string[]; readAt: string | null }>;
   previewGemSearchWord(word: string): Promise<GemSearchWordPreview>;
   /** Chosen categories no longer on the website's list, and categories new on it. */
   getCategoryHealth(portalId: string): Promise<CategoryHealth>;

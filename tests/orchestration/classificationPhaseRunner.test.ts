@@ -38,6 +38,21 @@ const MY_TENDERS_PAGE_2_HTML = `<html><body>
       <td>2026_TEST_1</td><td>Development of Citizen Services Portal</td>
       <td><a href="/detail" target="_blank"><img src="images/view.png" title="View Tender Information"></a></td>
     </tr>
+    <tr>
+      <td>2026_OWN_42_1</td><td>Survey of village tanks</td>
+      <td><a href="/detail-own" target="_blank"><img src="images/view.png" title="View Tender Information"></a></td>
+    </tr>
+  </table>
+</body></html>`;
+
+// A tender the operator favourited on the website by hand.
+const OWN_DETAIL_HTML = `<html><head><meta charset="utf-8"></head><body>
+  <table>
+    <tr><td>Tender ID</td><td>2026_OWN_42_1</td></tr>
+    <tr><td>Tender Reference Number</td><td>REF/OWN/42</td></tr>
+    <tr><td>Title</td><td>Survey of village tanks</td></tr>
+    <tr><td>Product Category</td><td>Civil Works</td></tr>
+    <tr><td>Published Date</td><td>21-Sep-2026 09:00 AM</td></tr>
   </table>
 </body></html>`;
 
@@ -111,6 +126,7 @@ describe.skipIf(!CHROME_PATH)('runClassificationPhase', { timeout: 30_000 }, () 
       if (req.url === '/my') res.end(MY_TENDERS_PAGE_1_HTML);
       else if (req.url === '/my?page=2') res.end(MY_TENDERS_PAGE_2_HTML);
       else if (req.url === '/detail') res.end(DETAIL_HTML);
+      else if (req.url === '/detail-own') res.end(OWN_DETAIL_HTML);
       else res.end('<html><body><a href="/my">My Tenders</a></body></html>');
     });
     await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -300,5 +316,69 @@ describe.skipIf(!CHROME_PATH)('runClassificationPhase', { timeout: 30_000 }, () 
     expect(tenders.getById(missing.id)!.favorited).toBe(0);
     expect(tenders.getById(older.id)!.favorited).toBe(0);
     expect(tenders.getById(tenderId)!.favorited).toBe(1);
+  });
+
+  it('leaves out a tender published before the time the search started from', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    await runClassificationPhase(
+      { jobs, sessions, jobMachine, tenders, classifications },
+      page, jobId, authSessionId,
+      { searchDate: '2026-09-21', fromTime: '10:30', productCategories: ['Information Technology'], keywords: ['software development'], excludedKeywords: [] },
+      () => {}
+    );
+
+    const g1 = classifications.listForTender(tenderId).find((gate) => gate.gate === 'G1');
+    expect(g1?.result).toBe('REJECT');
+    expect(g1?.reason_code).toBe('PUBLISHED_BEFORE_FROM_TIME');
+  });
+
+  it('reads a tender the operator added to My Tenders by hand, keeps it as theirs and saves its documents', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    const added: string[] = [];
+    const saved: string[] = [];
+    const messages: string[] = [];
+    const result = await runClassificationPhase(
+      {
+        jobs, sessions, jobMachine, tenders, classifications,
+        saveDocuments: async (tender) => { saved.push(tender.tender_ref); },
+        ownFavourites: { isKnown: () => false, added: (tender) => added.push(tender.tender_ref) },
+      },
+      page, jobId, authSessionId,
+      { searchDate: '2026-09-21', productCategories: ['Information Technology'], keywords: ['software development'], excludedKeywords: [] },
+      (update) => { if (update.statusMessage) messages.push(update.statusMessage); }
+    );
+
+    expect(result.outcome).toBe('SUCCESS');
+    const own = tenders.findByJobAndRef(jobId, 'REF/OWN/42')!;
+    expect(own.tender_portal_id).toBe('2026_OWN_42_1');
+    expect(own.title).toBe('Survey of village tanks');
+    expect(own.favorited).toBe(1);
+    expect(own.detail_reviewed_at).not.toBeNull();
+    expect(added).toEqual(['REF/OWN/42']);
+    expect(saved).toContain('REF/OWN/42');
+    expect(messages.some((message) => /1 tender you added to My Tenders yourself was read and kept/.test(message))).toBe(true);
+  });
+
+  it('leaves alone a tender in My Tenders that TenderAssist already knows', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    const added: string[] = [];
+    await runClassificationPhase(
+      { jobs, sessions, jobMachine, tenders, classifications, ownFavourites: { isKnown: (id) => id === '2026_OWN_42_1', added: (tender) => added.push(tender.tender_ref) } },
+      page, jobId, authSessionId,
+      { searchDate: '2026-09-21', productCategories: ['Information Technology'], keywords: ['software development'], excludedKeywords: [] },
+      () => {}
+    );
+
+    expect(added).toEqual([]);
+    expect(tenders.findByJobAndRef(jobId, 'REF/OWN/42')).toBeUndefined();
   });
 });

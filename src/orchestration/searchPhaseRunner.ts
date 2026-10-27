@@ -7,9 +7,10 @@ import type { SearchRepository } from '../persistence/repositories/searchReposit
 import type { TenderRepository } from '../persistence/repositories/tenderRepository.js';
 import type { ClassificationRepository } from '../persistence/repositories/classificationRepository.js';
 import { CONFIGURED_SEARCHES } from '../search/searchConfig.js';
-import { searchCategory, favoriteVisibleRows } from '../browser/searchFormController.js';
+import { searchActiveTenders, favoriteVisibleRows } from '../browser/searchFormController.js';
 import type { AuthJobUpdate } from './authJobRunner.js';
 import type { ConfiguredSearch } from '../search/searchConfig.js';
+import type { ParsedActiveTenderRow } from '../search/activeTenderRowParser.js';
 import { isCancellationRequested, markJobCancelled, USER_CANCELLED_REASON } from './jobCancellation.js';
 import { triageTenderTitle, type PreFavoriteIntent } from '../classification/preFavoriteTriage.js';
 import type { PaceAction } from './actionPacer.js';
@@ -30,6 +31,11 @@ export interface SearchPhaseDeps {
   portalHomeUrl?: string;
   /** Receives the website's own Product Category list, read once per search phase. */
   onCategoryList?: (categories: string[]) => void;
+  /**
+   * A tender an earlier search of this day already saw: left alone, so a
+   * search from a time of day reads only what is new since.
+   */
+  seenBefore?: (row: ParsedActiveTenderRow) => boolean;
 }
 
 const PREFAVORITE_CLASSIFIER_VERSION = 'prefavorite-title-detail-v1';
@@ -87,6 +93,7 @@ export async function runSearchPhase(
   const failedCategories: string[] = [];
   // Dropped from the website's list: nothing to search again later; pick a replacement instead.
   const notListedCategories: string[] = [];
+  const notListedOrganisations: string[] = [];
   let categoryListRead = !deps.onCategoryList;
   const readCategoryList = (categories: string[]) => {
     categoryListRead = true;
@@ -96,20 +103,22 @@ export async function runSearchPhase(
   for (const config of configuredSearches) {
     if (isCancellationRequested(deps.signal)) return cancelled();
     const existing = searches.findByJobAndKey(jobId, config.searchKey);
-    const search = existing ?? searches.create(jobId, config.searchKey, config.productCategory);
+    const label = config.organisation ?? config.productCategory;
+    const search = existing ?? searches.create(jobId, config.searchKey, label);
     if (search.state === 'COMPLETE') continue;
 
     searches.updateState(search.id, 'RUNNING');
-    statusMessage = `Searching ${config.productCategory} and screening titles before favouriting.`;
+    statusMessage = `Searching ${label} and screening titles before favouriting.`;
     onUpdate(snapshot());
 
     try {
-      const rows = await retryTransient(() => searchCategory(page, config.productCategory, targetDate, deps.paceAction, deps.portalHomeUrl, categoryListRead ? undefined : readCategoryList), {
+      const criteria = config.organisation ? { organisation: config.organisation } : { productCategory: config.productCategory };
+      const rows = await retryTransient(() => searchActiveTenders(page, criteria, targetDate, deps.paceAction, deps.portalHomeUrl, categoryListRead ? undefined : readCategoryList), {
         delaysMs: retryDelaysMs,
         canRetry: sessionUsable,
         signal: deps.signal,
         onRetry: (attempt) => {
-          statusMessage = `${config.productCategory}: the portal did not respond, trying again (attempt ${attempt + 1} of ${retryDelaysMs.length + 1}).`;
+          statusMessage = `${label}: the portal did not respond, trying again (attempt ${attempt + 1} of ${retryDelaysMs.length + 1}).`;
           onUpdate(snapshot());
         },
       });
@@ -118,7 +127,14 @@ export async function runSearchPhase(
       const favoriteReferences: string[] = [];
       let rejectedCount = 0;
       let heldCount = 0;
+      let seenCount = 0;
       for (const row of rows) {
+        if (deps.seenBefore?.(row)) {
+          seenCount += 1;
+          continue;
+        }
+        // Found by a category search of this run already: one tender, read once.
+        if (config.organisation && tenders.findByJobAndRef(jobId, row.referenceNumber)) continue;
         const tender = tenders.upsert({
           jobId,
           tenderRef: row.referenceNumber,
@@ -142,8 +158,12 @@ export async function runSearchPhase(
           evidence: { searchDate: targetDate }, classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
         });
         classifications.saveGate({
-          tenderId: tender.id, gate: 'G2', result: 'PASS', reasonCode: 'SEARCH_RESULT_CATEGORY_MATCH',
-          evidence: { actual: [row.productCategory], matched: [row.productCategory] }, classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
+          tenderId: tender.id, gate: 'G2', result: 'PASS',
+          reasonCode: config.organisation ? 'SEARCH_RESULT_ORGANISATION_MATCH' : 'SEARCH_RESULT_CATEGORY_MATCH',
+          evidence: config.organisation
+            ? { actual: [row.productCategory], organisation: config.organisation }
+            : { actual: [row.productCategory], matched: [row.productCategory] },
+          classifierVersion: PREFAVORITE_CLASSIFIER_VERSION,
         });
 
         const titleDecision = triageTenderTitle(row.title, intent);
@@ -205,10 +225,11 @@ export async function runSearchPhase(
           if (tender) tenders.markFavorited(tender.id, favoritedAt);
         }
         heldCount += favoriteReferences.length - favoritedReferences.length;
-        statusMessage = `${config.productCategory}: ${rows.length} found, ${favoritedReferences.length} favourited, ${rejectedCount} rejected, ${heldCount} held for review.`;
+        statusMessage = `${label}: ${rows.length} found, ${favoritedReferences.length} favourited, ${rejectedCount} rejected, ${heldCount} held for review.`;
       } else {
-        statusMessage = `${config.productCategory}: ${rows.length} found, none added to My Tenders, ${rejectedCount} rejected, ${heldCount} held for review.`;
+        statusMessage = `${label}: ${rows.length} found, none added to My Tenders, ${rejectedCount} rejected, ${heldCount} held for review.`;
       }
+      if (seenCount > 0) statusMessage += ` ${seenCount} already seen by an earlier search of this day, so not read again.`;
 
       searches.updateProgress(search.id, 0, rows.length);
       searches.updateState(search.id, 'COMPLETE');
@@ -219,7 +240,7 @@ export async function runSearchPhase(
       if (authState === 'TAB_LOST' || authState === 'SESSION_EXPIRED') {
         const final = snapshot(
           'ABORTED',
-          `auth session reached terminal state ${authState} during ${config.productCategory} search`
+          `auth session reached terminal state ${authState} during ${label} search`
         );
         onUpdate(final);
         return final;
@@ -231,12 +252,12 @@ export async function runSearchPhase(
       const message = err instanceof Error ? err.message : String(err);
       const attempts = (err as { attempts?: number }).attempts ?? 1;
       searches.markFailed(search.id, message, attempts);
-      if ((err as Error | null)?.name === 'CategoryNotOnPortalError') {
-        notListedCategories.push(config.productCategory);
+      if ((err as Error | null)?.name === 'CategoryNotOnPortalError' || (err as Error | null)?.name === 'OrganisationNotOnPortalError') {
+        (config.organisation ? notListedOrganisations : notListedCategories).push(label);
         statusMessage = message;
       } else {
-        failedCategories.push(config.productCategory);
-        statusMessage = `${config.productCategory} could not be searched after ${attempts} attempt${attempts === 1 ? '' : 's'}: ${message}`;
+        failedCategories.push(label);
+        statusMessage = `${label} could not be searched after ${attempts} attempt${attempts === 1 ? '' : 's'}: ${message}`;
       }
     }
 
@@ -253,6 +274,9 @@ export async function runSearchPhase(
   }
   if (notListedCategories.length > 0) {
     notes.push(`${notListedCategories.join(', ')} ${notListedCategories.length === 1 ? 'is' : 'are'} no longer on the website's category list, so ${notListedCategories.length === 1 ? 'it was' : 'they were'} skipped. Choose a replacement on Today or in Settings.`);
+  }
+  if (notListedOrganisations.length > 0) {
+    notes.push(`${notListedOrganisations.join(', ')} ${notListedOrganisations.length === 1 ? 'is' : 'are'} not in the website's organisation list, so ${notListedOrganisations.length === 1 ? 'it was' : 'they were'} skipped. Check the name in Settings.`);
   }
   if (notes.length > 0) statusMessage = `Search finished, but ${notes.join(' ')}`;
   const final = snapshot('SUCCESS');

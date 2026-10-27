@@ -96,6 +96,35 @@ export function findCategoryLabel(categories: readonly string[], productCategory
   return categories.find((label) => normaliseCategory(label) === wanted) ?? null;
 }
 
+export class OrganisationNotOnPortalError extends Error {
+  constructor(organisation: string) {
+    super(`"${organisation}" is not in any list on the website's search form today, so it was skipped. Check its spelling in Settings.`);
+    this.name = 'OrganisationNotOnPortalError';
+  }
+}
+
+/**
+ * Chooses an organisation on Search Active Tenders: the form's own
+ * organisation list is whichever dropdown (other than Product Category and
+ * Date Criteria) lists that name. Returns false when none does.
+ */
+async function selectOrganisation(page: Page, organisation: string): Promise<boolean> {
+  const wanted = normaliseCategory(organisation);
+  const target = await page.$$eval('select', (selects, name) => {
+    const norm = (value: string) => value.replace(/\s+/g, ' ').trim().toLowerCase();
+    for (const select of selects as HTMLSelectElement[]) {
+      if (select.id === 'ProductCategory' || select.id === 'dateCriteria') continue;
+      const option = Array.from(select.options).find((entry) => norm(entry.textContent ?? '') === name);
+      if (option) return { selector: select.id ? `#${CSS.escape(select.id)}` : select.name ? `select[name="${select.name}"]` : null, label: (option.textContent ?? '').trim() };
+    }
+    return null;
+  }, wanted);
+  if (!target?.selector) return false;
+  await page.selectOption(target.selector, { label: target.label });
+  return true;
+}
+
+/** Search Active Tenders for one category's tenders published on a day. */
 export async function searchCategory(
   page: Page,
   productCategory: string,
@@ -104,6 +133,22 @@ export async function searchCategory(
   portalHomeUrl?: string,
   onCategoryList?: (categories: string[]) => void
 ): Promise<ParsedActiveTenderRow[]> {
+  return searchActiveTenders(page, { productCategory }, fromToDateDdMmYyyy, paceAction, portalHomeUrl, onCategoryList);
+}
+
+/**
+ * Search Active Tenders for one category's, or one organisation's, tenders
+ * published on a day. An organisation is searched in every category.
+ */
+export async function searchActiveTenders(
+  page: Page,
+  criteria: { productCategory?: string; organisation?: string },
+  fromToDateDdMmYyyy: string,
+  paceAction: PaceAction = noPacing,
+  portalHomeUrl?: string,
+  onCategoryList?: (categories: string[]) => void
+): Promise<ParsedActiveTenderRow[]> {
+  const searched = criteria.organisation ?? criteria.productCategory ?? '';
   await ensurePortalMenu(page, 'Search Active Tenders', portalHomeUrl, paceAction);
   await paceAction();
   await submitAndWaitForNewPage(page, () => page.click('text=Search Active Tenders'));
@@ -111,13 +156,19 @@ export async function searchCategory(
   const categories = await readProductCategoryOptions(page).catch((): string[] => []);
   // Reading the list is a bonus; a surprise here must not stop the search.
   if (onCategoryList && categories.length > 0) onCategoryList(categories);
-  // The website drops categories from its list now and then (Tamil Nadu's
-  // "Information Technology", 9 Oct 2026). Selecting a missing one would
-  // wait 30s and look like a slow portal, so say so plainly instead.
-  const label = categories.length > 0 ? findCategoryLabel(categories, productCategory) : productCategory;
-  if (!label) throw new CategoryNotOnPortalError(productCategory);
-  await paceAction();
-  await page.selectOption('#ProductCategory', { label });
+  if (criteria.organisation) {
+    await paceAction();
+    if (!(await selectOrganisation(page, criteria.organisation))) throw new OrganisationNotOnPortalError(criteria.organisation);
+  } else {
+    const productCategory = criteria.productCategory ?? '';
+    // The website drops categories from its list now and then (Tamil Nadu's
+    // "Information Technology", 9 Oct 2026). Selecting a missing one would
+    // wait 30s and look like a slow portal, so say so plainly instead.
+    const label = categories.length > 0 ? findCategoryLabel(categories, productCategory) : productCategory;
+    if (!label) throw new CategoryNotOnPortalError(productCategory);
+    await paceAction();
+    await page.selectOption('#ProductCategory', { label });
+  }
   await paceAction();
   await page.selectOption('#dateCriteria', { label: 'Published Date' });
   await paceAction();
@@ -160,7 +211,7 @@ export async function searchCategory(
   if (cellRows === null) {
     const pageText = await page.locator('body').innerText().catch(() => '');
     if (/no\s+(?:open\s+)?tenders?\s+found/i.test(pageText)) return [];
-    throw new Error(`The website did not show its results table for "${productCategory}" after searching. ${pageText.replace(/\s+/g, ' ').trim().slice(0, 160)}`);
+    throw new Error(`The website did not show its results table for "${searched}" after searching. ${pageText.replace(/\s+/g, ' ').trim().slice(0, 160)}`);
   }
 
   return cellRows.map(parseActiveTenderRow).filter((r): r is ParsedActiveTenderRow => r !== null);

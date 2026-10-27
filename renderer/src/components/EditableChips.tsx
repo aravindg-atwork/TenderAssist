@@ -11,9 +11,11 @@ export interface EditableChipsProps {
   placeholder: string;
   /** What the list is for, behind an (i) beside its heading. */
   info?: ReactNode;
+  /** Names offered while typing (the website's own list), any name may still be typed. */
+  suggestions?: readonly string[];
 }
 
-export function EditableChips({ id, label, helper, values, onChange, placeholder, info }: EditableChipsProps) {
+export function EditableChips({ id, label, helper, values, onChange, placeholder, info, suggestions }: EditableChipsProps) {
   const [draft, setDraft] = useState('');
   // Remove all asks twice, so one stray click never empties a list.
   const [confirmClear, setConfirmClear] = useState(false);
@@ -70,9 +72,15 @@ export function EditableChips({ id, label, helper, values, onChange, placeholder
           value={draft}
           placeholder={placeholder}
           aria-describedby={`${id}-helper`}
+          list={suggestions && suggestions.length > 0 ? `${id}-suggestions` : undefined}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
         />
+        {suggestions && suggestions.length > 0 && (
+          <datalist id={`${id}-suggestions`}>
+            {suggestions.filter((name) => !values.some((value) => value.toLocaleLowerCase() === name.toLocaleLowerCase())).map((name) => <option key={name} value={name} />)}
+          </datalist>
+        )}
         <button type="button" className={draft.trim() ? 'btn btn--primary' : 'btn btn--quiet'} onClick={addDraft} disabled={!draft.trim()}>
           <PlusIcon /> Add
         </button>

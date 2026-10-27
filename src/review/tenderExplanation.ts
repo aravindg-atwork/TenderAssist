@@ -57,6 +57,7 @@ function rejectClause(gate: ScreenedGate): string {
   const evidence = gate.evidence;
   switch (gate.gate) {
     case 'G1':
+      if (gate.reasonCode === 'PUBLISHED_BEFORE_FROM_TIME') return 'published before the time this search started from';
       return gate.reasonCode === 'UNPARSEABLE_PUBLISHED_DATE' ? 'published date could not be read' : 'not published on the selected date';
     case 'G2': {
       const actual = list(evidence.actual);
@@ -84,6 +85,7 @@ function pickedUpClause(byGate: (id: ScreenedGate['gate']) => ScreenedGate | und
   const matchedCategories = list(category?.evidence.matched);
   if (category?.reasonCode === 'SEARCH_WORD_MATCH' && searchWords.length) parts.push(`GeM listed it for your search word ${quoted(searchWords)}`);
   else if (category?.result === 'PASS' && matchedCategories.length) parts.push(`it is in your category ${quoted(matchedCategories)}`);
+  else if (category?.result === 'PASS' && typeof category.evidence.organisation === 'string') parts.push(`it is from your organisation ${quoted([category.evidence.organisation])}`);
   const intent = list(byGate('G3')?.evidence.matchedKeywords);
   if (intent.length) parts.push(`it mentions your words ${quoted(intent)}`);
   return parts.length ? parts.join(', and ') : 'it was listed for the date you searched, but none of your categories or words matched';
@@ -136,8 +138,9 @@ export function explainScreening(recommendation: 'KEEP' | 'REJECT' | 'UNCERTAIN'
     return { sentence: `Recommended: has your search word ${quoted(list(byGate('G2')?.evidence.searchWords))}${where}.`, matchedExclusions, matchedIntent };
   }
   const category = list(byGate('G2')?.evidence.matched);
+  const organisation = byGate('G2')?.evidence.organisation;
   const parts = [
-    category.length ? `category ${quoted(category)}` : null,
+    category.length ? `category ${quoted(category)}` : typeof organisation === 'string' ? `from your organisation ${quoted([organisation])}` : null,
     matchedIntent.length ? `matched ${quoted(matchedIntent)}` : null,
   ].filter(Boolean);
   return { sentence: parts.length ? `Recommended: ${parts.join('; ')}.` : 'Recommended: passed every check.', matchedExclusions, matchedIntent };

@@ -16,7 +16,11 @@ export interface PublishableTender {
   manualReview?: TenderReviewRow;
   documents: TenderDocumentRow[];
   requirements?: TenderRequirementRow;
-  /** Stable S.No within the day folder; defaults to the item's position. */
+  /**
+   * Fixed number within the day folder, used in the tender's folder name;
+   * defaults to the item's position. The sheet's own S.No is the row's
+   * place on the sheet, so it always runs 1, 2, 3 even after a tender left.
+   */
   serialNumber?: number;
   /** The website this tender came from, when one sheet holds several websites. */
   portal?: { url: string; name: string };
@@ -155,6 +159,8 @@ async function publishTenderEligibilityWorkbook(
   tenderDirectory: string,
   item: PublishableTender,
   serialNumber: number,
+  /** Its S.No on the day's sheet. */
+  sheetNumber: number,
   structure: OutputStructureSettings,
   outputDate: string
 ): Promise<void> {
@@ -163,7 +169,7 @@ async function publishTenderEligibilityWorkbook(
   const text = (key: string) => (typeof req[key] === 'string' ? req[key]! : '');
   const sections = requirementSections(item.requirements);
   const decision = item.manualReview?.decision ?? item.automaticDecision;
-  const row = reportRow({ tender: item.tender, serialNumber, eligibility: text('eligibility'), emd: text('emd') });
+  const row = reportRow({ tender: item.tender, serialNumber: sheetNumber, eligibility: text('eligibility'), emd: text('emd') });
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'TenderAssist';
   workbook.created = new Date();
@@ -182,7 +188,7 @@ async function publishTenderEligibilityWorkbook(
   };
   group('The tender');
   add([
-    ['S.No', serialNumber],
+    ['S.No', sheetNumber],
     ['Tender ID', item.tender.tender_portal_id ?? item.tender.tender_ref],
     ['Reference', item.tender.tender_ref],
     ['Tender title', item.tender.title],
@@ -346,13 +352,17 @@ export async function publishJobWorkbook(
 
   for (const [index, item] of items.entries()) {
     const serialNumber = item.serialNumber ?? index + 1;
+    // Rows come in folder-number order; a tender that left (re-decided by a
+    // later search, or rejected) leaves no gap in the sheet's S.No (owner,
+    // 27 Oct 2026: a sheet started at 3).
+    const sheetNumber = index + 1;
     const req = requirementData(item.requirements);
     const tenderDirectory = tenderOutputDirectory(jobDirectory, item.tender, serialNumber, structure, searchDate);
     const documentsDirectory = tenderDocumentsDirectory(jobDirectory, item.tender, serialNumber, structure, searchDate);
     const website = item.portal ?? portal;
     const row = reportRow({
       tender: item.tender,
-      serialNumber,
+      serialNumber: sheetNumber,
       eligibility: req.eligibility,
       emd: req.emd,
       qualification: item.qualification,
@@ -388,7 +398,7 @@ export async function publishJobWorkbook(
       documents: item.documents.filter((document) => document.state === 'DOWNLOADED').length,
       folder: tenderDirectory,
     });
-    await publishTenderEligibilityWorkbook(tenderDirectory, item, serialNumber, structure, searchDate);
+    await publishTenderEligibilityWorkbook(tenderDirectory, item, serialNumber, sheetNumber, structure, searchDate);
   }
 
   sheet.autoFilter = { from: 'A1', to: `${sheet.getColumn(REPORT_COLUMNS.length + EARLIER_COLUMNS.length).letter}1` };

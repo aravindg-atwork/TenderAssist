@@ -39,6 +39,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const [productCategories, setProductCategories] = useState<string[]>([]);
   // Each website's own chosen categories, by website id.
   const [categoriesByPortal, setCategoriesByPortal] = useState<Record<string, string[]>>({});
+  // Each website's organisations to search, by website id.
+  const [organisationsByPortal, setOrganisationsByPortal] = useState<Record<string, string[]>>({});
+  const [websiteOrganisations, setWebsiteOrganisations] = useState<string[]>([]);
   const [gemIncludeProducts, setGemIncludeProducts] = useState(false);
   /** GeM search words: open bids with one are read whatever their day or category. */
   const [gemSearchWords, setGemSearchWords] = useState<string[]>([]);
@@ -67,6 +70,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     if (!settings) return;
     setProductCategories(settings.defaults.productCategories);
     setCategoriesByPortal(settings.defaults.categoriesByPortal);
+    setOrganisationsByPortal(settings.defaults.organisationsByPortal ?? {});
     setGemIncludeProducts(settings.defaults.gemIncludeProducts);
     setGemSearchWords(settings.defaults.gemSearchWords ?? []);
     setKeywords(settings.defaults.keywords);
@@ -84,6 +88,18 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const chosenCategories = categoriesByPortal[selectedPortal.id]
     ?? categoriesForPortal({ productCategories, keywords, excludedKeywords, categoriesByPortal: {}, gemIncludeProducts }, selectedPortal);
   const setChosenCategories = (values: string[]) => setCategoriesByPortal({ ...categoriesByPortal, [selectedPortal.id]: values });
+  const chosenOrganisations = organisationsByPortal[selectedPortal.id] ?? [];
+  const setChosenOrganisations = (values: string[]) => setOrganisationsByPortal({ ...organisationsByPortal, [selectedPortal.id]: values });
+
+  // The website's own organisation names, offered while typing.
+  useEffect(() => {
+    let current = true;
+    setWebsiteOrganisations([]);
+    window.tenderAssist.getPortalOrganisations(selectedPortal.id)
+      .then((list) => { if (current) setWebsiteOrganisations(list.names); })
+      .catch(() => { if (current) setWebsiteOrganisations([]); });
+    return () => { current = false; };
+  }, [selectedPortal.id]);
 
   // GeM rewords the example after a category's name now and then; follow its current wording.
   useEffect(() => {
@@ -173,7 +189,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   }, []);
 
   // What auto-save compares: everything on these pages except the password being typed.
-  const snapshot = JSON.stringify({ productCategories, categoriesByPortal, gemIncludeProducts, gemSearchWords, keywords, excludedKeywords, loginId, rememberPassword, publishing, pacing, portal: selectedPortalId });
+  const snapshot = JSON.stringify({ productCategories, categoriesByPortal, organisationsByPortal, gemIncludeProducts, gemSearchWords, keywords, excludedKeywords, loginId, rememberPassword, publishing, pacing, portal: selectedPortalId });
   const lastSaved = useRef<string | null>(null);
   const loaded = Boolean(settings && credentialSettings && publishing && pacing);
 
@@ -192,7 +208,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     setSaving(true);
     setSaved(false);
     setError(null);
-    const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories },
+    const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories }, organisationsByPortal,
       // Product bids now follow the chosen categories (a product category searches them), so the old switch is cleared.
       gemIncludeProducts: false, gemSearchWords };
     const withCredentials = !gem && (mode === 'explicit' || password === '');
@@ -338,6 +354,11 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
               </div>
               {wordsOpen && <GemSearchWords values={gemSearchWords} onChange={setGemSearchWords} onClose={() => setWordsOpen(false)} />}
               <p className="hint">The list is GeM’s own Category list from its advanced search, services and products, exactly as GeM shows it. “Open now” is GeM’s own count of bids open in that category today; the other number is how many started in it on the days you searched GeM. Each website keeps its own categories; the intent and excluded words below are shared by every website.</p>
+              <EditableChips id="organisation-entry" label="Organisations to search" values={chosenOrganisations} onChange={setChosenOrganisations}
+                suggestions={websiteOrganisations} placeholder="Type a ministry or department"
+                helper={websiteOrganisations.length > 0
+                  ? 'Bids from these ministries or departments are checked in any category; your intent and excluded words still decide them. Names come from the buyers of the GeM bids TenderAssist has listed.'
+                  : 'Bids from these ministries or departments are checked in any category; your intent and excluded words still decide them. After your first GeM search, GeM’s buyer names are offered as you type.'} />
             </>
           ) : (
             <>
@@ -345,6 +366,9 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
               <div id="look-categories" />
               <CategoryPicker portalName={selectedPortal.name} websiteList={websiteCategories} info={CATEGORY_INFO}
                 values={chosenCategories} onChange={setChosenCategories} {...categoryHelp} />
+              <EditableChips id="organisation-entry" label="Organisations to search" values={chosenOrganisations} onChange={setChosenOrganisations}
+                suggestions={websiteOrganisations} placeholder="Type an organisation, as the website names it"
+                helper={`Each one is searched on ${selectedPortal.name} as well as your categories, in every category; your intent and excluded words still decide its tenders. ${websiteOrganisations.length > 0 ? `${websiteOrganisations.length} organisations from the website’s “Tenders by Organisation” list are offered as you type.` : 'The website’s organisation list could not be read just now; type the name as the website shows it.'}`} />
             </>
           )}
           <div id="look-intent" />

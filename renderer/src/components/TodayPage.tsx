@@ -113,6 +113,8 @@ export function TodayPage({
   /** GeM only: search the day bids started (published) or the day they close. */
   const [dateMeaning, setDateMeaning] = useState<RunDateMeaning>('PUBLISHED');
   const [runAgain, setRunAgain] = useState(false);
+  /** One published day: read only tenders published from this time (HH:MM); '' is the whole day. */
+  const [fromTime, setFromTime] = useState('');
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [skippedNote, setSkippedNote] = useState<string | null>(null);
@@ -336,6 +338,13 @@ export function TodayPage({
   }, [busy, decide, drawer, mode, selected, walk]);
 
   const dateCount = to >= from ? daysBetween(from, to) : 1;
+  const oneDay = !closing && from === to;
+  const lastSearchedAt = oneDay ? history.searchedUntil?.[from] : undefined;
+  // A day searched part-way goes on from where its last search started.
+  useEffect(() => { setFromTime(lastSearchedAt ?? ''); }, [from, to, selectedPortalId, lastSearchedAt]);
+  const partDays = !closing && !oneDay
+    ? Object.entries(history.searchedUntil ?? {}).filter(([date]) => date >= from && date <= to).sort(([a], [b]) => a.localeCompare(b))
+    : [];
   const blocker = preflight?.checks.find((check) => check.level === 'BLOCKED') ?? null;
   const warnings = preflight?.checks.filter((check) => check.level === 'WARNING') ?? [];
   const missed = history.missedDates;
@@ -354,8 +363,9 @@ export function TodayPage({
       const { jobId, skipped } = await window.tenderAssist.startJob(
         closing
           ? { searchDate: todayIso(), portalId: selectedPortalId, dateMeaning: 'CLOSING_AFTER', closingFrom: from, ...settings.defaults }
-          : { searchDate: from, portalId: selectedPortalId, dateMeaning: 'PUBLISHED', ...settings.defaults },
-        closing ? todayIso() : to > from ? to : from, { runAgain: closing || runAgain },
+          : { searchDate: from, portalId: selectedPortalId, dateMeaning: 'PUBLISHED', ...settings.defaults, ...(oneDay ? { fromTime } : {}) },
+        // A time chosen for a day already searched searches it again from then.
+        closing ? todayIso() : to > from ? to : from, { runAgain: closing || runAgain || (oneDay && Boolean(fromTime) && fromTime !== lastSearchedAt) },
       );
       if (skipped.length > 0) setSkippedNote(`Already searched, skipped: ${skipped.map(shortDate).join(', ')}.`);
       onRunStarted(jobId);
@@ -523,10 +533,23 @@ export function TodayPage({
                   </label>
                 </div>
               )}
+              {oneDay && (
+                <div className="dates-pick">
+                  <label className="field"><span>Published from</span>
+                    <input type="time" value={fromTime} disabled={starting} onChange={(event) => setFromTime(event.target.value)} />
+                  </label>
+                </div>
+              )}
+              {oneDay && (lastSearchedAt
+                ? <p className="hint">{shortDate(from)} was last searched at {lastSearchedAt}, so this search reads only tenders published since then; earlier ones stay as they are. {fromTime ? 'Clear the time to read the whole day again.' : 'The whole day is read again.'}</p>
+                : fromTime && <p className="hint">Only tenders published at {fromTime} or later are read.</p>)}
+              {partDays.length > 0 && (
+                <p className="hint">{partDays.map(([date, time]) => `${shortDate(date)} was searched until ${time}`).join('; ')}. {partDays.length === 1 ? 'That day goes' : 'Those days go'} on from then.</p>
+              )}
               {!closing && (
                 <label className="check">
                   <input type="checkbox" checked={runAgain} disabled={starting} onChange={(event) => setRunAgain(event.target.checked)} />
-                  Also search days already searched
+                  Also search days already searched (the whole day)
                 </label>
               )}
             </section>

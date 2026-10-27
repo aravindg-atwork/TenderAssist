@@ -1,6 +1,6 @@
 /**
- * Searching a date again replaces what the earlier search of it saved: the
- * day folder, its sheet and Drive keep only the latest finished search
+ * Searching a date again replaces what the earlier search of it saved for
+ * the tenders it finds again: the latest look at a tender decides it
  * (operator, 16 Oct 2026: a second 14-10 GeM search left the first one's 14
  * folders beside its own 28, six bids twice). Runs are compared within one
  * website and one kind of search, so a catch-up search ("closing on or
@@ -19,7 +19,20 @@ export interface DayFolderRun {
   isSearch: boolean;
 }
 
-/** The runs in one day folder that a later finished search of the same thing replaced. */
+/**
+ * The finished searches after this run of the same website and the same
+ * thing. Only a tender one of them found again is replaced (owner, 27 Oct
+ * 2026): a tender it never saw (closed since, or published before its
+ * "from" time) stays on the sheet with its S.No.
+ */
+export function laterSearches(runs: readonly DayFolderRun[], jobId: string): string[] {
+  const self = runs.find((run) => run.jobId === jobId);
+  if (!self || !self.isSearch) return [];
+  return runs.filter((run) => run.isSearch && run.finished && run.runNumber > self.runNumber
+    && run.portalId === self.portalId && run.searchKey === self.searchKey).map((run) => run.jobId);
+}
+
+/** The runs in one day folder that a later finished search of the same thing may have replaced tenders of. */
 export function supersededRuns(runs: readonly DayFolderRun[]): Set<string> {
   const latestFinished = new Map<string, number>();
   for (const run of runs) {

@@ -5,7 +5,8 @@ import type { Page } from 'playwright-core';
 
 const attemptsByCategory = new Map<string, number>();
 vi.mock('../../src/browser/searchFormController.js', () => ({
-  searchCategory: vi.fn(async (_page: unknown, category: string) => {
+  searchActiveTenders: vi.fn(async (_page: unknown, criteria: { productCategory?: string }) => {
+    const category = criteria.productCategory ?? '';
     const attempt = (attemptsByCategory.get(category) ?? 0) + 1;
     attemptsByCategory.set(category, attempt);
     if (category === 'Flaky') {

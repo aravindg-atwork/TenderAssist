@@ -10,6 +10,14 @@ import {
 
 const DEFAULTS_KEY = 'run_defaults';
 
+/** A stored UTC time as the Indian date and time of day, the websites' own clock. */
+export function indianDateTime(iso: string): { date: string; time: string } | null {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return null;
+  const ist = new Date(ms + 5.5 * 3_600_000).toISOString();
+  return { date: ist.slice(0, 10), time: ist.slice(11, 16) };
+}
+
 interface SettingsRow {
   value_json: string;
 }
@@ -19,6 +27,8 @@ interface JobConfigRow {
   search_date: string;
   date_meaning: string;
   closing_from: string | null;
+  from_time: string | null;
+  organisations_json: string | null;
   product_categories_json: string;
   keywords_json: string;
   excluded_keywords_json: string;
@@ -62,8 +72,8 @@ export class RunConfigurationRepository {
     this.db
       .prepare(
         `INSERT INTO job_run_configs
-           (job_id, search_date, product_categories_json, keywords_json, excluded_keywords_json, created_at, portal_id, date_meaning, closing_from)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (job_id, search_date, product_categories_json, keywords_json, excluded_keywords_json, created_at, portal_id, date_meaning, closing_from, from_time, organisations_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         jobId,
@@ -74,7 +84,9 @@ export class RunConfigurationRepository {
         new Date().toISOString(),
         config.portalId ?? 'tamil-nadu',
         config.dateMeaning ?? 'PUBLISHED',
-        config.closingFrom ?? null
+        config.closingFrom ?? null,
+        config.fromTime ?? null,
+        config.organisations?.length ? JSON.stringify(config.organisations) : null
       );
     return config;
   }
@@ -101,7 +113,7 @@ export class RunConfigurationRepository {
   getForJob(jobId: string): RunConfiguration | undefined {
     const row = this.db
       .prepare(
-        `SELECT portal_id, search_date, date_meaning, closing_from, product_categories_json, keywords_json, excluded_keywords_json
+        `SELECT portal_id, search_date, date_meaning, closing_from, from_time, organisations_json, product_categories_json, keywords_json, excluded_keywords_json
          FROM job_run_configs WHERE job_id = ?`
       )
       .get(jobId) as JobConfigRow | undefined;
@@ -110,6 +122,8 @@ export class RunConfigurationRepository {
       searchDate: row.search_date,
       dateMeaning: row.date_meaning as RunDateMeaning,
       closingFrom: row.closing_from ?? undefined,
+      fromTime: row.from_time ?? undefined,
+      organisations: row.organisations_json ? JSON.parse(row.organisations_json) as string[] : undefined,
       portalId: row.portal_id,
       productCategories: JSON.parse(row.product_categories_json) as string[],
       keywords: JSON.parse(row.keywords_json) as string[],
@@ -134,9 +148,37 @@ export class RunConfigurationRepository {
       `SELECT DISTINCT config.search_date
        FROM job_run_configs config
        JOIN jobs ON jobs.id = config.job_id
-       WHERE config.portal_id = ? AND config.date_meaning = ? AND jobs.state = 'COMPLETE'`
+       WHERE config.portal_id = ? AND config.date_meaning = ? AND jobs.state = 'COMPLETE'
+         -- A published day searched during the day itself is searched only
+         -- up to then (searchedUntil): the next search goes on from there.
+         AND (config.date_meaning <> 'PUBLISHED' OR date(jobs.created_at, '+330 minutes') > config.search_date)`
     ).all(portalId, meaning) as unknown as Array<{ search_date: string }>;
     return rows.map((row) => row.search_date);
+  }
+
+  /**
+   * How far a published day has been searched on a website: 'DAY' when a
+   * finished search started after the day was over, the Indian time
+   * ("HH:MM") the latest finished search started on the day itself, or null
+   * when it was never searched to the end. A search at 10:04 saw nothing
+   * published after 10:04 (owner, 27 Oct 2026), so the day is not done.
+   */
+  searchedUntil(portalId: string, searchDate: string): 'DAY' | string | null {
+    const rows = this.db.prepare(
+      `SELECT jobs.created_at AS started
+       FROM job_run_configs config
+       JOIN jobs ON jobs.id = config.job_id
+       WHERE config.portal_id = ? AND config.date_meaning = 'PUBLISHED' AND config.search_date = ?
+         AND jobs.state = 'COMPLETE' AND COALESCE(jobs.purpose, 'SEARCH') = 'SEARCH'`
+    ).all(portalId, searchDate) as unknown as Array<{ started: string }>;
+    let latest: string | null = null;
+    for (const { started } of rows) {
+      const ist = indianDateTime(started);
+      if (!ist) continue;
+      if (ist.date > searchDate) return 'DAY';
+      if (ist.date === searchDate && (!latest || ist.time > latest)) latest = ist.time;
+    }
+    return latest;
   }
 
   deleteForJob(jobId: string): void {

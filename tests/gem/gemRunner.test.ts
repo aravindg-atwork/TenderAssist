@@ -95,6 +95,45 @@ describe('a GeM run for one date', () => {
     expect(read.map((value) => value.replace('%PDF-', '')).sort()).toEqual(['1', '4']);
   });
 
+  it('searched from a time of day, reads only bids started since and none an earlier search saw', async () => {
+    const bids = [
+      bid(1, 'Custom Bid for Services - Web application for the morning', '2026-10-06T09:30:00'),
+      bid(2, 'Custom Bid for Services - Web application seen at ten', '2026-10-06T10:20:00'),
+      bid(3, 'Custom Bid for Services - Web application for the afternoon', '2026-10-06T15:00:00'),
+    ];
+    const counted: number[] = [];
+    const result = await runGemDate(deps(bids, { 3: BID_TEXT }, {
+      seenBefore: (seen) => seen.id === '2',
+      onDayCounts: (_day, total) => counted.push(total),
+    }), jobId, { ...CONFIG, fromTime: '10:04' }, () => {});
+
+    expect(result.outcome).toBe('SUCCESS');
+    expect(tenders.listForJob(jobId).map((tender) => tender.tender_ref)).toEqual(['GEM/2026/B/3']);
+    expect(result.statusMessage).toContain('2 started before 10:04 or were seen by an earlier search of this day');
+    // Part of a day is not the day's count for the daily report.
+    expect(counted).toEqual([]);
+  });
+
+  it('also checks bids from a chosen ministry or department in any category, the words still deciding', async () => {
+    const outside = (id: number, title: string, department: string) => ({ ...bid(id, title), department });
+    const bids = [
+      outside(1, 'Manpower Outsourcing Services - Web application support', 'Indian Railways'),
+      outside(2, 'Manpower Outsourcing Services - Housekeeping', 'Indian Railways'),
+      outside(3, 'Manpower Outsourcing Services - Web application support', 'Other Department'),
+    ];
+    let offered: string[] = [];
+    const result = await runGemDate(deps(bids, { 1: BID_TEXT, 2: BID_TEXT }, { onOrganisations: (names) => { offered = names; } }),
+      jobId, { ...CONFIG, organisations: ['Indian Railways'] }, () => {});
+
+    expect(tenders.listForJob(jobId).map((tender) => tender.tender_ref).sort()).toEqual(['GEM/2026/B/1', 'GEM/2026/B/2']);
+    const g2 = classifications.listForTender(tenders.findByJobAndRef(jobId, 'GEM/2026/B/1')!.id).find((gate) => gate.gate === 'G2');
+    expect(g2?.reason_code).toBe('ORGANISATION_MATCH');
+    expect(finalFor('GEM/2026/B/1')).toBe('KEEP');
+    expect(finalFor('GEM/2026/B/2')).toBe('REJECT'); // no intent word
+    expect(result.statusMessage).toContain('2 outside your categories came from your chosen organisations');
+    expect(offered).toEqual(expect.arrayContaining(['Indian Railways', 'Other Department']));
+  });
+
   it('records the bid’s facts for the eligibility sheet and lists its files to save', async () => {
     await runGemDate(deps([bid(1, 'Custom Bid for Services - Development of web application')], { 1: BID_TEXT }), jobId, CONFIG, () => {});
     const tender = tenders.findByJobAndRef(jobId, 'GEM/2026/B/1')!;

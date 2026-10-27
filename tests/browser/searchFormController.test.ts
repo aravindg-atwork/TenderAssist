@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import http, { type Server } from 'node:http';
 import { chromium } from 'playwright-core';
 import { launchChrome, waitForCdpReady } from '../../src/browser/chromeLauncher.js';
-import { CategoryNotOnPortalError, ensurePortalMenu, searchCategory, favoriteAllVisibleRows, favoriteVisibleRows } from '../../src/browser/searchFormController.js';
+import { CategoryNotOnPortalError, OrganisationNotOnPortalError, ensurePortalMenu, searchActiveTenders, searchCategory, favoriteAllVisibleRows, favoriteVisibleRows } from '../../src/browser/searchFormController.js';
 import { isTransientPortalError } from '../../src/orchestration/transientRetry.js';
 import { CHROME_PATH } from '../support/chrome.js';
 import { removeDirWithRetry } from '../support/removeDirWithRetry.js';
@@ -25,7 +25,11 @@ const SEARCH_FORM_HTML = `<html><body>
   </select>
   <input type="text" name="fromDate" id="fromDate" readonly value="">
   <input type="text" name="toDate" id="toDate" readonly value="">
-  <input type="submit" id="submit" value="Search" onclick="document.location.href='/results?category=' + document.getElementById('ProductCategory').value">
+  <select id="OrgName" name="OrgName">
+    <option value="">-Select-</option>
+    <option value="TNEB">Tamil Nadu Electricity Board</option>
+  </select>
+  <input type="submit" id="submit" value="Search" onclick="document.location.href='/results?category=' + document.getElementById('ProductCategory').value + '&amp;org=' + document.getElementById('OrgName').value">
 </body></html>`;
 
 function resultsHtml(rows: Array<{ id: string; title: string; ref: string; category: string; value: string }>): string {
@@ -85,6 +89,7 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
   let chromeProc: ReturnType<typeof launchChrome>;
   let cdpPort: number;
   let currentRows: Array<{ id: string; title: string; ref: string; category: string; value: string }> = [];
+  let lastResultsUrl = '';
   let lastFavoriteBody = '';
   let blankAfterFavorite = false;
   let flakyHomeFailures = 0;
@@ -98,6 +103,7 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
     resultsPage = 'TABLE';
     server = http.createServer((req, res) => {
       if (req.url?.startsWith('/results')) {
+        lastResultsUrl = req.url;
         // As Tamil Nadu shows an empty search (21 Oct 2026), and a page it did not mean to show.
         const page = resultsPage === 'NONE_FOUND'
           ? '<html><body><a href="/">Search Active Tenders</a> Open Tenders S.No Tender ID Tender Title No Open Tenders Found.</body></html>'
@@ -161,6 +167,28 @@ describe.skipIf(!CHROME_PATH)('searchFormController', { timeout: 30_000 }, () =>
       productCategory: 'Information Technology',
       valueInRupees: 'NA',
     });
+  });
+
+  it('searches one organisation in every category, picking the form’s own organisation list', async () => {
+    currentRows = [{ id: '2026_TNEB_1_1', title: 'Billing software', ref: 'TNEB/1', category: 'Works', value: 'NA' }];
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    const rows = await searchActiveTenders(page, { organisation: 'tamil nadu  electricity board' }, '21/09/2026');
+
+    expect(rows.map((row) => row.referenceNumber)).toEqual(['TNEB/1']);
+    expect(lastResultsUrl).toBe('/results?category=&org=TNEB');
+  });
+
+  it('skips at once an organisation the website’s form does not list', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    const error = await searchActiveTenders(page, { organisation: 'Highways Department' }, '21/09/2026').catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(OrganisationNotOnPortalError);
   });
 
   it('searchCategory hands over the website category list, without the placeholder', async () => {

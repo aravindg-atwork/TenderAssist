@@ -158,6 +158,29 @@ describe('copying a day to Drive', () => {
   });
 });
 
+describe('the sheet’s S.No', () => {
+  it('runs 1, 2 on the sheet when tenders 1 and 2 left, while the folders keep their numbers', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tenderassist-sno-'));
+    const tender = (id: string, title: string) => ({
+      id, job_id: 'job-1', tender_ref: `REF-${id}`, tender_portal_id: id, title, organisation_chain: null,
+      published_date: null, closing_date: null, department: null, state_name: null, opening_date: null, product_category: 'Software',
+      value_in_rupees: '', favorited: 1, favorited_at: null, detail_product_category: null, tender_category: null, detail_text: null,
+      detail_reviewed_at: null, document_links_json: '[]', created_at: '', updated_at: '',
+    }) satisfies TenderRow;
+    const output = await publishJobWorkbook(root, '2026-10-16', 'job-1', [
+      { tender: tender('a', 'Website redesign'), automaticDecision: 'KEEP', documents: [], serialNumber: 3 },
+      { tender: tender('b', 'Mobile app'), automaticDecision: 'KEEP', documents: [], serialNumber: 4 },
+    ]);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.workbookPath);
+    const sheet = workbook.getWorksheet('Approved Tenders')!;
+    expect([sheet.getCell('A2').value, sheet.getCell('A3').value]).toEqual([1, 2]);
+    expect(existsSync(join(output.jobDirectory, '16-10-2026_3_Website redesign', 'Eligibility.xlsx'))).toBe(true);
+    expect(existsSync(join(output.jobDirectory, '16-10-2026_4_Mobile app'))).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
 describe('tender folder names', () => {
   it('drop GeM’s "Custom Bid for Services -" and stay short, but keep finding folders saved under the old full name', () => {
     expect(folderTitle('Custom Bid for Services - Integrated Mobile Application for the WDRA 2 Web Portal')).toBe('Integrated Mobile Application for the WDRA 2 Web Portal');

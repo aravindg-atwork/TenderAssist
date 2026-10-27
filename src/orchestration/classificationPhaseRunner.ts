@@ -4,9 +4,9 @@ import type { AuthSessionRepository } from '../persistence/repositories/authSess
 import type { TenderRepository, TenderRow } from '../persistence/repositories/tenderRepository.js';
 import type { ClassificationRepository, FinalClassification } from '../persistence/repositories/classificationRepository.js';
 import type { JobStateMachine } from '../state/jobStateMachine.js';
-import type { RunConfiguration } from '../config/runConfiguration.js';
+import { chosenOrganisationOf, publishedBeforeFromTime, type RunConfiguration } from '../config/runConfiguration.js';
 import { tenderPageFacts } from '../review/watchedTenders.js';
-import { detailTextFor, navigateToMyTenders, NotInMyTendersError, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
+import { detailTextFor, navigateToMyTenders, NotInMyTendersError, reviewOwnFavouritesInMyTenders, reviewTendersFromMyTenders, type TenderDetailSnapshot } from '../browser/myTendersController.js';
 import { parseTenderPortalDate } from '../search/tenderDateParser.js';
 import { evaluateGate1 } from '../classification/gate1Freshness.js';
 import { evaluateIntentKeywords, evaluateExcludedScope, evaluateTenderIntent, type TextGateResult } from '../classification/intentGates.js';
@@ -43,6 +43,18 @@ export interface ClassificationPhaseDeps {
    * nobody answered in time.
    */
   askOperator?: (tender: TenderRow, detail: TenderDetailSnapshot, reason: string) => Promise<RunQuestionAnswer | null>;
+  /**
+   * Tenders the operator favourited on the website by hand are read too,
+   * when given: `isKnown` tells TenderAssist's own favourites apart, and
+   * `added` records the operator's choice on the new tender.
+   */
+  ownFavourites?: { isKnown: (tenderPortalId: string) => boolean; added: (tender: TenderRow) => void };
+}
+
+/** A tender's title from its details page: the portal's Title, else its Work Description. */
+export function titleFromDetails(detail: Pick<TenderDetailSnapshot, 'fields'>, fallback: string): string {
+  const field = (pattern: RegExp) => detail.fields.find((entry) => pattern.test(entry.label.trim()) && entry.value.trim())?.value.trim();
+  return field(/^(?:tender\s+)?title$/i) ?? field(/^work\s*description$/i) ?? fallback;
 }
 
 /**
@@ -94,7 +106,7 @@ export async function runClassificationPhase(
 
   onUpdate(snapshot());
   const currentJobTenders = tenders.listForJob(jobId).filter((tender) => tender.favorited === 1);
-  if (currentJobTenders.length === 0) {
+  if (currentJobTenders.length === 0 && !deps.ownFavourites) {
     jobMachine.transition(jobId, 'SHORTLISTED', 'no current-job favorites required classification');
     const final = snapshot('SUCCESS');
     onUpdate(final);
@@ -145,7 +157,10 @@ export async function runClassificationPhase(
       closingDate: tenderPageFacts(detailTextFor(detail)).closingDateRaw,
     });
 
-    const g1 = publishedDate
+    const g1 = publishedBeforeFromTime(publishedDate, config.fromTime)
+      // Searched from a time of day: one published before it is not this search's.
+      ? { result: 'REJECT' as const, reason_code: 'PUBLISHED_BEFORE_FROM_TIME', published_date: publishedDate, from_time: config.fromTime }
+      : publishedDate
       ? evaluateGate1(publishedDate, evaluatedAgainst, 7)
       : {
           result: 'PASS' as const,
@@ -168,19 +183,21 @@ export async function runClassificationPhase(
     const matchedCategories = actualCategories.filter((actual) =>
       config.productCategories.some((configured) => sameCategory(actual, configured))
     );
+    // A chosen organisation's tender counts in any category.
+    const organisation = matchedCategories.length > 0 ? null : chosenOrganisationOf([detail.organisationChain, detail.department], config.organisations);
     classifications.saveGate({
       tenderId: tender.id,
       gate: 'G2',
-      result: matchedCategories.length > 0 ? 'PASS' : 'REJECT',
+      result: matchedCategories.length > 0 || organisation ? 'PASS' : 'REJECT',
       reasonCode: matchedCategories.length > 0
         ? detail.productCategories.length > 0 ? 'PRODUCT_CATEGORY_MATCH' : 'SEARCH_RESULT_CATEGORY_MATCH'
-        : 'PRODUCT_CATEGORY_MISMATCH',
-      evidence: { actual: actualCategories, configured: config.productCategories, matched: matchedCategories },
+        : organisation ? 'ORGANISATION_MATCH' : 'PRODUCT_CATEGORY_MISMATCH',
+      evidence: { actual: actualCategories, configured: config.productCategories, matched: matchedCategories, ...(organisation ? { organisation } : {}) },
       classifierVersion: CLASSIFIER_VERSION,
     });
 
     // The portal's own one-line "Work Description" reads like a title; the rest of the page only counts phrases.
-    const workDescription = detail.fields.find((field) => /^works*description$/i.test(field.label))?.value ?? '';
+    const workDescription = detail.fields.find((field) => /^work\s*description$/i.test(field.label.trim()))?.value ?? '';
     const { title: titleIntent, intent: g3 } = evaluateTenderIntent(`${tender.title} ${workDescription}`, detail.bodyText, config.keywords);
     titleIntents.set(tender.id, titleIntent);
     matchedIntent.set(tender.id, g3.matchedTerms);
@@ -241,6 +258,62 @@ export async function runClassificationPhase(
     }
   }, deps.portalHomeUrl);
   if (isCancellationRequested(deps.signal)) return cancelled();
+
+  // The operator's own favourites: read and kept as their choice, with documents.
+  if (deps.ownFavourites) {
+    const own = deps.ownFavourites;
+    const sessionUsable = () => {
+      const state = sessions.getById(authSessionId)?.state;
+      return state !== 'TAB_LOST' && state !== 'SESSION_EXPIRED';
+    };
+    let added = 0;
+    let otherDay = 0;
+    const reopened = sessionUsable() && await navigateToMyTenders(page, deps.paceAction, deps.portalHomeUrl).then(() => true, () => false);
+    if (reopened && !isCancellationRequested(deps.signal)) {
+      const result = await reviewOwnFavouritesInMyTenders(page, own.isKnown, async (stub, detail, detailPage) => {
+        if (isCancellationRequested(deps.signal)) return;
+        // Each one belongs to the run of its own published day (owner, 27 Oct 2026).
+        const published = detail.publishedDateRaw ? parseTenderPortalDate(detail.publishedDateRaw) : null;
+        if (published && published.slice(0, 10) !== config.searchDate) {
+          otherDay += 1;
+          return;
+        }
+        const portalTenderId = detail.tenderPortalId || stub.tender_portal_id || stub.tender_ref;
+        const saved = tenders.upsert({
+          jobId,
+          tenderRef: detail.tenderReferenceNumber || portalTenderId,
+          tenderPortalId: portalTenderId,
+          title: titleFromDetails(detail, portalTenderId),
+          organisationChain: null,
+          publishedDate: null,
+          closingDate: null,
+          openingDate: null,
+          productCategory: detail.productCategories[0] ?? '',
+          valueInRupees: '',
+        });
+        tenders.markFavorited(saved.id, new Date().toISOString());
+        const tender = tenders.getById(saved.id) ?? saved;
+        recordDecision(tender, detail);
+        own.added(tender);
+        added += 1;
+        onUpdate({ ...snapshot(), statusMessage: `Read ${tender.title}, which you added to My Tenders yourself. Kept, saving its documents.` });
+        if (deps.saveDocuments) await deps.saveDocuments(tender, detailPage).catch(() => {});
+      }, { paceAction: deps.paceAction, portalHomeUrl: deps.portalHomeUrl, publishedOn: config.searchDate });
+      otherDay += result.otherDays.length;
+      if (result.failed.size > 0) {
+        onUpdate({ ...snapshot(), statusMessage: `${result.failed.size} tender${result.failed.size === 1 ? '' : 's'} you added to My Tenders could not be read: ${[...result.failed.keys()].join(', ')}. The next run tries again.` });
+      }
+    }
+    if (isCancellationRequested(deps.signal)) return cancelled();
+    if (added > 0 || otherDay > 0) {
+      const parts = [
+        added > 0 && `${added} tender${added === 1 ? '' : 's'} you added to My Tenders yourself ${added === 1 ? 'was' : 'were'} read and kept`,
+        otherDay > 0 && `${otherDay} more you added ${otherDay === 1 ? 'was' : 'were'} published on another day and ${otherDay === 1 ? 'is' : 'are'} read when that day is searched`,
+      ].filter(Boolean);
+      onUpdate({ ...snapshot(), statusMessage: `${parts.join('; ')}.` });
+    }
+  }
+
   for (const tender of currentJobTenders) {
     if (isCancellationRequested(deps.signal)) return cancelled();
     if (decided.has(tender.id)) continue;

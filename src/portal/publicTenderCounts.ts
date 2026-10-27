@@ -55,6 +55,21 @@ export function parsePublishedDates(html: string): string[] {
   });
 }
 
+/**
+ * The names on the website's public "Tenders by Organisation" page: the
+ * organisations that have open tenders now, as the website names them.
+ */
+export async function listPublicOrganisations(portalUrl: string, options: Pick<CountOptions, 'fetch' | 'signal'> = {}): Promise<string[]> {
+  const doFetch = options.fetch ?? fetch;
+  const response = await doFetch(`${portalUrl}?page=FrontEndTendersByOrganisation&service=page`, {
+    headers: PORTAL_CHECK_HEADERS, signal: options.signal ?? AbortSignal.timeout(60_000),
+  });
+  if (!response.ok) throw new Error(`The website answered ${response.status}.`);
+  const names = parseOrganisations(await response.text()).map((organisation) => organisation.name);
+  if (names.length === 0) throw new Error('The website showed no organisations; its public list may have changed.');
+  return names;
+}
+
 export async function countPublishedTenders(portalUrl: string, options: CountOptions = {}): Promise<PublicCounts> {
   const doFetch = options.fetch ?? fetch;
   const origin = new URL(portalUrl).origin;

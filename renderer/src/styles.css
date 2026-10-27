@@ -563,6 +563,7 @@ textarea {
 .edge.is-open .edge__title { color: var(--blue-ink); font-weight: 700; }
 .edge__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
 .edge__closing { font-size: 0.8125rem; white-space: nowrap; }
+.edge__org { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; background: transparent; border: 1px solid var(--blue); color: var(--blue-ink); font-size: 0.6875rem; font-weight: 700; line-height: 1.5; vertical-align: 1px; }
 .edge__tag { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); }
 .edge__tag--keep { background: var(--green); }
 .edge__tag--look { background: var(--amber); }

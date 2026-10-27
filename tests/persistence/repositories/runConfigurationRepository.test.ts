@@ -80,6 +80,7 @@ describe('RunConfigurationRepository', () => {
       keywords: ['Web Application', 'Digitization'],
       excludedKeywords: ['AMC'],
       categoriesByPortal: { gem: ['Application Development', 'Custom Bid For Services'], 'tamil-nadu': ['Computer- S/W'] },
+      organisationsByPortal: {},
       gemIncludeProducts: true,
       // Trimmed, one of each, and nothing without two letters or digits.
       gemSearchWords: ['SEO', 'website development'],
@@ -138,5 +139,27 @@ describe('RunConfigurationRepository', () => {
     expect(repo.getForJob(closingJob)?.dateMeaning).toBe('CLOSING');
     expect(repo.listCompletedRunDates('gem')).toEqual(['2026-10-15']);
     expect(repo.listCompletedRunDates('gem', 'CLOSING')).toEqual(['2026-10-20']);
+  });
+
+  it('counts a day searched during the day itself only up to then, and goes on from that time', () => {
+    const jobs = new JobRepository(db);
+    const config = { portalId: 'tamil-nadu', productCategories: ['IT'], keywords: ['software'], excludedKeywords: [] };
+    const searched = (searchDate: string, startedUtc: string, extra: object = {}) => {
+      const id = jobs.create().id;
+      repo.saveForJob(id, { ...config, searchDate, ...extra });
+      db.prepare("UPDATE jobs SET state = 'COMPLETE', created_at = ? WHERE id = ?").run(startedUtc, id);
+      return id;
+    };
+    // 10:04 and 15:30 in India on the 26th; the 25th was searched the next morning.
+    searched('2026-10-26', '2026-10-26T04:34:00.000Z');
+    const later = searched('2026-10-26', '2026-10-26T10:00:00.000Z', { fromTime: '10:04' });
+    searched('2026-10-25', '2026-10-26T03:00:00.000Z');
+
+    expect(repo.searchedUntil('tamil-nadu', '2026-10-26')).toBe('15:30');
+    expect(repo.searchedUntil('tamil-nadu', '2026-10-25')).toBe('DAY');
+    expect(repo.searchedUntil('tamil-nadu', '2026-10-24')).toBeNull();
+    expect(repo.searchedUntil('gem', '2026-10-26')).toBeNull();
+    expect(repo.listCompletedRunDates('tamil-nadu')).toEqual(['2026-10-25']);
+    expect(repo.getForJob(later)?.fromTime).toBe('10:04');
   });
 });

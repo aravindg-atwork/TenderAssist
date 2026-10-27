@@ -3,6 +3,7 @@ import type { OpportunityLifecycle } from '../state/opportunityLifecycle.js';
 import { explainScreening, parseScreenedGates } from './tenderExplanation.js';
 import { RETENDER_REASON_TEXT, retenderReason } from './relatedTenders.js';
 import { describeChangesSinceDecision } from './timeline.js';
+import { chosenOrganisationOf } from '../config/runConfiguration.js';
 
 export type InboxGroup = 'UNCERTAIN' | 'RECOMMENDED' | 'CHANGED' | 'AUTO_REJECTED';
 
@@ -56,6 +57,8 @@ export interface InboxItem extends TenderSummary {
   group: InboxGroup;
   /** For a rule reject only. */
   rejectKind?: RuleRejectKind;
+  /** One of the operator's chosen organisations (Settings), whose tenders come first in each group. */
+  favouredOrganisation?: string;
 }
 
 /** The screening check that decided a reject, by its gates. */
@@ -160,17 +163,27 @@ function toItem(row: InboxRow, group: InboxGroup, related: RelatedTender[], chan
   };
 }
 
-export function buildInbox(opportunities: Pick<OpportunityRepository, 'listInboxRows' | 'listEvents'> & RelatedSource): InboxView {
+export function buildInbox(
+  opportunities: Pick<OpportunityRepository, 'listInboxRows' | 'listEvents'> & RelatedSource,
+  /** Each website's chosen organisations: their tenders are of more interest (owner, 27 Oct 2026). */
+  organisationsFor?: (portalId: string) => readonly string[],
+): InboxView {
   const view: InboxView = { uncertain: [], recommended: [], changed: [], autoRejected: [], attentionCount: 0 };
   const related = relatedTenders(opportunities);
   for (const row of opportunities.listInboxRows()) {
     const group = groupFor(row);
     if (!group) continue;
     const item = toItem(row, group, related.get(row.id) ?? [], () => describeChangesSinceDecision(opportunities.listEvents(row.id)));
+    const favoured = chosenOrganisationOf([row.organisation_chain, row.department], organisationsFor?.(row.portal_id));
+    if (favoured) item.favouredOrganisation = favoured;
     if (group === 'UNCERTAIN') view.uncertain.push(item);
     else if (group === 'RECOMMENDED') view.recommended.push(item);
     else if (group === 'CHANGED') view.changed.push(item);
     else view.autoRejected.push(item);
+  }
+  // A chosen organisation's tenders first, each group otherwise in its own order.
+  for (const items of [view.uncertain, view.recommended, view.changed, view.autoRejected]) {
+    items.sort((a, b) => Number(Boolean(b.favouredOrganisation)) - Number(Boolean(a.favouredOrganisation)));
   }
   view.attentionCount = view.uncertain.length + view.recommended.length + view.changed.length;
   return view;

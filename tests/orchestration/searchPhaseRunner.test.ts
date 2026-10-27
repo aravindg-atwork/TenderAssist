@@ -197,6 +197,23 @@ describe.skipIf(!CHROME_PATH)('runSearchPhase', { timeout: 30_000 }, () => {
     expect(classifications.listForTender(tender.id).find((gate) => gate.gate === 'G3')?.reason_code).toBe('TITLE_NEEDS_DETAIL');
   });
 
+  it('leaves alone a tender an earlier search of the day already saw', async () => {
+    const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    const page = browser.contexts()[0].pages()[0];
+    await page.goto(`http://127.0.0.1:${serverPort}/`);
+
+    const updates: AuthJobUpdate[] = [];
+    const result = await runSearchPhase(
+      { jobs, sessions, jobMachine, searches, tenders, classifications, seenBefore: (row) => row.referenceNumber === 'ref-Information Technology' },
+      page, jobId, authSessionId, (u) => updates.push(u), new Date(), undefined,
+      { keywords: ['title'], excludedKeywords: [] }
+    );
+
+    expect(result.outcome).toBe('SUCCESS');
+    expect(tenders.listForJob(jobId)).toHaveLength(0);
+    expect(updates.some((u) => /1 already seen by an earlier search of this day/.test(u.statusMessage ?? ''))).toBe(true);
+  });
+
   it('does not favourite a tender whose title has an excluded word', async () => {
     const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
     const page = browser.contexts()[0].pages()[0];
