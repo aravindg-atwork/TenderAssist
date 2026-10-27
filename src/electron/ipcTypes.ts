@@ -50,6 +50,19 @@ export type { DailyReport, DayRow, CategoryRow };
 export type { CategoryHealth, CategorySuggestion, MissingCategory, ReplacementAdvice };
 export type { PortalCategoryList, RunQuestion, RunQuestionAnswer, WordSuggestions };
 export type { WordSuggestion } from '../review/wordSuggestions.js';
+import type { MissedTendersView } from '../review/missedTenders.js';
+import type { FamilySuggestions } from '../review/wordFamilies.js';
+import type { IntentFamily } from '../config/runConfiguration.js';
+export type { MissedFix, MissedSuggestion, MissedTendersView } from '../review/missedTenders.js';
+export type { FamilySuggestion, FamilySuggestions, StarterFamilyOffer } from '../review/wordFamilies.js';
+export type { IntentFamily } from '../config/runConfiguration.js';
+
+/** What Settings has now, for suggestions to each word family. */
+export interface FamilySuggestionRequest {
+  families: IntentFamily[];
+  keywords: string[];
+  excludedKeywords: string[];
+}
 import type { LicenceView } from '../licence/licenceManager.js';
 export type { LicenceView };
 
@@ -116,7 +129,7 @@ export interface PortalBounds {
   height: number;
 }
 
-export type SettingsSection = 'folders' | 'relevance' | 'signer' | 'login' | 'categories' | 'intent' | 'excluded';
+export type SettingsSection = 'folders' | 'relevance' | 'signer' | 'login' | 'categories' | 'intent' | 'excluded' | 'missed';
 
 /** OpenWebStart and Java 8 or newer, which the GePNIC portals' DSC signer runs on. */
 /** One step of the first-time setup checklist. */
@@ -312,6 +325,10 @@ export interface TenderAssistApi {
   markNewCategoriesLooked(portalId: string): Promise<void>;
   /** Words to consider adding, learnt from tenders the operator approved and rejected. */
   getWordSuggestions(): Promise<WordSuggestions>;
+  /** Why TenderAssist missed wanted tenders of the last 60 days, and the fix for each reason. */
+  getMissedTenders(): Promise<MissedTendersView>;
+  /** Words to add to each word family, for what Settings has now. */
+  getFamilySuggestions(input: FamilySuggestionRequest): Promise<FamilySuggestions>;
   getPortalCredentialSettings(portalId: string): Promise<PortalCredentialSettings>;
   savePortalCredentials(portalId: string, input: SavePortalCredentialInput): Promise<PortalCredentialSettings>;
   getPublishingSettings(portalId: string): Promise<PublishingSettings>;

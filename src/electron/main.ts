@@ -45,6 +45,8 @@ import { waitForCdpReady } from '../browser/chromeLauncher.js';
 import { runAuthJob } from '../orchestration/authJobRunner.js';
 import { runSearchPhase } from '../orchestration/searchPhaseRunner.js';
 import { suggestWords, workDescriptionFrom, type DecidedTenderText, type WordSuggestions } from '../review/wordSuggestions.js';
+import { explainMissedTenders, MISSED_WINDOW_DAYS, type MissedTender, type MissedTendersView } from '../review/missedTenders.js';
+import { suggestFamilyWords, type FamilySuggestions } from '../review/wordFamilies.js';
 import { RUN_QUESTION_TIMEOUT_MS, waitForAnswer, withRunState, type RunQuestion, type RunQuestionAnswer } from '../orchestration/runQuestion.js';
 import { runClassificationPhase } from '../orchestration/classificationPhaseRunner.js';
 import { PORTAL_SESSION_EXPIRED_REASON, runPostProcessing, saveTenderFiles, type DocumentDownloader } from '../orchestration/postProcessingRunner.js';
@@ -59,6 +61,7 @@ import { reactToAuthSessionLoss } from '../browser/authJobCoordinator.js';
 import type { Page } from 'playwright-core';
 import type {
   BidChecklistView,
+  FamilySuggestionRequest,
   JobListItem,
   JobDetail,
   DocumentsWaiting,
@@ -79,7 +82,7 @@ import type {
   GemSearchWordPreview,
 } from './ipcTypes.js';
 import {
-  categoriesForPortal, chosenOrganisationOf, organisationsForPortal, DEFAULT_GEM_CATEGORIES, normalizeFromTime, normalizeRunConfiguration, publishedBeforeFromTime, STARTING_EXCLUDED_WORDS, STARTING_INTENT_WORDS, STARTING_PORTAL_CATEGORIES,
+  categoriesForPortal, chosenOrganisationOf, organisationsForPortal, DEFAULT_GEM_CATEGORIES, normalizeFromTime, normalizeIntentFamilies, normalizeRunConfiguration, publishedBeforeFromTime, STARTING_EXCLUDED_WORDS, STARTING_INTENT_WORDS, STARTING_PORTAL_CATEGORIES,
   type RunConfiguration, type RunDateMeaning,
 } from '../config/runConfiguration.js';
 import { categoryHealth, gemCategoryKey, suggestReplacements, type CategoryEvidence, type CategoryHealth, type ReplacementAdvice } from '../config/categoryHealth.js';
@@ -900,6 +903,58 @@ ipcMain.handle('get-word-suggestions', (): WordSuggestions => {
   });
 });
 
+// Tenders the operator wanted: approved, and every bid step after.
+const WANTED_LIFECYCLES: readonly OpportunityLifecycle[] = ['APPROVED', 'DOCUMENTS_COLLECTED', 'ELIGIBILITY_REVIEWED', 'PREPARING', 'SUBMITTED', 'NOT_SUBMITTED', 'WON', 'LOST'];
+
+/**
+ * Wanted tenders TenderAssist's rules missed: approved after it rejected
+ * them, or added to My Tenders by hand. Each with its saved checks, for
+ * Settings to say why and offer the fix (src/review/missedTenders.ts).
+ */
+ipcMain.handle('get-missed-tenders', (): MissedTendersView => {
+  const since = new Date(Date.now() - MISSED_WINDOW_DAYS * 86_400_000).toISOString();
+  const missed: MissedTender[] = [];
+  for (const row of opportunities.listAllWithScreening()) {
+    if (!WANTED_LIFECYCLES.includes(row.lifecycle) || row.updated_at < since) continue;
+    const approval = opportunities.listEvents(row.id).filter((event) => event.kind === 'APPROVED').at(-1);
+    if (!approval || approval.created_at < since) continue;
+    const addedByHand = approval.note === OWN_FAVOURITE_NOTE;
+    if (!addedByHand && row.recommendation !== 'REJECT') continue;
+    const tender = readSighting(row.id);
+    const portal = getPortalDefinition(row.portal_id);
+    missed.push({
+      portalId: portal.id,
+      portalName: isGemPortal(portal) ? 'GeM' : portal.name,
+      portalKind: portal.kind,
+      title: tender?.title ?? row.title,
+      workDescription: workDescriptionFrom(tender?.detail_text ?? null),
+      details: tender?.detail_text ?? '',
+      organisation: row.organisation_chain ?? row.department ?? tender?.organisation_chain ?? tender?.department ?? null,
+      gates: parseScreenedGates(row.screening_json),
+      addedByHand,
+      jobId: approval.job_id,
+      approvedAt: approval.created_at,
+    });
+  }
+  return explainMissedTenders(missed, runConfigurations.getDefaults());
+});
+
+/** Words to add to each word family, from approved tenders and the usual wordings (src/review/wordFamilies.ts). */
+ipcMain.handle('get-family-suggestions', (_event, input: unknown): FamilySuggestions => {
+  const given = (typeof input === 'object' && input !== null ? input : {}) as Partial<FamilySuggestionRequest>;
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const approved = opportunities.list({ lifecycles: [...WANTED_LIFECYCLES] }).map((row) => {
+    const withDetails = tenders.listForOpportunity(row.id).filter((tender) => tender.detail_text).at(-1);
+    return { title: row.title, description: workDescriptionFrom(withDetails?.detail_text ?? null) };
+  });
+  return suggestFamilyWords({
+    families: normalizeIntentFamilies(given.families),
+    keywords: strings(given.keywords),
+    excludedKeywords: strings(given.excludedKeywords),
+    approved,
+  });
+});
+
 // GeM's list is public: read it from GeM when it is missing or two weeks old.
 const GEM_CATEGORY_LIST_MAX_AGE_MS = 14 * 86_400_000;
 
@@ -1530,7 +1585,7 @@ const BIDDING_LIFECYCLES: readonly OpportunityLifecycle[] = ['APPROVED', 'DOCUME
 /** "15-10-2026 10:00:00" (GeM) or "15-Oct-2026 11:00 AM" (GePNIC), Indian time, as UTC ISO. */
 function portalDateTime(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  const gem = /^(d{2})-(d{2})-(d{4}) (d{2}):(d{2})/.exec(raw.trim());
+  const gem = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/.exec(raw.trim());
   const iso = gem ? `${gem[3]}-${gem[2]}-${gem[1]}T${gem[4]}:${gem[5]}:00+05:30` : parseTenderPortalDate(raw.trim());
   const time = iso ? Date.parse(iso) : Number.NaN;
   return Number.isFinite(time) ? new Date(time).toISOString() : null;
@@ -4296,12 +4351,13 @@ ipcMain.handle('get-live-session', (): LiveSessionView => {
   const jobIds = ctx?.sessionJobIds ?? [];
   const seen = new Map<string, LiveSessionTender>();
   const screening = new Map(opportunities.listAllWithScreening().map((row) => [row.id, row]));
+  const families = runConfigurations.getDefaults().intentFamilies;
   for (const jobId of jobIds) {
     for (const tender of tenders.listForJob(jobId)) {
       if (!tender.opportunity_id || seen.has(tender.opportunity_id)) continue;
       const row = screening.get(tender.opportunity_id);
       if (!row) continue;
-      const explanation = explainScreening(row.recommendation, parseScreenedGates(row.screening_json));
+      const explanation = explainScreening(row.recommendation, parseScreenedGates(row.screening_json), families);
       seen.set(row.id, {
         opportunityId: row.id,
         tenderId: row.tender_portal_id ?? row.tender_ref,

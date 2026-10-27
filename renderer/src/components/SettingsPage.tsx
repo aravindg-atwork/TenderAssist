@@ -13,7 +13,7 @@ const INTENT_INFO = <>Words for the work you bid for. A tender is kept when its 
 const EXCLUDED_INFO = <>Words that mean “not for us”, such as “civil works” or “furniture”. A tender whose title or category has one of them is rejected straight away, even if it also has an intent word.</>;
 import { LicenceSetting } from './Licence';
 import { categoriesForPortal, DEFAULT_GEM_CATEGORIES, TOO_BROAD_INTENT_WORDS, type RunDefaults } from '../../../src/config/runConfiguration';
-import type { CategoryHealth, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
+import type { CategoryHealth, FamilySuggestions, IntentFamily, MissedFix, MissedTendersView, MissingCategory, PortalCategoryList, PortalCredentialSettings, RunSettingsState, WordSuggestions } from '../../../src/electron/ipcTypes';
 import type { PublishingSettings } from '../../../src/persistence/repositories/publishingSettingsRepository';
 import type { UpdateStatus } from '../../../src/electron/updateService';
 import { DEFAULT_AUTOMATION_PACING, type AutomationPacingSettings, type AutomationPacingMode } from '../../../src/persistence/repositories/automationSettingsRepository';
@@ -22,10 +22,24 @@ import { CategoryPicker } from './CategoryPicker';
 import { GemSearchWords } from './GemSearchWords';
 import { CategoryReplacement, withReplacements } from './CategoryReplacement';
 import { WordSuggestionList } from './WordSuggestionList';
+import { MissedTenderList } from './MissedTenderList';
+import { WordFamilies } from './WordFamilies';
 import { getPortalDefinition, isGemPortal } from '../../../src/config/portalRegistry';
 import { refreshCategoryNames } from '../../../src/gem/gemBid';
 import { PortalSelect } from './PortalSelect';
 import { DEFAULT_OUTPUT_STRUCTURE, resolveOutputStructure, type OutputStructureSettings } from '../../../src/publishing/outputStructure';
+
+// "Keep it" on an excluded word that rejected a wanted tender: not asked again on this computer.
+const KEPT_EXCLUDED_KEY = 'tenderassist.keptExcludedWords';
+function readKeptExcluded(): string[] {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(KEPT_EXCLUDED_KEY) ?? '[]') as unknown;
+    return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === 'string') : [];
+  } catch { return []; }
+}
+function writeKeptExcluded(keys: string[]): void {
+  try { window.localStorage.setItem(KEPT_EXCLUDED_KEY, JSON.stringify(keys)); } catch { /* asked again next time */ }
+}
 
 export interface SettingsPageProps {
   settings: RunSettingsState | null;
@@ -49,6 +63,10 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const [keywords, setKeywords] = useState<string[]>([]);
   const [excludedKeywords, setExcludedKeywords] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<WordSuggestions | null>(null);
+  const [intentFamilies, setIntentFamilies] = useState<IntentFamily[]>([]);
+  const [familySuggestions, setFamilySuggestions] = useState<FamilySuggestions | null>(null);
+  const [missed, setMissed] = useState<MissedTendersView | null>(null);
+  const [keptExcluded, setKeptExcluded] = useState<string[]>(readKeptExcluded);
   const [websiteCategories, setWebsiteCategories] = useState<PortalCategoryList | null>(null);
   const [categoryHealth, setCategoryHealth] = useState<CategoryHealth | null>(null);
   const [replacing, setReplacing] = useState<MissingCategory[] | null>(null);
@@ -75,9 +93,29 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     setGemSearchWords(settings.defaults.gemSearchWords ?? []);
     setKeywords(settings.defaults.keywords);
     setExcludedKeywords(settings.defaults.excludedKeywords);
+    setIntentFamilies(settings.defaults.intentFamilies ?? []);
     // Suggestions leave out the saved words, so ask again whenever they change.
     window.tenderAssist.getWordSuggestions().then(setSuggestions).catch(() => setSuggestions(null));
+    window.tenderAssist.getMissedTenders().then(setMissed).catch(() => setMissed(null));
   }, [settings]);
+
+  // Each family's suggestions follow what is on screen, a moment after a change.
+  useEffect(() => {
+    let current = true;
+    const timer = window.setTimeout(() => {
+      window.tenderAssist.getFamilySuggestions({ families: intentFamilies, keywords, excludedKeywords })
+        .then((result) => { if (current) setFamilySuggestions(result); })
+        .catch(() => { if (current) setFamilySuggestions(null); });
+    }, 300);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [intentFamilies, keywords, excludedKeywords]);
+
+  // An intent word removed from the list leaves its family too.
+  const changeKeywords = (next: string[]) => {
+    setKeywords(next);
+    const kept = new Set(next.map((word) => word.toLocaleLowerCase()));
+    setIntentFamilies((families) => families.map((family) => ({ ...family, phrases: family.phrases.filter((phrase) => kept.has(phrase.toLocaleLowerCase())) })));
+  };
 
   const selectedPortal = getPortalDefinition(selectedPortalId);
   const wordKey = (word: string) => word.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
@@ -90,6 +128,31 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   const setChosenCategories = (values: string[]) => setCategoriesByPortal({ ...categoriesByPortal, [selectedPortal.id]: values });
   const chosenOrganisations = organisationsByPortal[selectedPortal.id] ?? [];
   const setChosenOrganisations = (values: string[]) => setOrganisationsByPortal({ ...organisationsByPortal, [selectedPortal.id]: values });
+
+  // A fix for a missed tender changes Settings as the operator would by hand; auto-save then saves it.
+  const categoriesOf = (portalId: string) => categoriesByPortal[portalId]
+    ?? categoriesForPortal({ productCategories, keywords, excludedKeywords, categoriesByPortal: {}, gemIncludeProducts }, getPortalDefinition(portalId));
+  const hasWord = (values: string[], word: string) => values.some((value) => wordKey(value) === wordKey(word));
+  const fixApplied = (fix: MissedFix): boolean => {
+    switch (fix.kind) {
+      case 'ADD_CATEGORY': return hasWord(categoriesOf(fix.portalId), fix.category);
+      case 'ADD_ORGANISATION': return hasWord(organisationsByPortal[fix.portalId] ?? [], fix.organisation);
+      case 'ADD_INTENT_WORD': return hasWord(keywords, fix.phrase);
+      case 'REVIEW_EXCLUDED_WORD': return !hasWord(excludedKeywords, fix.word);
+    }
+  };
+  const applyFix = (fix: MissedFix) => {
+    if (fixApplied(fix)) return;
+    if (fix.kind === 'ADD_CATEGORY') setCategoriesByPortal({ ...categoriesByPortal, [fix.portalId]: [...categoriesOf(fix.portalId), fix.category] });
+    if (fix.kind === 'ADD_ORGANISATION') setOrganisationsByPortal({ ...organisationsByPortal, [fix.portalId]: [...(organisationsByPortal[fix.portalId] ?? []), fix.organisation] });
+    if (fix.kind === 'ADD_INTENT_WORD') setKeywords([...keywords, fix.phrase]);
+    if (fix.kind === 'REVIEW_EXCLUDED_WORD') setExcludedKeywords(excludedKeywords.filter((word) => wordKey(word) !== wordKey(fix.word)));
+  };
+  const keepExcluded = (key: string) => {
+    const next = [...keptExcluded, key];
+    setKeptExcluded(next);
+    writeKeptExcluded(next);
+  };
 
   // The website's own organisation names, offered while typing.
   useEffect(() => {
@@ -189,7 +252,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
   }, []);
 
   // What auto-save compares: everything on these pages except the password being typed.
-  const snapshot = JSON.stringify({ productCategories, categoriesByPortal, organisationsByPortal, gemIncludeProducts, gemSearchWords, keywords, excludedKeywords, loginId, rememberPassword, publishing, pacing, portal: selectedPortalId });
+  const snapshot = JSON.stringify({ productCategories, categoriesByPortal, organisationsByPortal, gemIncludeProducts, gemSearchWords, keywords, intentFamilies, excludedKeywords, loginId, rememberPassword, publishing, pacing, portal: selectedPortalId });
   const lastSaved = useRef<string | null>(null);
   const loaded = Boolean(settings && credentialSettings && publishing && pacing);
 
@@ -210,7 +273,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     setError(null);
     const defaults: RunDefaults = { productCategories, keywords, excludedKeywords, categoriesByPortal: { ...categoriesByPortal, [selectedPortal.id]: chosenCategories }, organisationsByPortal,
       // Product bids now follow the chosen categories (a product category searches them), so the old switch is cleared.
-      gemIncludeProducts: false, gemSearchWords };
+      gemIncludeProducts: false, gemSearchWords, intentFamilies };
     const withCredentials = !gem && (mode === 'explicit' || password === '');
     try {
       const [next, nextCredentials, nextPublishing, nextPacing] = await Promise.all([
@@ -298,7 +361,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
     if (focusRequest?.section === 'folders') setActive('folders');
     if (focusRequest?.section === 'signer') setActive('signer');
     if (focusRequest?.section === 'login') setActive('login');
-    if (focusRequest?.section === 'categories' || focusRequest?.section === 'intent' || focusRequest?.section === 'excluded') {
+    if (focusRequest?.section === 'categories' || focusRequest?.section === 'intent' || focusRequest?.section === 'excluded' || focusRequest?.section === 'missed') {
       setActive('look');
       // After the section shows: bring that list into view.
       const target = `look-${focusRequest.section}`;
@@ -374,7 +437,7 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           <div id="look-intent" />
           <EditableChips id="intent-keyword-entry" label="Intent words" info={INTENT_INFO}
             helper="Start with 2 to 4 phrases from tenders you bid for, worded as their titles are (like “website development”). A single word counts only in a tender’s title; a phrase also counts in its details. Suggestions below come from the tenders you approve."
-            values={keywords} onChange={setKeywords} placeholder="Add an intent word or phrase" />
+            values={keywords} onChange={changeKeywords} placeholder="Add an intent word or phrase" />
           {broadWords.length > 0 && (
             <p className="notice notice--attention" role="note">
               {broadWords.map((word) => `“${word}”`).join(', ')} on {broadWords.length === 1 ? 'its' : 'their'} own {broadWords.length === 1 ? 'is' : 'are'} too broad:
@@ -384,13 +447,16 @@ export function SettingsPage({ settings, onSaved, selectedPortalId, onPortalChan
           )}
           <WordSuggestionList title="Suggested intent words, from tenders you approved" suggestions={suggestions?.intent ?? []}
             current={keywords} onAdd={(phrase) => setKeywords([...keywords, phrase])} />
+          <WordFamilies keywords={keywords} families={intentFamilies} suggestions={familySuggestions}
+            onChange={(next) => { setKeywords(next.keywords); setIntentFamilies(next.families); }} />
           <div id="look-excluded" />
           <EditableChips id="excluded-keyword-entry" label="Excluded words" info={EXCLUDED_INFO}
             helper="A tender whose title or category has one of these is rejected without opening it."
             values={excludedKeywords} onChange={setExcludedKeywords} placeholder="Add an excluded word" />
           <WordSuggestionList title="Suggested excluded words, from tenders you rejected" suggestions={suggestions?.excluded ?? []}
             current={excludedKeywords} onAdd={(phrase) => setExcludedKeywords([...excludedKeywords, phrase])} />
-          {suggestions && suggestions.intent.length + suggestions.excluded.length > 0 && (
+          <MissedTenderList suggestions={missed?.suggestions ?? []} isApplied={fixApplied} onApply={applyFix} onKeep={keepExcluded} kept={keptExcluded} />
+          {((suggestions && suggestions.intent.length + suggestions.excluded.length > 0) || (missed?.suggestions.length ?? 0) > 0) && (
             <p className="hint">Suggestions are only added when you select Add, then Save changes.</p>
           )}
         </section>
